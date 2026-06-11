@@ -7,6 +7,7 @@
 .gradle/
 .kotlin/
 build/
+.snyk
 
 # CMake
 cmake-build-debug/
