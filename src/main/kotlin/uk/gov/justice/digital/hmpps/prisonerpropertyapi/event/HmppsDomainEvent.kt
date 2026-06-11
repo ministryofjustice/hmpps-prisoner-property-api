@@ -16,8 +16,7 @@ data class PersonReference(val identifiers: List<Identifier> = emptyList()) {
   fun nomsNumber(): String? = identifiers.firstOrNull { it.type == "NOMS" }?.value
 
   companion object {
-    fun withPrisonerNumber(prisonerNumber: String) =
-      PersonReference(listOf(Identifier("NOMS", prisonerNumber)))
+    fun withPrisonerNumber(prisonerNumber: String) = PersonReference(listOf(Identifier("NOMS", prisonerNumber)))
   }
 }
 

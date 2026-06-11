@@ -36,8 +36,7 @@ class PropertyResource(private val propertyService: PropertyService) {
   @Operation(summary = "List all property items held for a prisoner")
   @GetMapping("/prisoners/{prisonerNumber}/property")
   @PreAuthorize("hasAnyRole('ROLE_PRISONER_PROPERTY__RO', 'ROLE_PRISONER_PROPERTY__RW')")
-  fun listItems(@PathVariable prisonerNumber: String): List<PropertyItemDto> =
-    propertyService.listItemsForPrisoner(prisonerNumber)
+  fun listItems(@PathVariable prisonerNumber: String): List<PropertyItemDto> = propertyService.listItemsForPrisoner(prisonerNumber)
 
   @Operation(summary = "Get a single property item by id")
   @GetMapping("/property/{id}")

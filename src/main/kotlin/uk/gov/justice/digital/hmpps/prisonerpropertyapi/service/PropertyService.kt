@@ -42,14 +42,12 @@ class PropertyService(
   }
 
   @Transactional(readOnly = true)
-  fun listItemsForPrisoner(prisonerNumber: String): List<PropertyItemDto> =
-    repository.findByPrisonerNumberOrderByCreatedAtDesc(prisonerNumber).map(PropertyItemDto::from)
+  fun listItemsForPrisoner(prisonerNumber: String): List<PropertyItemDto> = repository.findByPrisonerNumberOrderByCreatedAtDesc(prisonerNumber).map(PropertyItemDto::from)
 
   @Transactional(readOnly = true)
-  fun getItem(id: UUID): PropertyItemDto =
-    repository.findById(id)
-      .map(PropertyItemDto::from)
-      .orElseThrow { NoSuchElementException("Property item $id not found") }
+  fun getItem(id: UUID): PropertyItemDto = repository.findById(id)
+    .map(PropertyItemDto::from)
+    .orElseThrow { NoSuchElementException("Property item $id not found") }
 
   /** Marks all held items for a prisoner as returned (e.g. on release). */
   @Transactional
