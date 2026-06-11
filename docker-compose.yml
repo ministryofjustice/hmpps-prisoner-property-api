@@ -39,7 +39,7 @@ services:
       - APPLICATION_AUTHENTICATION_UI_ALLOWLIST=0.0.0.0/0
 
   postgres:
-    image: postgres:16
+    image: postgres:18
     networks:
       - hmpps
     container_name: prisoner-property-postgres

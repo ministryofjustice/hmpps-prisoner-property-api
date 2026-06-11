@@ -10,10 +10,9 @@ hmpps-auth:
 
 spring:
   datasource:
-    url: 'jdbc:tc:postgresql:16:///prisoner_property'
-    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
-    username: test
-    password: test
+    url: 'jdbc:postgresql://localhost:5432/prisoner_property'
+    username: prisoner_property
+    password: prisoner_property
     hikari:
       maximum-pool-size: 5
 
