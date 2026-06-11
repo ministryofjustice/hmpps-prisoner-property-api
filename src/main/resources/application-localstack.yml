@@ -1,0 +1,11 @@
+hmpps.sqs:
+  provider: localstack
+  queues:
+    prisonerproperty:
+      queueName: ${random.uuid}
+      dlqName: ${random.uuid}
+      subscribeTopicId: domainevents
+      subscribeFilter: '{"eventType":["prison-offender-events.prisoner.released","prison-offender-events.prisoner.received"]}'
+  topics:
+    domainevents:
+      arn: arn:aws:sns:eu-west-2:000000000000:${random.uuid}

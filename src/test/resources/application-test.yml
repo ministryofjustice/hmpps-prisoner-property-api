@@ -8,6 +8,15 @@ management.endpoint:
 hmpps-auth:
   url: "http://localhost:8090/auth"
 
+spring:
+  datasource:
+    url: 'jdbc:tc:postgresql:16:///prisoner_property'
+    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
+    username: test
+    password: test
+    hikari:
+      maximum-pool-size: 5
+
 springdoc:
   api-docs:
     enabled: true

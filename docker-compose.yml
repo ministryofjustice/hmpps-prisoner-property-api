@@ -4,6 +4,13 @@ services:
     networks:
       - hmpps
     container_name: hmpps-prisoner-property-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      hmpps-auth:
+        condition: service_healthy
     ports:
       - "8080:8080"
     healthcheck:
@@ -12,6 +19,10 @@ services:
       - SERVER_PORT=8080
       - HMPPS_AUTH_URL=http://hmpps-auth:8080/auth
       - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/prisoner_property
+      - SPRING_DATASOURCE_USERNAME=prisoner_property
+      - SPRING_DATASOURCE_PASSWORD=prisoner_property
+      - HMPPS_SQS_LOCALSTACKURL=http://localstack:4566
 
   hmpps-auth:
     image: ghcr.io/ministryofjustice/hmpps-auth:latest
@@ -26,6 +37,39 @@ services:
       - SERVER_PORT=8080
       - SPRING_PROFILES_ACTIVE=dev
       - APPLICATION_AUTHENTICATION_UI_ALLOWLIST=0.0.0.0/0
+
+  postgres:
+    image: postgres:16
+    networks:
+      - hmpps
+    container_name: prisoner-property-postgres
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "prisoner_property"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    environment:
+      - POSTGRES_USER=prisoner_property
+      - POSTGRES_PASSWORD=prisoner_property
+      - POSTGRES_DB=prisoner_property
+
+  localstack:
+    image: localstack/localstack:4
+    networks:
+      - hmpps
+    container_name: prisoner-property-localstack
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "awslocal sns list-topics && awslocal sqs list-queues"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    environment:
+      - SERVICES=sns,sqs
+      - DEFAULT_REGION=eu-west-2
 
 networks:
   hmpps:
