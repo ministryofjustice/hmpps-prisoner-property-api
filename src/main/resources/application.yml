@@ -90,6 +90,10 @@ management:
         time-to-live: 2000ms
 
 springdoc:
+  # Exclude the hmpps-sqs operational queue-admin endpoints from the published API docs -
+  # they are infrastructure tooling, not part of the product API.
+  paths-to-exclude:
+    - /queue-admin/**
   api-docs:
     enabled: false
   swagger-ui:
