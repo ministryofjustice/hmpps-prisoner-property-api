@@ -8,6 +8,14 @@ management.endpoint:
 hmpps-auth:
   url: "http://localhost:8090/auth"
 
+spring:
+  datasource:
+    url: 'jdbc:postgresql://localhost:5432/prisoner_property'
+    username: prisoner_property
+    password: prisoner_property
+    hikari:
+      maximum-pool-size: 5
+
 springdoc:
   api-docs:
     enabled: true

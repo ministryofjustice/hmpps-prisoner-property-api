@@ -11,10 +11,22 @@ import org.springframework.security.access.AccessDeniedException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.servlet.resource.NoResourceFoundException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerNotFoundException
 import uk.gov.justice.hmpps.kotlin.common.ErrorResponse
 
 @RestControllerAdvice
 class PrisonerPropertyApiExceptionHandler {
+  @ExceptionHandler(PropertyContainerNotFoundException::class)
+  fun handlePropertyContainerNotFoundException(e: PropertyContainerNotFoundException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(NOT_FOUND)
+    .body(
+      ErrorResponse(
+        status = NOT_FOUND,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Property container not found: {}", e.message) }
+
   @ExceptionHandler(ValidationException::class)
   fun handleValidationException(e: ValidationException): ResponseEntity<ErrorResponse> = ResponseEntity
     .status(BAD_REQUEST)
