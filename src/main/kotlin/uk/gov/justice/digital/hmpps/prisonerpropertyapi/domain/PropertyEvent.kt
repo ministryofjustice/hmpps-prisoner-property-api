@@ -9,6 +9,7 @@ import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.helper.GeneratedUuidV7
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -46,5 +47,7 @@ class PropertyEvent(
   val toPrisonId: String? = null,
 
   @Id
-  val id: UUID = UUID.randomUUID(),
+  @GeneratedUuidV7
+  @Column(name = "id", updatable = false, nullable = false)
+  open var id: UUID? = null,
 )

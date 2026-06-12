@@ -16,6 +16,7 @@ dependencies {
   implementation("org.springframework.boot:spring-boot-starter-validation")
   implementation("org.springframework.security:spring-security-access")
   implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
+  implementation("com.fasterxml.uuid:java-uuid-generator:5.2.0")
   implementation("com.zaxxer:HikariCP:7.0.2")
 
   runtimeOnly("org.postgresql:postgresql:42.7.11")

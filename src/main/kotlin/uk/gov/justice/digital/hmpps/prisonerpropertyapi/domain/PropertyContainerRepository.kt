@@ -5,4 +5,5 @@ import java.util.UUID
 
 interface PropertyContainerRepository : JpaRepository<PropertyContainer, UUID> {
   fun findByPrisonerNumber(prisonerNumber: String): List<PropertyContainer>
+  fun findByPrisonId(prisonId: String): List<PropertyContainer>
 }

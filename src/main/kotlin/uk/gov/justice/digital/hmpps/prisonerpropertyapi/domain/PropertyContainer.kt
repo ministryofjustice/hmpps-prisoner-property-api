@@ -8,6 +8,7 @@ import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.OneToMany
 import jakarta.persistence.Table
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.helper.GeneratedUuidV7
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -38,7 +39,9 @@ class PropertyContainer(
   val events: MutableList<PropertyEvent> = mutableListOf(),
 
   @Id
-  val id: UUID = UUID.randomUUID(),
+  @GeneratedUuidV7
+  @Column(name = "id", updatable = false, nullable = false)
+  var id: UUID? = null,
 ) {
   /** The most recent seal number, from the latest seal-bearing event. */
   fun currentSealNumber(): String? = events

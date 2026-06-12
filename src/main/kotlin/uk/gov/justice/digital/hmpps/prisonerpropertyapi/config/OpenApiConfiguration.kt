@@ -1,10 +1,13 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.config
 
+import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.info.Contact
 import io.swagger.v3.oas.models.info.Info
+import io.swagger.v3.oas.models.security.SecurityRequirement
 import io.swagger.v3.oas.models.security.SecurityScheme
 import io.swagger.v3.oas.models.servers.Server
+import io.swagger.v3.oas.models.tags.Tag
 import org.springframework.boot.info.BuildProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -17,25 +20,31 @@ class OpenApiConfiguration(buildProperties: BuildProperties) {
   fun customOpenAPI(): OpenAPI = OpenAPI()
     .servers(
       listOf(
-        Server().url("https://prisoner-property-api-dev.hmpps.service.justice.gov.uk").description("Development"),
-        Server().url("https://prisoner-property-api-preprod.hmpps.service.justice.gov.uk").description("Pre-Production"),
-        Server().url("https://prisoner-property-api.hmpps.service.justice.gov.uk").description("Production"),
-        Server().url("http://localhost:8080").description("Local"),
+        Server().url("/").description("Current url"),
       ),
     )
-    .tags(
-      listOf(),
-    )
     .info(
-      Info().title("HMPPS Prisoner Property Api").version(version)
-        .contact(Contact().name("HMPPS Digital Studio").email("feedback@digital.justice.gov.uk")),
+      Info().title("HMPPS Prisoner Property API")
+        .version(version)
+        .description("API for viewing and managing prisoner's properties and its locations")
+        .contact(Contact().name("Move a prisoner Team").email("Moveaprisoner-gg@justice.gov.uk")),
     )
-  // TODO Add security schema and roles in `.components()` and `.addSecurityItem()`
+    .tags(
+      listOf(
+        Tag().name("hmpps-queue-resource-async")
+          .description("""Endpoints that are to be used by administrators only for managing SQS queues. All endpoints require the <b>QUEUE_ADMIN</b> role further information can be found in the <a href="https://github.com/ministryofjustice/hmpps-spring-boot-sqs">hmpps-spring-boot-sqs</a> project"""),
+      ),
+    )
+    .components(
+      Components().addSecuritySchemes(
+        "bearer-jwt",
+        SecurityScheme()
+          .type(SecurityScheme.Type.HTTP)
+          .scheme("bearer")
+          .bearerFormat("JWT")
+          .`in`(SecurityScheme.In.HEADER)
+          .name("Authorization").description("An HMPPS Auth access token."),
+      ),
+    )
+    .addSecurityItem(SecurityRequirement().addList("bearer-jwt", listOf("read", "write")))
 }
-
-private fun SecurityScheme.addBearerJwtRequirement(role: String): SecurityScheme = type(SecurityScheme.Type.HTTP)
-  .scheme("bearer")
-  .bearerFormat("JWT")
-  .`in`(SecurityScheme.In.HEADER)
-  .name("Authorization")
-  .description("A HMPPS Auth access token with the `$role` role.")

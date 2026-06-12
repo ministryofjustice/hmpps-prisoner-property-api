@@ -1,4 +1,4 @@
-package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration
+package uk.gov.justice.digital.hmpps.prisonerpropertyapi.repository
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -11,6 +11,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.IntegrationTestBase
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -35,7 +36,19 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
     val found = containerRepository.findByPrisonerNumber("A1234BC")
     assertThat(found).singleElement().extracting { it.id }.isEqualTo(container.id)
 
-    val events = eventRepository.findByContainerIdOrderByEventDateTimeDesc(container.id)
+    val events = eventRepository.findByContainerIdOrderByEventDateTimeDesc(container.id!!)
+    assertThat(events).extracting<PropertyEventType> { it.eventType }
+      .containsExactly(PropertyEventType.MOVED, PropertyEventType.SEAL_CHANGED, PropertyEventType.CREATED_SEALED)
+  }
+
+  @Test
+  fun `persists a container with its events and finds it by prison id`() {
+    val container = containerRepository.save(containerWithSealMoveHistory())
+
+    val found = containerRepository.findByPrisonId("LEI")
+    assertThat(found).singleElement().extracting { it.id }.isEqualTo(container.id)
+
+    val events = eventRepository.findByContainerIdOrderByEventDateTimeDesc(container.id!!)
     assertThat(events).extracting<PropertyEventType> { it.eventType }
       .containsExactly(PropertyEventType.MOVED, PropertyEventType.SEAL_CHANGED, PropertyEventType.CREATED_SEALED)
   }
