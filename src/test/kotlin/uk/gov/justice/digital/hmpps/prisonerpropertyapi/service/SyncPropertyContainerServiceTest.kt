@@ -1,0 +1,225 @@
+package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
+
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import org.mockito.kotlin.any
+import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
+import org.mockito.kotlin.verify
+import org.mockito.kotlin.whenever
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.NomisContainerCode
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.sync.NomisContainerTransformer
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.util.Optional
+import java.util.UUID
+
+class SyncPropertyContainerServiceTest {
+
+  private val repository = mock<PropertyContainerRepository>()
+  private val publisher = mock<DomainEventPublisher>()
+  private val service = SyncPropertyContainerService(repository, NomisContainerTransformer(), publisher)
+
+  @Test
+  fun `create builds a sealed container and publishes a created event`() {
+    stubSaveAssigningId()
+
+    val result = service.sync(request())
+
+    assertThat(result.mappingType).isEqualTo(SyncMappingType.CREATED)
+    assertThat(result.nomisPropertyContainerId).isEqualTo(123)
+
+    val saved = captureSaved()
+    assertThat(saved.containerType).isEqualTo(ContainerType.STANDARD)
+    assertThat(saved.events).singleElement().satisfies({
+      assertThat(it.eventType).isEqualTo(PropertyEventType.CREATED_SEALED)
+      assertThat(it.sealNumber).isEqualTo("SEAL1")
+      assertThat(it.toInternalLocationId).isEqualTo(LOCATION)
+    })
+    assertThat(publishedEvent().eventType).isEqualTo("prison-property.container.created")
+  }
+
+  @Test
+  fun `create uses a placeholder when the seal is missing`() {
+    stubSaveAssigningId()
+
+    service.sync(request(sealMark = null))
+
+    assertThat(captureSaved().currentSealNumber()).isEqualTo("MISSING-123")
+  }
+
+  @Test
+  fun `migrate does not publish a domain event`() {
+    stubSaveAssigningId()
+
+    service.migrate(request())
+
+    verify(publisher, never()).publish(any())
+  }
+
+  @Test
+  fun `create with a proposed disposal date records disposal required`() {
+    stubSaveAssigningId()
+
+    service.sync(request(proposedDisposalDate = LocalDate.parse("2026-09-01")))
+
+    val saved = captureSaved()
+    assertThat(saved.proposedDisposalDate).isEqualTo(LocalDate.parse("2026-09-01"))
+    assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.DISPOSAL_REQUIRED)
+    assertThat(saved.events.map { it.eventType }).contains(PropertyEventType.DISPOSAL_REQUIRED)
+  }
+
+  @Test
+  fun `create for a Branston container records the Branston location with no internal id`() {
+    stubSaveAssigningId()
+
+    service.sync(request(containerCode = NomisContainerCode.BRANSTON_STORAGE, internalLocationId = null))
+
+    val saved = captureSaved()
+    assertThat(saved.containerType).isEqualTo(ContainerType.EXCESS)
+    assertThat(saved.currentLocation()).isNull()
+    assertThat(saved.currentLocationType()).isEqualTo(StorageLocationType.BRANSTON)
+  }
+
+  @Test
+  fun `create with an expiry date disposes the container and clears its location`() {
+    stubSaveAssigningId()
+
+    service.sync(request(expiryDate = LocalDate.parse("2026-09-15")))
+
+    val saved = captureSaved()
+    assertThat(saved.disposedDate).isEqualTo(LocalDate.parse("2026-09-15"))
+    assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.DISPOSED)
+    assertThat(saved.currentLocation()).isNull()
+    assertThat(saved.events.map { it.eventType }).contains(PropertyEventType.DISPOSED)
+  }
+
+  @Test
+  fun `re-syncing an unchanged snapshot is a no-op`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    val result = service.sync(request(dpsId = existing.id))
+
+    assertThat(result.mappingType).isEqualTo(SyncMappingType.UPDATED)
+    assertThat(existing.events).hasSize(1)
+    verify(repository, never()).save(any())
+    verify(publisher, never()).publish(any())
+  }
+
+  @Test
+  fun `a changed seal appends a seal-changed event and publishes an update`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.sync(request(dpsId = existing.id, sealMark = "SEAL2"))
+
+    assertThat(existing.currentSealNumber()).isEqualTo("SEAL2")
+    assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.SEAL_CHANGED)
+    val event = publishedEvent()
+    assertThat(event.eventType).isEqualTo("prison-property.container.updated")
+    assertThat(event.additionalInformation?.get("changedFields")).isEqualTo(listOf("sealNumber"))
+  }
+
+  @Test
+  fun `a changed location appends a move event`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
+
+    service.sync(request(dpsId = existing.id, internalLocationId = newLocation))
+
+    assertThat(existing.currentLocation()).isEqualTo(newLocation)
+    val moved = existing.events.last()
+    assertThat(moved.eventType).isEqualTo(PropertyEventType.MOVED)
+    assertThat(moved.fromInternalLocationId).isEqualTo(LOCATION)
+    assertThat(moved.toInternalLocationId).isEqualTo(newLocation)
+  }
+
+  @Test
+  fun `disposing an existing container appends a disposed event and clears the location`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.sync(request(dpsId = existing.id, expiryDate = LocalDate.parse("2026-09-15")))
+
+    assertThat(existing.disposedDate).isEqualTo(LocalDate.parse("2026-09-15"))
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.DISPOSED)
+    assertThat(existing.currentLocation()).isNull()
+    assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.DISPOSED)
+  }
+
+  private fun stubSaveAssigningId() {
+    whenever(repository.save(any())).thenAnswer { invocation ->
+      (invocation.arguments[0] as PropertyContainer).apply { if (id == null) id = UUID.randomUUID() }
+    }
+  }
+
+  private fun captureSaved(): PropertyContainer {
+    val captor = argumentCaptor<PropertyContainer>()
+    verify(repository).save(captor.capture())
+    return captor.firstValue
+  }
+
+  private fun publishedEvent(): HmppsDomainEvent {
+    val captor = argumentCaptor<HmppsDomainEvent>()
+    verify(publisher).publish(captor.capture())
+    return captor.firstValue
+  }
+
+  private fun existingContainer(): PropertyContainer {
+    val container = PropertyContainer(
+      prisonerNumber = "A1234BC",
+      prisonId = "LEI",
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "USER1",
+      createDateTime = CREATE_TIME,
+      id = UUID.randomUUID(),
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, CREATE_TIME, "USER1", sealNumber = "SEAL1", toInternalLocationId = LOCATION),
+    )
+    return container
+  }
+
+  private fun request(
+    dpsId: UUID? = null,
+    sealMark: String? = "SEAL1",
+    internalLocationId: UUID? = LOCATION,
+    containerCode: NomisContainerCode = NomisContainerCode.BULK,
+    proposedDisposalDate: LocalDate? = null,
+    expiryDate: LocalDate? = null,
+  ) = SyncPropertyContainerRequest(
+    nomisPropertyContainerId = 123,
+    dpsId = dpsId,
+    prisonerNumber = "A1234BC",
+    prisonId = "LEI",
+    containerCode = containerCode,
+    internalLocationId = internalLocationId,
+    sealMark = sealMark,
+    proposedDisposalDate = proposedDisposalDate,
+    expiryDate = expiryDate,
+    createDateTime = CREATE_TIME,
+    createUsername = "USER1",
+    modifyDateTime = MODIFY_TIME,
+    modifyUsername = "USER2",
+  )
+
+  private companion object {
+    private val CREATE_TIME: LocalDateTime = LocalDateTime.parse("2026-01-01T09:00:00")
+    private val MODIFY_TIME: LocalDateTime = LocalDateTime.parse("2026-02-01T09:00:00")
+    private val LOCATION: UUID = UUID.fromString("11111111-1111-1111-1111-111111111111")
+  }
+}
