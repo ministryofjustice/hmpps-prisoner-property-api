@@ -20,8 +20,10 @@ import org.springframework.web.bind.annotation.RestController
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.SyncPropertyContainerService
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.SyncResult
 import uk.gov.justice.hmpps.kotlin.common.ErrorResponse
 import java.util.UUID
 
@@ -34,7 +36,14 @@ import java.util.UUID
 class SyncPropertyContainerResource(
   private val syncPropertyContainerService: SyncPropertyContainerService,
   private val propertyContainerService: PropertyContainerService,
+  private val domainEventPublisher: DomainEventPublisher,
 ) {
+
+  /** Publishes the domain event (if any) after the service transaction has committed. */
+  private fun SyncResult.publishAfterCommit(): SyncPropertyContainerResponse {
+    event?.let(domainEventPublisher::publish)
+    return response
+  }
 
   @PostMapping("/upsert")
   @Operation(
@@ -50,7 +59,7 @@ class SyncPropertyContainerResource(
       ApiResponse(responseCode = "404", description = "The supplied DPS id does not exist", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )
-  fun upsert(@Valid @RequestBody request: SyncPropertyContainerRequest): SyncPropertyContainerResponse = syncPropertyContainerService.sync(request)
+  fun upsert(@Valid @RequestBody request: SyncPropertyContainerRequest): SyncPropertyContainerResponse = syncPropertyContainerService.sync(request).publishAfterCommit()
 
   @PostMapping("/migrate")
   @Operation(
@@ -66,7 +75,7 @@ class SyncPropertyContainerResource(
       ApiResponse(responseCode = "404", description = "The supplied DPS id does not exist", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )
-  fun migrate(@Valid @RequestBody request: SyncPropertyContainerRequest): SyncPropertyContainerResponse = syncPropertyContainerService.migrate(request)
+  fun migrate(@Valid @RequestBody request: SyncPropertyContainerRequest): SyncPropertyContainerResponse = syncPropertyContainerService.migrate(request).publishAfterCommit()
 
   @GetMapping("/{id}")
   @Operation(
