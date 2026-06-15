@@ -54,10 +54,10 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `derives current seal, status and location from the latest events`() {
+  fun `derives current status and location from the latest events`() {
     val container = containerWithSealMoveHistory()
 
-    assertThat(container.currentSealNumber()).isEqualTo("SEAL002")
+    assertThat(container.currentSealNumber).isEqualTo("SEAL002")
     assertThat(container.currentStatus()).isEqualTo(ContainerStatus.STORED)
     assertThat(container.currentLocation()).isEqualTo(LOCATION_B)
   }
@@ -82,6 +82,7 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
       prisonId = "LEI",
       containerType = ContainerType.STANDARD,
       createdByUserId = "USER1",
+      currentSealNumber = "SEAL002",
     )
     container.events.add(
       event(container, PropertyEventType.CREATED_SEALED, baseTime, sealNumber = "SEAL001", toLocation = LOCATION_A),

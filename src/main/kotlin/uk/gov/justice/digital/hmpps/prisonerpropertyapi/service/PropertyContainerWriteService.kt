@@ -27,6 +27,9 @@ class PropertyContainerWriteService(
 
   @Transactional
   fun create(request: CreatePropertyContainerRequest, username: String): WriteResult {
+    if (repository.existsByCurrentSealNumberAndDisposedDateIsNull(request.sealNumber)) {
+      throw DuplicateSealNumberException(request.sealNumber)
+    }
     val now = LocalDateTime.now()
     val container = PropertyContainer(
       prisonerNumber = request.prisonerNumber,
@@ -35,6 +38,7 @@ class PropertyContainerWriteService(
       createdByUserId = username,
       createDateTime = now,
       proposedDisposalDate = request.proposedDisposalDate,
+      currentSealNumber = request.sealNumber,
     )
     container.events.add(
       PropertyEvent(
@@ -65,7 +69,11 @@ class PropertyContainerWriteService(
     val now = LocalDateTime.now()
     val changed = mutableListOf<String>()
 
-    if (request.sealNumber != container.currentSealNumber()) {
+    if (request.sealNumber != container.currentSealNumber) {
+      if (repository.existsByCurrentSealNumberAndDisposedDateIsNullAndIdNot(request.sealNumber, id)) {
+        throw DuplicateSealNumberException(request.sealNumber)
+      }
+      container.currentSealNumber = request.sealNumber
       container.events.add(PropertyEvent(container, PropertyEventType.SEAL_CHANGED, now, username, sealNumber = request.sealNumber))
       changed += "sealNumber"
     }

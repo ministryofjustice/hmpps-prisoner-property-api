@@ -58,13 +58,15 @@ class SyncPropertyContainerService(
     val disposalTime = request.modifyDateTime ?: request.createDateTime
 
     val location = transformer.resolveLocation(request)
+    val seal = transformer.resolveSeal(request.nomisPropertyContainerId, request.sealMark)
+    container.currentSealNumber = seal
     container.events.add(
       PropertyEvent(
         container = container,
         eventType = PropertyEventType.CREATED_SEALED,
         eventDateTime = request.createDateTime,
         eventUserId = request.createUsername,
-        sealNumber = transformer.resolveSeal(request.nomisPropertyContainerId, request.sealMark),
+        sealNumber = seal,
         toInternalLocationId = location?.internalLocationId,
         toStorageLocationType = location?.type,
         toPrisonId = request.prisonId,
@@ -93,7 +95,8 @@ class SyncPropertyContainerService(
     val changed = mutableListOf<String>()
 
     val incomingSeal = transformer.resolveSeal(request.nomisPropertyContainerId, request.sealMark)
-    if (incomingSeal != existing.currentSealNumber()) {
+    if (incomingSeal != existing.currentSealNumber) {
+      existing.currentSealNumber = incomingSeal
       existing.events.add(
         PropertyEvent(existing, PropertyEventType.SEAL_CHANGED, now, user, sealNumber = incomingSeal),
       )
