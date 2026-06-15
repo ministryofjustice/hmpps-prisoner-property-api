@@ -10,7 +10,6 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PersonReference
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyDomainEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.sync.NomisContainerTransformer
 import java.time.LocalDate
@@ -159,7 +158,7 @@ class SyncPropertyContainerService(
   private fun buildEvent(eventType: PropertyDomainEventType, dpsId: UUID, nomisId: Long, prisonerNumber: String, changedFields: List<String>?): HmppsDomainEvent = HmppsDomainEvent(
     eventType = eventType.value,
     description = "A prisoner property container was synchronised from NOMIS",
-    personReference = PersonReference.withPrisonerNumber(prisonerNumber),
+    prisonerNumber = prisonerNumber,
     additionalInformation = buildMap {
       put("dpsId", dpsId.toString())
       put("nomisPropertyContainerId", nomisId)
