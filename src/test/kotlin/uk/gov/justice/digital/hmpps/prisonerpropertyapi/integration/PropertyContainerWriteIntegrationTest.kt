@@ -17,6 +17,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContai
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -84,6 +85,51 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `rejects creating a container with a seal already used by an active container`() {
+    repository.save(seedContainer(seal = "SEAL1"))
+
+    webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(createRequest(sealNumber = "SEAL1"))
+      .exchange()
+      .expectStatus().isEqualTo(409)
+  }
+
+  @Test
+  fun `allows creating a container reusing a seal held only by a disposed container`() {
+    repository.save(seedContainer(seal = "SEAL1", disposedDate = LocalDate.parse("2026-02-01")))
+
+    webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(createRequest(sealNumber = "SEAL1"))
+      .exchange()
+      .expectStatus().isCreated
+  }
+
+  @Test
+  fun `rejects amending a container's seal to one used by another active container`() {
+    repository.save(seedContainer(prisonerNumber = "A1234BC", seal = "SEAL1"))
+    val target = repository.save(seedContainer(prisonerNumber = "B2345CD", seal = "SEAL2")).id!!
+
+    webTestClient.put().uri("/property-containers/{id}", target)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(updateRequest(sealNumber = "SEAL1"))
+      .exchange()
+      .expectStatus().isEqualTo(409)
+  }
+
+  @Test
+  fun `allows updating a container without changing its seal`() {
+    val id = repository.save(seedContainer(seal = "SEAL1")).id!!
+
+    webTestClient.put().uri("/property-containers/{id}", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(updateRequest(sealNumber = "SEAL1"))
+      .exchange()
+      .expectStatus().isOk
+  }
+
+  @Test
   fun `returns not found when updating an unknown container`() {
     webTestClient.put().uri("/property-containers/{id}", UUID.randomUUID())
       .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
@@ -127,16 +173,22 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .expectStatus().isForbidden
   }
 
-  private fun seedContainer(): PropertyContainer {
+  private fun seedContainer(
+    prisonerNumber: String = "A1234BC",
+    seal: String = "SEAL1",
+    disposedDate: LocalDate? = null,
+  ): PropertyContainer {
     val container = PropertyContainer(
-      prisonerNumber = "A1234BC",
+      prisonerNumber = prisonerNumber,
       prisonId = "LEI",
       containerType = ContainerType.STANDARD,
       createdByUserId = "A_USER",
       createDateTime = LocalDateTime.parse("2026-01-01T09:00:00"),
+      currentSealNumber = seal,
+      disposedDate = disposedDate,
     )
     container.events.add(
-      PropertyEvent(container, PropertyEventType.CREATED_SEALED, LocalDateTime.parse("2026-01-01T09:00:00"), "A_USER", sealNumber = "SEAL1", toInternalLocationId = LOCATION, toStorageLocationType = StorageLocationType.INTERNAL),
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, LocalDateTime.parse("2026-01-01T09:00:00"), "A_USER", sealNumber = seal, toInternalLocationId = LOCATION, toStorageLocationType = StorageLocationType.INTERNAL),
     )
     return container
   }

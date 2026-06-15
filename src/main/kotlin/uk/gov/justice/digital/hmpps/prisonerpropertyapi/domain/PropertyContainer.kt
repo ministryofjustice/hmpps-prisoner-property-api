@@ -45,6 +45,9 @@ class PropertyContainer(
   @Column(name = "disposed_date")
   var disposedDate: LocalDate? = null,
 
+  @Column(name = "current_seal_number")
+  var currentSealNumber: String? = null,
+
   @OneToMany(mappedBy = "container", cascade = [CascadeType.ALL], orphanRemoval = true)
   val events: MutableList<PropertyEvent> = mutableListOf(),
 
@@ -53,12 +56,6 @@ class PropertyContainer(
   @Column(name = "id", updatable = false, nullable = false)
   var id: UUID? = null,
 ) {
-  /** The most recent seal number, from the latest seal-bearing event. */
-  fun currentSealNumber(): String? = events
-    .filter { it.eventType.carriesSeal }
-    .maxByOrNull { it.eventDateTime }
-    ?.sealNumber
-
   /**
    * The current status. A recorded disposal date takes precedence over the latest event so that a
    * later correction (e.g. a seal fix) does not "un-dispose" the container; otherwise it derives

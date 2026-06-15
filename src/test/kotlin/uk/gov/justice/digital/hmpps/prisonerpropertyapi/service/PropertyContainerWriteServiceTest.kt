@@ -38,7 +38,7 @@ class PropertyContainerWriteServiceTest {
     assertThat(saved.prisonerNumber).isEqualTo("A1234BC")
     assertThat(saved.containerType).isEqualTo(ContainerType.STANDARD)
     assertThat(saved.createdByUserId).isEqualTo("A_USER")
-    assertThat(saved.currentSealNumber()).isEqualTo("SEAL1")
+    assertThat(saved.currentSealNumber).isEqualTo("SEAL1")
     assertThat(saved.currentLocation()).isEqualTo(LOCATION)
     assertThat(saved.currentLocationType()).isEqualTo(StorageLocationType.INTERNAL)
     assertThat(saved.events).singleElement().extracting { it.eventType }.isEqualTo(PropertyEventType.CREATED_SEALED)
@@ -67,7 +67,7 @@ class PropertyContainerWriteServiceTest {
 
     val result = service.update(existing.id!!, updateRequest(sealNumber = "SEAL2"), "A_USER")
 
-    assertThat(existing.currentSealNumber()).isEqualTo("SEAL2")
+    assertThat(existing.currentSealNumber).isEqualTo("SEAL2")
     assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.SEAL_CHANGED)
     assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
     assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("sealNumber"))
@@ -107,6 +107,35 @@ class PropertyContainerWriteServiceTest {
       .isInstanceOf(PropertyContainerNotFoundException::class.java)
   }
 
+  @Test
+  fun `create rejects a seal already held by an active container`() {
+    whenever(repository.existsByCurrentSealNumberAndDisposedDateIsNull("SEAL1")).thenReturn(true)
+
+    assertThatThrownBy { service.create(createRequest(), "A_USER") }
+      .isInstanceOf(DuplicateSealNumberException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `update rejects amending the seal to one held by another active container`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.existsByCurrentSealNumberAndDisposedDateIsNullAndIdNot("SEAL2", existing.id!!)).thenReturn(true)
+
+    assertThatThrownBy { service.update(existing.id!!, updateRequest(sealNumber = "SEAL2"), "A_USER") }
+      .isInstanceOf(DuplicateSealNumberException::class.java)
+  }
+
+  @Test
+  fun `update keeping the same seal does not check uniqueness`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.update(existing.id!!, updateRequest(), "A_USER")
+
+    verify(repository, never()).existsByCurrentSealNumberAndDisposedDateIsNullAndIdNot(any(), any())
+  }
+
   private fun stubSaveAssigningId() {
     whenever(repository.save(any())).thenAnswer { invocation ->
       (invocation.arguments[0] as PropertyContainer).apply { if (id == null) id = UUID.randomUUID() }
@@ -126,6 +155,7 @@ class PropertyContainerWriteServiceTest {
       containerType = ContainerType.STANDARD,
       createdByUserId = "A_USER",
       createDateTime = LocalDateTime.parse("2026-01-01T09:00:00"),
+      currentSealNumber = "SEAL1",
       id = UUID.randomUUID(),
     )
     container.events.add(

@@ -53,7 +53,7 @@ data class PropertyContainerDto(
       prisonerNumber = container.prisonerNumber,
       prisonId = container.prisonId,
       containerType = container.containerType,
-      currentSealNumber = container.currentSealNumber(),
+      currentSealNumber = container.currentSealNumber,
       currentStatus = container.currentStatus(),
       currentLocation = container.currentLocation(),
       currentLocationType = container.currentLocationType(),

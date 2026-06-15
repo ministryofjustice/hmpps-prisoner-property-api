@@ -54,7 +54,7 @@ class SyncPropertyContainerServiceTest {
 
     service.sync(request(sealMark = null))
 
-    assertThat(captureSaved().currentSealNumber()).isEqualTo("MISSING-123")
+    assertThat(captureSaved().currentSealNumber).isEqualTo("MISSING-123")
   }
 
   @Test
@@ -123,7 +123,7 @@ class SyncPropertyContainerServiceTest {
 
     val result = service.sync(request(dpsId = existing.id, sealMark = "SEAL2"))
 
-    assertThat(existing.currentSealNumber()).isEqualTo("SEAL2")
+    assertThat(existing.currentSealNumber).isEqualTo("SEAL2")
     assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.SEAL_CHANGED)
     assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
     assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("sealNumber"))
@@ -176,6 +176,7 @@ class SyncPropertyContainerServiceTest {
       containerType = ContainerType.STANDARD,
       createdByUserId = "USER1",
       createDateTime = CREATE_TIME,
+      currentSealNumber = "SEAL1",
       id = UUID.randomUUID(),
     )
     container.events.add(

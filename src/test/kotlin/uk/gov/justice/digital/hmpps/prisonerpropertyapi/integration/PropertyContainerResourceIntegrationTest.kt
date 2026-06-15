@@ -109,6 +109,7 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       prisonId = "LEI",
       containerType = ContainerType.STANDARD,
       createdByUserId = "USER1",
+      currentSealNumber = "SEAL002",
     )
     container.events.add(
       PropertyEvent(container, PropertyEventType.CREATED_SEALED, baseTime, "USER1", sealNumber = "SEAL001", toInternalLocationId = LOCATION_A),
