@@ -4,6 +4,8 @@ import io.swagger.v3.oas.annotations.media.Schema
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -12,7 +14,7 @@ data class PropertyContainerDto(
   @Schema(description = "Unique id of the container", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d")
   val id: UUID,
 
-  @Schema(description = "Prisoner (NOMS) number the property belongs to", example = "A1234BC")
+  @Schema(description = "Prisoner number the property belongs to", example = "A1234BC")
   val prisonerNumber: String,
 
   @Schema(description = "Id of the prison holding the container", example = "LEI")
@@ -27,8 +29,17 @@ data class PropertyContainerDto(
   @Schema(description = "Current status, derived from the most recent event", example = "STORED")
   val currentStatus: ContainerStatus,
 
-  @Schema(description = "Current internal location id, derived from the most recent move", example = "11111111-1111-1111-1111-111111111111", nullable = true)
+  @Schema(description = "Current internal location id, derived from the most recent move. Null when offsite at Branston, unrecorded, or disposed", example = "11111111-1111-1111-1111-111111111111", nullable = true)
   val currentLocation: UUID?,
+
+  @Schema(description = "Current storage location type (INTERNAL prison location or offsite BRANSTON), derived from the most recent move", example = "INTERNAL", nullable = true)
+  val currentLocationType: StorageLocationType?,
+
+  @Schema(description = "Date the container is proposed to be disposed of, if any", example = "2026-09-01", nullable = true)
+  val proposedDisposalDate: LocalDate?,
+
+  @Schema(description = "Date the container was disposed of, if any", example = "2026-09-15", nullable = true)
+  val disposedDate: LocalDate?,
 
   @Schema(description = "When the container was created")
   val createDateTime: LocalDateTime,
@@ -45,6 +56,9 @@ data class PropertyContainerDto(
       currentSealNumber = container.currentSealNumber(),
       currentStatus = container.currentStatus(),
       currentLocation = container.currentLocation(),
+      currentLocationType = container.currentLocationType(),
+      proposedDisposalDate = container.proposedDisposalDate,
+      disposedDate = container.disposedDate,
       createDateTime = container.createDateTime,
       createdByUserId = container.createdByUserId,
     )

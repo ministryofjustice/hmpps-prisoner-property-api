@@ -10,6 +10,7 @@ import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.helper.GeneratedUuidV7
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -40,11 +41,18 @@ class PropertyEvent(
   @Column(name = "to_internal_location_id")
   val toInternalLocationId: UUID? = null,
 
+  @Enumerated(EnumType.STRING)
+  @Column(name = "to_storage_location_type")
+  val toStorageLocationType: StorageLocationType? = null,
+
   @Column(name = "from_prison_id")
   val fromPrisonId: String? = null,
 
   @Column(name = "to_prison_id")
   val toPrisonId: String? = null,
+
+  @Column(name = "event_date")
+  val eventDate: LocalDate? = null,
 
   @Id
   @GeneratedUuidV7

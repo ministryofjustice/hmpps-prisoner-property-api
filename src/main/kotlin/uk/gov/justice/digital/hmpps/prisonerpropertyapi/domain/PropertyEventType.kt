@@ -11,5 +11,6 @@ enum class PropertyEventType(val status: ContainerStatus, val carriesSeal: Boole
   MOVED(ContainerStatus.STORED),
   TRANSFERRED(ContainerStatus.TRANSFER),
   RETURNED(ContainerStatus.RETURNED),
+  DISPOSAL_REQUIRED(ContainerStatus.DISPOSAL_REQUIRED),
   DISPOSED(ContainerStatus.DISPOSED),
 }
