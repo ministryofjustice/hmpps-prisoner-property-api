@@ -10,11 +10,11 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyContainerEventFactory
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyDomainEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.sync.NomisContainerTransformer
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.util.UUID
 
 /**
  * Ingests NOMIS property container snapshots, applying the business transform and translating each
@@ -84,7 +84,7 @@ class SyncPropertyContainerService(
     val event = if (migrating) {
       null
     } else {
-      buildEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, request.nomisPropertyContainerId, request.prisonerNumber, changedFields = null)
+      PropertyContainerEventFactory.syncEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, request.nomisPropertyContainerId, request.prisonerNumber, changedFields = null)
     }
     return SyncResult(SyncPropertyContainerResponse(saved.id!!, request.nomisPropertyContainerId, SyncMappingType.CREATED), event)
   }
@@ -148,7 +148,7 @@ class SyncPropertyContainerService(
     if (changed.isNotEmpty()) {
       repository.save(existing)
       if (!migrating) {
-        event = buildEvent(PropertyDomainEventType.CONTAINER_UPDATED, existing.id!!, request.nomisPropertyContainerId, request.prisonerNumber, changed)
+        event = PropertyContainerEventFactory.syncEvent(PropertyDomainEventType.CONTAINER_UPDATED, existing.id!!, request.nomisPropertyContainerId, request.prisonerNumber, changed)
       }
     }
     return SyncResult(SyncPropertyContainerResponse(existing.id!!, request.nomisPropertyContainerId, SyncMappingType.UPDATED), event)
@@ -157,17 +157,6 @@ class SyncPropertyContainerService(
   private fun disposalRequiredEvent(container: PropertyContainer, date: LocalDate, time: LocalDateTime, user: String) = PropertyEvent(container, PropertyEventType.DISPOSAL_REQUIRED, time, user, eventDate = date)
 
   private fun disposedEvent(container: PropertyContainer, date: LocalDate, time: LocalDateTime, user: String) = PropertyEvent(container, PropertyEventType.DISPOSED, time, user, eventDate = date)
-
-  private fun buildEvent(eventType: PropertyDomainEventType, dpsId: UUID, nomisId: Long, prisonerNumber: String, changedFields: List<String>?): HmppsDomainEvent = HmppsDomainEvent(
-    eventType = eventType.value,
-    description = "A prisoner property container was synchronised from NOMIS",
-    prisonerNumber = prisonerNumber,
-    additionalInformation = buildMap {
-      put("dpsId", dpsId.toString())
-      put("nomisPropertyContainerId", nomisId)
-      changedFields?.let { put("changedFields", it) }
-    },
-  )
 }
 
 /**

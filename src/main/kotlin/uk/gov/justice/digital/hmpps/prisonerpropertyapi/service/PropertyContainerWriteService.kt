@@ -11,6 +11,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContai
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyContainerEventFactory
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyDomainEventType
 import java.time.LocalDateTime
 import java.util.UUID
@@ -59,7 +60,7 @@ class PropertyContainerWriteService(
     }
 
     val saved = repository.save(container)
-    val event = buildEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, request.prisonerNumber, changedFields = null)
+    val event = PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, request.prisonerNumber, changedFields = null)
     return WriteResult(PropertyContainerDto.from(saved), event)
   }
 
@@ -112,20 +113,10 @@ class PropertyContainerWriteService(
     var event: HmppsDomainEvent? = null
     if (changed.isNotEmpty()) {
       repository.save(container)
-      event = buildEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, changed)
+      event = PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, changed)
     }
     return WriteResult(PropertyContainerDto.from(container), event)
   }
-
-  private fun buildEvent(eventType: PropertyDomainEventType, dpsId: UUID, prisonerNumber: String, changedFields: List<String>?): HmppsDomainEvent = HmppsDomainEvent(
-    eventType = eventType.value,
-    description = "A prisoner property container was changed by a member of staff",
-    prisonerNumber = prisonerNumber,
-    additionalInformation = buildMap {
-      put("dpsId", dpsId.toString())
-      changedFields?.let { put("changedFields", it) }
-    },
-  )
 }
 
 /**
