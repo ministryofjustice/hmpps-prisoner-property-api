@@ -20,6 +20,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationTy
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
@@ -286,6 +287,64 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .bodyValue(CombineContainersRequest(sourceContainerIds = listOf(a), containerType = ContainerType.STANDARD, sealNumber = "NEWSEAL"))
       .exchange()
       .expectStatus().isBadRequest
+  }
+
+  @Test
+  fun `moves a container offsite to Branston, clearing its internal location`() {
+    val id = repository.save(seedContainer()).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/move", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(MoveContainerRequest(locationType = StorageLocationType.BRANSTON))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.currentLocationType").isEqualTo("BRANSTON")
+      .jsonPath("$.currentLocation").doesNotExist()
+
+    verify(domainEventPublisher).publish(
+      check {
+        assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+        assertThat(it.additionalInformation?.get("changedFields")).isEqualTo(listOf("location"))
+      },
+    )
+  }
+
+  @Test
+  fun `moves a container to a new internal location`() {
+    val id = repository.save(seedContainer()).id!!
+    val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
+
+    webTestClient.post().uri("/property-containers/{id}/move", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(MoveContainerRequest(locationType = StorageLocationType.INTERNAL, internalLocationId = newLocation))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.currentLocationType").isEqualTo("INTERNAL")
+      .jsonPath("$.currentLocation").isEqualTo(newLocation.toString())
+  }
+
+  @Test
+  fun `rejects a Branston move that supplies an internal location id`() {
+    val id = repository.save(seedContainer()).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/move", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(MoveContainerRequest(locationType = StorageLocationType.BRANSTON, internalLocationId = LOCATION))
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
+  @Test
+  fun `rejects moving a container that has already left active storage`() {
+    val id = repository.save(seedContainer(removalOutcome = RemovalOutcome.DISPOSED, removalDate = LocalDate.parse("2026-02-01"))).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/move", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(MoveContainerRequest(locationType = StorageLocationType.BRANSTON))
+      .exchange()
+      .expectStatus().isEqualTo(409)
   }
 
   @Test

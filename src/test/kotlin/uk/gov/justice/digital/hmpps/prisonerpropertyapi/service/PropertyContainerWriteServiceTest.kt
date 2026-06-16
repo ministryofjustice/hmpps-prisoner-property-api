@@ -21,6 +21,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationTy
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import java.time.LocalDate
@@ -234,6 +235,71 @@ class PropertyContainerWriteServiceTest {
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
 
     assertThatThrownBy { service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.RETURNED), "A_USER") }
+      .isInstanceOf(ContainerAlreadyRemovedException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `move to Branston records a Branston move with no internal id`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    val result = service.move(existing.id!!, MoveContainerRequest(locationType = StorageLocationType.BRANSTON), "A_USER")
+
+    assertThat(existing.currentLocationType()).isEqualTo(StorageLocationType.BRANSTON)
+    assertThat(existing.currentLocation()).isNull()
+    val moved = existing.events.last()
+    assertThat(moved.eventType).isEqualTo(PropertyEventType.MOVED)
+    assertThat(moved.fromInternalLocationId).isEqualTo(LOCATION)
+    assertThat(moved.toInternalLocationId).isNull()
+    assertThat(moved.toStorageLocationType).isEqualTo(StorageLocationType.BRANSTON)
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("location"))
+  }
+
+  @Test
+  fun `move to an internal location records an internal move`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
+
+    service.move(existing.id!!, MoveContainerRequest(locationType = StorageLocationType.INTERNAL, internalLocationId = newLocation), "A_USER")
+
+    assertThat(existing.currentLocation()).isEqualTo(newLocation)
+    assertThat(existing.currentLocationType()).isEqualTo(StorageLocationType.INTERNAL)
+  }
+
+  @Test
+  fun `move to Branston with an internal id is rejected`() {
+    assertThatThrownBy { service.move(UUID.randomUUID(), MoveContainerRequest(StorageLocationType.BRANSTON, internalLocationId = LOCATION), "A_USER") }
+      .isInstanceOf(ValidationException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `move to an internal location without an id is rejected`() {
+    assertThatThrownBy { service.move(UUID.randomUUID(), MoveContainerRequest(StorageLocationType.INTERNAL), "A_USER") }
+      .isInstanceOf(ValidationException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `move to the current location is a no-op`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    val result = service.move(existing.id!!, MoveContainerRequest(StorageLocationType.INTERNAL, internalLocationId = LOCATION), "A_USER")
+
+    assertThat(result.event).isNull()
+    assertThat(existing.events).hasSize(1)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `move of an already-removed container throws`() {
+    val existing = existingContainer().apply { removalOutcome = RemovalOutcome.DISPOSED }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    assertThatThrownBy { service.move(existing.id!!, MoveContainerRequest(StorageLocationType.BRANSTON), "A_USER") }
       .isInstanceOf(ContainerAlreadyRemovedException::class.java)
     verify(repository, never()).save(any())
   }
