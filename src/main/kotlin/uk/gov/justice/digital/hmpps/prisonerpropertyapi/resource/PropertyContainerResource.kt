@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
@@ -207,6 +208,27 @@ class PropertyContainerResource(
     ],
   )
   fun combine(@Valid @RequestBody request: CombineContainersRequest): PropertyContainerDto = propertyContainerWriteService.combine(request, currentUsername()).publishAllAfterCommit()
+
+  @PostMapping("/{id}/move")
+  @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
+  @Operation(
+    summary = "Move a property container",
+    description = "Moves the container to an internal prison location or offsite to the Branston warehouse, recording the move in history. Requires role ROLE_PRISONER_PROPERTY__RW.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Property container moved (or already at the target location)"),
+      ApiResponse(responseCode = "400", description = "Invalid request", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RW role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "404", description = "Property container not found", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "409", description = "Property container has already left active storage", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun move(
+    @Parameter(description = "Property container id", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d", required = true)
+    @PathVariable
+    id: UUID,
+    @Valid @RequestBody request: MoveContainerRequest,
+  ): PropertyContainerDto = propertyContainerWriteService.move(id, request, currentUsername()).publishAfterCommit()
 
   private fun currentUsername(): String = authenticationHolder.username ?: authenticationHolder.principal
 }

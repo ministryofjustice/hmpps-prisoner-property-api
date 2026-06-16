@@ -12,6 +12,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationTy
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
@@ -215,6 +216,38 @@ class PropertyContainerWriteService(
     }
 
     return CombineResult(PropertyContainerDto.from(saved), events)
+  }
+
+  /** Move a container to an internal prison location or offsite to the Branston warehouse. */
+  @Transactional
+  fun move(id: UUID, request: MoveContainerRequest, username: String): WriteResult {
+    if (request.locationType == StorageLocationType.INTERNAL && request.internalLocationId == null) {
+      throw ValidationException("internalLocationId is required for an internal move")
+    }
+    if (request.locationType == StorageLocationType.BRANSTON && request.internalLocationId != null) {
+      throw ValidationException("internalLocationId must not be set for a Branston move")
+    }
+    val container = loadActive(id)
+    val targetId = if (request.locationType == StorageLocationType.INTERNAL) request.internalLocationId else null
+
+    if (request.locationType == container.currentLocationType() && targetId == container.currentLocation()) {
+      return WriteResult(PropertyContainerDto.from(container), null)
+    }
+
+    container.events.add(
+      PropertyEvent(
+        container,
+        PropertyEventType.MOVED,
+        LocalDateTime.now(),
+        username,
+        fromInternalLocationId = container.currentLocation(),
+        toInternalLocationId = targetId,
+        toStorageLocationType = request.locationType,
+      ),
+    )
+    repository.save(container)
+    val event = PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, listOf("location"))
+    return WriteResult(PropertyContainerDto.from(container), event)
   }
 
   private fun loadActive(id: UUID): PropertyContainer {
