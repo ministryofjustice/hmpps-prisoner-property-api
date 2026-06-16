@@ -16,6 +16,9 @@ generic-service:
     enabled: true
     host: app-hostname.local # override per environment
     tlsSecretName: hmpps-prisoner-property-api-cert
+    # MOJ assurance: enable ModSecurity WAF (OWASP Core Rule Set) at the ingress.
+    # Default snippet runs the engine in blocking mode (SecRuleEngine On).
+    modsecurity_enabled: true
 
   # Environment variables to load into the deployment
   env:
