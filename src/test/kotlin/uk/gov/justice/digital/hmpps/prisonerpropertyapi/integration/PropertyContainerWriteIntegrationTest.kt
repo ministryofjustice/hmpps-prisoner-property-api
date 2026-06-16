@@ -12,9 +12,12 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
 import java.time.LocalDate
@@ -97,7 +100,7 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
 
   @Test
   fun `allows creating a container reusing a seal held only by a disposed container`() {
-    repository.save(seedContainer(seal = "SEAL1", disposedDate = LocalDate.parse("2026-02-01")))
+    repository.save(seedContainer(seal = "SEAL1", removalOutcome = RemovalOutcome.DISPOSED, removalDate = LocalDate.parse("2026-02-01")))
 
     webTestClient.post().uri("/property-containers")
       .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
@@ -148,6 +151,88 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `disposes a container, clears its location and publishes an updated event`() {
+    val id = repository.save(seedContainer()).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/dispose", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(DisposeContainerRequest(disposalDate = LocalDate.parse("2026-09-15")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.currentStatus").isEqualTo("DISPOSED")
+      .jsonPath("$.removalOutcome").isEqualTo("DISPOSED")
+      .jsonPath("$.removalDate").isEqualTo("2026-09-15")
+      .jsonPath("$.currentLocation").doesNotExist()
+
+    verify(domainEventPublisher).publish(
+      check {
+        assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+        assertThat(it.additionalInformation?.get("changedFields")).isEqualTo(listOf("removalOutcome"))
+      },
+    )
+  }
+
+  @Test
+  fun `rejects disposing a container that has already left active storage`() {
+    val id = repository.save(seedContainer(removalOutcome = RemovalOutcome.RETURNED, removalDate = LocalDate.parse("2026-02-01"))).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/dispose", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(DisposeContainerRequest())
+      .exchange()
+      .expectStatus().isEqualTo(409)
+  }
+
+  @Test
+  fun `removes a container by returning it to the prisoner`() {
+    val id = repository.save(seedContainer()).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/remove", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(RemoveContainerRequest(outcome = RemovalOutcome.RETURNED))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.currentStatus").isEqualTo("RETURNED")
+      .jsonPath("$.removalOutcome").isEqualTo("RETURNED")
+      .jsonPath("$.currentLocation").doesNotExist()
+  }
+
+  @Test
+  fun `removes a container by transferring it to another prison`() {
+    val id = repository.save(seedContainer()).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/remove", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(RemoveContainerRequest(outcome = RemovalOutcome.TRANSFERRED, toPrisonId = "MDI"))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.removalOutcome").isEqualTo("TRANSFERRED")
+  }
+
+  @Test
+  fun `rejects transferring a container without a destination prison`() {
+    val id = repository.save(seedContainer()).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/remove", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(RemoveContainerRequest(outcome = RemovalOutcome.TRANSFERRED))
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
+  @Test
+  fun `returns forbidden when disposing with the read-only role`() {
+    webTestClient.post().uri("/property-containers/{id}/dispose", UUID.randomUUID())
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .bodyValue(DisposeContainerRequest())
+      .exchange()
+      .expectStatus().isForbidden
+  }
+
+  @Test
   fun `returns unauthorized when no token is presented`() {
     webTestClient.post().uri("/property-containers")
       .bodyValue(createRequest())
@@ -176,7 +261,8 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   private fun seedContainer(
     prisonerNumber: String = "A1234BC",
     seal: String = "SEAL1",
-    disposedDate: LocalDate? = null,
+    removalOutcome: RemovalOutcome? = null,
+    removalDate: LocalDate? = null,
   ): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = prisonerNumber,
@@ -185,7 +271,8 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       createdByUserId = "A_USER",
       createDateTime = LocalDateTime.parse("2026-01-01T09:00:00"),
       currentSealNumber = seal,
-      disposedDate = disposedDate,
+      removalOutcome = removalOutcome,
+      removalDate = removalDate,
     )
     container.events.add(
       PropertyEvent(container, PropertyEventType.CREATED_SEALED, LocalDateTime.parse("2026-01-01T09:00:00"), "A_USER", sealNumber = seal, toInternalLocationId = LOCATION, toStorageLocationType = StorageLocationType.INTERNAL),

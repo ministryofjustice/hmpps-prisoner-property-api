@@ -88,7 +88,8 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
     getById(created.dpsId)
       .jsonPath("$.currentStatus").isEqualTo("DISPOSED")
-      .jsonPath("$.disposedDate").isEqualTo("2026-09-15")
+      .jsonPath("$.removalOutcome").isEqualTo("DISPOSED")
+      .jsonPath("$.removalDate").isEqualTo("2026-09-15")
       .jsonPath("$.currentLocation").doesNotExist()
   }
 

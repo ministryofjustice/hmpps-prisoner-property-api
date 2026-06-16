@@ -1,18 +1,23 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 
+import jakarta.validation.ValidationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyContainerEventFactory
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyDomainEventType
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -28,7 +33,7 @@ class PropertyContainerWriteService(
 
   @Transactional
   fun create(request: CreatePropertyContainerRequest, username: String): WriteResult {
-    if (repository.existsByCurrentSealNumberAndDisposedDateIsNull(request.sealNumber)) {
+    if (repository.existsByCurrentSealNumberAndRemovalOutcomeIsNull(request.sealNumber)) {
       throw DuplicateSealNumberException(request.sealNumber)
     }
     val now = LocalDateTime.now()
@@ -71,7 +76,7 @@ class PropertyContainerWriteService(
     val changed = mutableListOf<String>()
 
     if (request.sealNumber != container.currentSealNumber) {
-      if (repository.existsByCurrentSealNumberAndDisposedDateIsNullAndIdNot(request.sealNumber, id)) {
+      if (repository.existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot(request.sealNumber, id)) {
         throw DuplicateSealNumberException(request.sealNumber)
       }
       container.currentSealNumber = request.sealNumber
@@ -116,6 +121,48 @@ class PropertyContainerWriteService(
       event = PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, changed)
     }
     return WriteResult(PropertyContainerDto.from(container), event)
+  }
+
+  /** Dispose of (destroy) a container, taking it out of active storage. */
+  @Transactional
+  fun dispose(id: UUID, request: DisposeContainerRequest, username: String): WriteResult {
+    val container = loadActive(id)
+    val date = request.disposalDate ?: LocalDate.now()
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.DISPOSED, LocalDateTime.now(), username, eventDate = date, fromPrisonId = container.prisonId),
+    )
+    return container.removeWith(RemovalOutcome.DISPOSED, date)
+  }
+
+  /** Remove a container from active storage by returning it to the prisoner or transferring it to another prison. */
+  @Transactional
+  fun remove(id: UUID, request: RemoveContainerRequest, username: String): WriteResult {
+    if (request.outcome != RemovalOutcome.RETURNED && request.outcome != RemovalOutcome.TRANSFERRED) {
+      throw ValidationException("Removal outcome must be RETURNED or TRANSFERRED, was ${request.outcome}")
+    }
+    if (request.outcome == RemovalOutcome.TRANSFERRED && request.toPrisonId.isNullOrBlank()) {
+      throw ValidationException("toPrisonId is required when transferring a container")
+    }
+    val container = loadActive(id)
+    val date = request.date ?: LocalDate.now()
+    container.events.add(
+      PropertyEvent(container, request.outcome.eventType, LocalDateTime.now(), username, eventDate = date, fromPrisonId = container.prisonId, toPrisonId = request.toPrisonId),
+    )
+    return container.removeWith(request.outcome, date)
+  }
+
+  private fun loadActive(id: UUID): PropertyContainer {
+    val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
+    container.removalOutcome?.let { throw ContainerAlreadyRemovedException(id, it) }
+    return container
+  }
+
+  private fun PropertyContainer.removeWith(outcome: RemovalOutcome, date: LocalDate): WriteResult {
+    removalOutcome = outcome
+    removalDate = date
+    repository.save(this)
+    val event = PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, listOf("removalOutcome"))
+    return WriteResult(PropertyContainerDto.from(this), event)
   }
 }
 
