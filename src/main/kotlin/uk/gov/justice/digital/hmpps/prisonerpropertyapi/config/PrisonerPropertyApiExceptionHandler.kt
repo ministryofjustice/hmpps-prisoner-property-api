@@ -3,15 +3,18 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.config
 import jakarta.validation.ValidationException
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus.BAD_REQUEST
+import org.springframework.http.HttpStatus.CONFLICT
 import org.springframework.http.HttpStatus.FORBIDDEN
 import org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR
 import org.springframework.http.HttpStatus.NOT_FOUND
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.security.access.AccessDeniedException
+import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.servlet.resource.NoResourceFoundException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicateSealNumberException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerNotFoundException
 import uk.gov.justice.hmpps.kotlin.common.ErrorResponse
 
@@ -39,6 +42,17 @@ class PrisonerPropertyApiExceptionHandler {
       ),
     ).also { log.info("Validation exception: {}", e.message) }
 
+  @ExceptionHandler(MethodArgumentNotValidException::class)
+  fun handleMethodArgumentNotValidException(e: MethodArgumentNotValidException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(BAD_REQUEST)
+    .body(
+      ErrorResponse(
+        status = BAD_REQUEST,
+        userMessage = "Validation failure: ${e.message}",
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Validation exception: {}", e.message) }
+
   @ExceptionHandler(HttpMessageNotReadableException::class)
   fun handleHttpMessageNotReadableException(e: HttpMessageNotReadableException): ResponseEntity<ErrorResponse> = ResponseEntity
     .status(BAD_REQUEST)
@@ -49,6 +63,17 @@ class PrisonerPropertyApiExceptionHandler {
         developerMessage = e.message,
       ),
     ).also { log.info("Unreadable request body: {}", e.message) }
+
+  @ExceptionHandler(DuplicateSealNumberException::class)
+  fun handleDuplicateSealNumberException(e: DuplicateSealNumberException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(CONFLICT)
+    .body(
+      ErrorResponse(
+        status = CONFLICT,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Duplicate seal number: {}", e.message) }
 
   @ExceptionHandler(NoResourceFoundException::class)
   fun handleNoResourceFoundException(e: NoResourceFoundException): ResponseEntity<ErrorResponse> = ResponseEntity

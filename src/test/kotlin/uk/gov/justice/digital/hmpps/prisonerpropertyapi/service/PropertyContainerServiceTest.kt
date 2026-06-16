@@ -74,6 +74,7 @@ class PropertyContainerServiceTest {
       prisonId = "LEI",
       containerType = ContainerType.STANDARD,
       createdByUserId = "USER1",
+      currentSealNumber = "SEAL002",
       id = UUID.randomUUID(),
     )
     container.events.add(

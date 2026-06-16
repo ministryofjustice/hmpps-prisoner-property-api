@@ -18,8 +18,6 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationTy
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.NomisContainerCode
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.sync.NomisContainerTransformer
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -29,17 +27,17 @@ import java.util.UUID
 class SyncPropertyContainerServiceTest {
 
   private val repository = mock<PropertyContainerRepository>()
-  private val publisher = mock<DomainEventPublisher>()
-  private val service = SyncPropertyContainerService(repository, NomisContainerTransformer(), publisher)
+  private val service = SyncPropertyContainerService(repository, NomisContainerTransformer())
 
   @Test
-  fun `create builds a sealed container and publishes a created event`() {
+  fun `create builds a sealed container and returns a created event to publish`() {
     stubSaveAssigningId()
 
     val result = service.sync(request())
 
-    assertThat(result.mappingType).isEqualTo(SyncMappingType.CREATED)
-    assertThat(result.nomisPropertyContainerId).isEqualTo(123)
+    assertThat(result.response.mappingType).isEqualTo(SyncMappingType.CREATED)
+    assertThat(result.response.nomisPropertyContainerId).isEqualTo(123)
+    assertThat(result.event?.eventType).isEqualTo("prison-property.container.created")
 
     val saved = captureSaved()
     assertThat(saved.containerType).isEqualTo(ContainerType.STANDARD)
@@ -48,7 +46,6 @@ class SyncPropertyContainerServiceTest {
       assertThat(it.sealNumber).isEqualTo("SEAL1")
       assertThat(it.toInternalLocationId).isEqualTo(LOCATION)
     })
-    assertThat(publishedEvent().eventType).isEqualTo("prison-property.container.created")
   }
 
   @Test
@@ -57,28 +54,16 @@ class SyncPropertyContainerServiceTest {
 
     service.sync(request(sealMark = null))
 
-    assertThat(captureSaved().currentSealNumber()).isEqualTo("MISSING-123")
+    assertThat(captureSaved().currentSealNumber).isEqualTo("MISSING-123")
   }
 
   @Test
-  fun `migrate does not publish a domain event`() {
+  fun `migrate returns no event to publish`() {
     stubSaveAssigningId()
 
-    service.migrate(request())
+    val result = service.migrate(request())
 
-    verify(publisher, never()).publish(any())
-  }
-
-  @Test
-  fun `create with a proposed disposal date records disposal required`() {
-    stubSaveAssigningId()
-
-    service.sync(request(proposedDisposalDate = LocalDate.parse("2026-09-01")))
-
-    val saved = captureSaved()
-    assertThat(saved.proposedDisposalDate).isEqualTo(LocalDate.parse("2026-09-01"))
-    assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.DISPOSAL_REQUIRED)
-    assertThat(saved.events.map { it.eventType }).contains(PropertyEventType.DISPOSAL_REQUIRED)
+    assertThat(result.event).isNull()
   }
 
   @Test
@@ -91,6 +76,18 @@ class SyncPropertyContainerServiceTest {
     assertThat(saved.containerType).isEqualTo(ContainerType.EXCESS)
     assertThat(saved.currentLocation()).isNull()
     assertThat(saved.currentLocationType()).isEqualTo(StorageLocationType.BRANSTON)
+  }
+
+  @Test
+  fun `create with a proposed disposal date records disposal required`() {
+    stubSaveAssigningId()
+
+    service.sync(request(proposedDisposalDate = LocalDate.parse("2026-09-01")))
+
+    val saved = captureSaved()
+    assertThat(saved.proposedDisposalDate).isEqualTo(LocalDate.parse("2026-09-01"))
+    assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.DISPOSAL_REQUIRED)
+    assertThat(saved.events.map { it.eventType }).contains(PropertyEventType.DISPOSAL_REQUIRED)
   }
 
   @Test
@@ -107,30 +104,29 @@ class SyncPropertyContainerServiceTest {
   }
 
   @Test
-  fun `re-syncing an unchanged snapshot is a no-op`() {
+  fun `re-syncing an unchanged snapshot is a no-op with no event`() {
     val existing = existingContainer()
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.sync(request(dpsId = existing.id))
 
-    assertThat(result.mappingType).isEqualTo(SyncMappingType.UPDATED)
+    assertThat(result.response.mappingType).isEqualTo(SyncMappingType.UPDATED)
+    assertThat(result.event).isNull()
     assertThat(existing.events).hasSize(1)
     verify(repository, never()).save(any())
-    verify(publisher, never()).publish(any())
   }
 
   @Test
-  fun `a changed seal appends a seal-changed event and publishes an update`() {
+  fun `a changed seal appends a seal-changed event and returns an update event`() {
     val existing = existingContainer()
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
 
-    service.sync(request(dpsId = existing.id, sealMark = "SEAL2"))
+    val result = service.sync(request(dpsId = existing.id, sealMark = "SEAL2"))
 
-    assertThat(existing.currentSealNumber()).isEqualTo("SEAL2")
+    assertThat(existing.currentSealNumber).isEqualTo("SEAL2")
     assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.SEAL_CHANGED)
-    val event = publishedEvent()
-    assertThat(event.eventType).isEqualTo("prison-property.container.updated")
-    assertThat(event.additionalInformation?.get("changedFields")).isEqualTo(listOf("sealNumber"))
+    assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("sealNumber"))
   }
 
   @Test
@@ -173,12 +169,6 @@ class SyncPropertyContainerServiceTest {
     return captor.firstValue
   }
 
-  private fun publishedEvent(): HmppsDomainEvent {
-    val captor = argumentCaptor<HmppsDomainEvent>()
-    verify(publisher).publish(captor.capture())
-    return captor.firstValue
-  }
-
   private fun existingContainer(): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
@@ -186,6 +176,7 @@ class SyncPropertyContainerServiceTest {
       containerType = ContainerType.STANDARD,
       createdByUserId = "USER1",
       createDateTime = CREATE_TIME,
+      currentSealNumber = "SEAL1",
       id = UUID.randomUUID(),
     )
     container.events.add(

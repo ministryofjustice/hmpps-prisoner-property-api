@@ -7,16 +7,28 @@ import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
+import jakarta.validation.Valid
 import jakarta.validation.constraints.Pattern
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType.APPLICATION_JSON_VALUE
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.validation.annotation.Validated
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerService
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerWriteService
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.WriteResult
+import uk.gov.justice.hmpps.kotlin.auth.HmppsAuthenticationHolder
 import uk.gov.justice.hmpps.kotlin.common.ErrorResponse
 import java.util.UUID
 
@@ -28,7 +40,16 @@ import java.util.UUID
 @SecurityRequirement(name = "bearer-jwt")
 class PropertyContainerResource(
   private val propertyContainerService: PropertyContainerService,
+  private val propertyContainerWriteService: PropertyContainerWriteService,
+  private val domainEventPublisher: DomainEventPublisher,
+  private val authenticationHolder: HmppsAuthenticationHolder,
 ) {
+
+  /** Publishes the domain event (if any) after the service transaction has committed. */
+  private fun WriteResult.publishAfterCommit(): PropertyContainerDto {
+    event?.let(domainEventPublisher::publish)
+    return container
+  }
 
   @GetMapping("/prisoner/{prisonerNumber}")
   @Operation(
@@ -82,4 +103,41 @@ class PropertyContainerResource(
     @PathVariable
     id: UUID,
   ): PropertyContainerDto = propertyContainerService.getById(id)
+
+  @PostMapping
+  @ResponseStatus(HttpStatus.CREATED)
+  @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
+  @Operation(
+    summary = "Create a new property container",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RW.",
+    responses = [
+      ApiResponse(responseCode = "201", description = "Property container created"),
+      ApiResponse(responseCode = "400", description = "Invalid request", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RW role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun create(@Valid @RequestBody request: CreatePropertyContainerRequest): PropertyContainerDto = propertyContainerWriteService.create(request, currentUsername()).publishAfterCommit()
+
+  @PutMapping("/{id}")
+  @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
+  @Operation(
+    summary = "Update a property container",
+    description = "Replaces the container's mutable details (type, seal, location, proposed disposal date), recording any change in history. Requires role ROLE_PRISONER_PROPERTY__RW.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Property container updated"),
+      ApiResponse(responseCode = "400", description = "Invalid request", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RW role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "404", description = "Property container not found", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun update(
+    @Parameter(description = "Property container id", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d", required = true)
+    @PathVariable
+    id: UUID,
+    @Valid @RequestBody request: UpdatePropertyContainerRequest,
+  ): PropertyContainerDto = propertyContainerWriteService.update(id, request, currentUsername()).publishAfterCommit()
+
+  private fun currentUsername(): String = authenticationHolder.username ?: authenticationHolder.principal
 }
