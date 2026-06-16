@@ -1,5 +1,6 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 
+import jakarta.validation.ValidationException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -15,8 +16,11 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -109,7 +113,7 @@ class PropertyContainerWriteServiceTest {
 
   @Test
   fun `create rejects a seal already held by an active container`() {
-    whenever(repository.existsByCurrentSealNumberAndDisposedDateIsNull("SEAL1")).thenReturn(true)
+    whenever(repository.existsByCurrentSealNumberAndRemovalOutcomeIsNull("SEAL1")).thenReturn(true)
 
     assertThatThrownBy { service.create(createRequest(), "A_USER") }
       .isInstanceOf(DuplicateSealNumberException::class.java)
@@ -120,7 +124,7 @@ class PropertyContainerWriteServiceTest {
   fun `update rejects amending the seal to one held by another active container`() {
     val existing = existingContainer()
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
-    whenever(repository.existsByCurrentSealNumberAndDisposedDateIsNullAndIdNot("SEAL2", existing.id!!)).thenReturn(true)
+    whenever(repository.existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot("SEAL2", existing.id!!)).thenReturn(true)
 
     assertThatThrownBy { service.update(existing.id!!, updateRequest(sealNumber = "SEAL2"), "A_USER") }
       .isInstanceOf(DuplicateSealNumberException::class.java)
@@ -133,7 +137,104 @@ class PropertyContainerWriteServiceTest {
 
     service.update(existing.id!!, updateRequest(), "A_USER")
 
-    verify(repository, never()).existsByCurrentSealNumberAndDisposedDateIsNullAndIdNot(any(), any())
+    verify(repository, never()).existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot(any(), any())
+  }
+
+  @Test
+  fun `dispose records a disposed outcome, clears the location and returns an updated event`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    val result = service.dispose(existing.id!!, DisposeContainerRequest(disposalDate = LocalDate.parse("2026-09-15")), "A_USER")
+
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.DISPOSED)
+    assertThat(existing.removalDate).isEqualTo(LocalDate.parse("2026-09-15"))
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.DISPOSED)
+    assertThat(existing.currentLocation()).isNull()
+    assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.DISPOSED)
+    assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("removalOutcome"))
+  }
+
+  @Test
+  fun `dispose defaults the disposal date to today when omitted`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.dispose(existing.id!!, DisposeContainerRequest(), "A_USER")
+
+    assertThat(existing.removalDate).isEqualTo(LocalDate.now())
+  }
+
+  @Test
+  fun `dispose of an already-removed container throws`() {
+    val existing = existingContainer().apply { removalOutcome = RemovalOutcome.RETURNED }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    assertThatThrownBy { service.dispose(existing.id!!, DisposeContainerRequest(), "A_USER") }
+      .isInstanceOf(ContainerAlreadyRemovedException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `dispose of an unknown container throws not found`() {
+    val id = UUID.randomUUID()
+    whenever(repository.findById(id)).thenReturn(Optional.empty())
+
+    assertThatThrownBy { service.dispose(id, DisposeContainerRequest(), "A_USER") }
+      .isInstanceOf(PropertyContainerNotFoundException::class.java)
+  }
+
+  @Test
+  fun `remove returning to the prisoner records a RETURNED outcome and event`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    val result = service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.RETURNED), "A_USER")
+
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.RETURNED)
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.RETURNED)
+    assertThat(existing.currentLocation()).isNull()
+    assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.RETURNED)
+    assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
+  }
+
+  @Test
+  fun `remove transferring records a TRANSFERRED outcome with the from and to prisons`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.TRANSFERRED, toPrisonId = "MDI"), "A_USER")
+
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+    val event = existing.events.last()
+    assertThat(event.eventType).isEqualTo(PropertyEventType.TRANSFERRED)
+    assertThat(event.fromPrisonId).isEqualTo("LEI")
+    assertThat(event.toPrisonId).isEqualTo("MDI")
+  }
+
+  @Test
+  fun `remove transferring without a destination prison throws`() {
+    assertThatThrownBy { service.remove(UUID.randomUUID(), RemoveContainerRequest(outcome = RemovalOutcome.TRANSFERRED), "A_USER") }
+      .isInstanceOf(ValidationException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `remove with a DISPOSED outcome is rejected`() {
+    assertThatThrownBy { service.remove(UUID.randomUUID(), RemoveContainerRequest(outcome = RemovalOutcome.DISPOSED), "A_USER") }
+      .isInstanceOf(ValidationException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `remove of an already-removed container throws`() {
+    val existing = existingContainer().apply { removalOutcome = RemovalOutcome.DISPOSED }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    assertThatThrownBy { service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.RETURNED), "A_USER") }
+      .isInstanceOf(ContainerAlreadyRemovedException::class.java)
+    verify(repository, never()).save(any())
   }
 
   private fun stubSaveAssigningId() {

@@ -14,9 +14,9 @@ interface PropertyContainerRepository : JpaRepository<PropertyContainer, UUID> {
   fun findByPrisonerNumber(prisonerNumber: String): List<PropertyContainer>
   fun findByPrisonId(prisonId: String): List<PropertyContainer>
 
-  /** Whether any active (not disposed) container already holds this seal number - used to enforce staff seal uniqueness. */
-  fun existsByCurrentSealNumberAndDisposedDateIsNull(currentSealNumber: String): Boolean
+  /** Whether any active (not removed) container already holds this seal number - used to enforce staff seal uniqueness. */
+  fun existsByCurrentSealNumberAndRemovalOutcomeIsNull(currentSealNumber: String): Boolean
 
   /** As above, excluding a given container (so a container amending its own seal does not clash with itself). */
-  fun existsByCurrentSealNumberAndDisposedDateIsNullAndIdNot(currentSealNumber: String, id: UUID): Boolean
+  fun existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot(currentSealNumber: String, id: UUID): Boolean
 }

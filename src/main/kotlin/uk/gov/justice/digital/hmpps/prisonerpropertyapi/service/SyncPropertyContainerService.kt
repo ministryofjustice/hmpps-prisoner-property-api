@@ -6,6 +6,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
@@ -53,8 +54,11 @@ class SyncPropertyContainerService(
       createdByUserId = request.createUsername,
       createDateTime = request.createDateTime,
       proposedDisposalDate = request.proposedDisposalDate,
-      disposedDate = request.expiryDate,
     )
+    if (request.expiryDate != null) {
+      container.removalOutcome = RemovalOutcome.DISPOSED
+      container.removalDate = request.expiryDate
+    }
     val disposalTime = request.modifyDateTime ?: request.createDateTime
 
     val location = transformer.resolveLocation(request)
@@ -136,10 +140,15 @@ class SyncPropertyContainerService(
       changed += "proposedDisposalDate"
     }
 
-    if (request.expiryDate != existing.disposedDate) {
-      existing.disposedDate = request.expiryDate
+    val currentDisposedDate = if (existing.removalOutcome == RemovalOutcome.DISPOSED) existing.removalDate else null
+    if (request.expiryDate != currentDisposedDate) {
       if (request.expiryDate != null) {
+        existing.removalOutcome = RemovalOutcome.DISPOSED
+        existing.removalDate = request.expiryDate
         existing.events.add(disposedEvent(existing, request.expiryDate, now, user))
+      } else {
+        existing.removalOutcome = null
+        existing.removalDate = null
       }
       changed += "disposedDate"
     }

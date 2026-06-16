@@ -22,7 +22,9 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerService
@@ -138,6 +140,48 @@ class PropertyContainerResource(
     id: UUID,
     @Valid @RequestBody request: UpdatePropertyContainerRequest,
   ): PropertyContainerDto = propertyContainerWriteService.update(id, request, currentUsername()).publishAfterCommit()
+
+  @PostMapping("/{id}/dispose")
+  @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
+  @Operation(
+    summary = "Dispose of a property container",
+    description = "Records the container as disposed of (destroyed), taking it out of active storage and clearing its location. Requires role ROLE_PRISONER_PROPERTY__RW.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Property container disposed"),
+      ApiResponse(responseCode = "400", description = "Invalid request", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RW role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "404", description = "Property container not found", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "409", description = "Property container has already left active storage", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun dispose(
+    @Parameter(description = "Property container id", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d", required = true)
+    @PathVariable
+    id: UUID,
+    @Valid @RequestBody request: DisposeContainerRequest,
+  ): PropertyContainerDto = propertyContainerWriteService.dispose(id, request, currentUsername()).publishAfterCommit()
+
+  @PostMapping("/{id}/remove")
+  @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
+  @Operation(
+    summary = "Remove a property container from active storage",
+    description = "Records the container as returned to the prisoner or transferred to another prison, taking it out of active storage and clearing its location. Requires role ROLE_PRISONER_PROPERTY__RW.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Property container removed"),
+      ApiResponse(responseCode = "400", description = "Invalid request", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RW role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "404", description = "Property container not found", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "409", description = "Property container has already left active storage", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun remove(
+    @Parameter(description = "Property container id", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d", required = true)
+    @PathVariable
+    id: UUID,
+    @Valid @RequestBody request: RemoveContainerRequest,
+  ): PropertyContainerDto = propertyContainerWriteService.remove(id, request, currentUsername()).publishAfterCommit()
 
   private fun currentUsername(): String = authenticationHolder.username ?: authenticationHolder.principal
 }

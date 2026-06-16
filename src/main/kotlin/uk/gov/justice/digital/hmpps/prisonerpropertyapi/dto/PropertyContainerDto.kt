@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -38,8 +39,11 @@ data class PropertyContainerDto(
   @Schema(description = "Date the container is proposed to be disposed of, if any", example = "2026-09-01", nullable = true)
   val proposedDisposalDate: LocalDate?,
 
-  @Schema(description = "Date the container was disposed of, if any", example = "2026-09-15", nullable = true)
-  val disposedDate: LocalDate?,
+  @Schema(description = "Why the container left active storage (disposed, returned, transferred, combined), if it has", example = "DISPOSED", nullable = true)
+  val removalOutcome: RemovalOutcome?,
+
+  @Schema(description = "Date the container left active storage, if it has", example = "2026-09-15", nullable = true)
+  val removalDate: LocalDate?,
 
   @Schema(description = "When the container was created")
   val createDateTime: LocalDateTime,
@@ -58,7 +62,8 @@ data class PropertyContainerDto(
       currentLocation = container.currentLocation(),
       currentLocationType = container.currentLocationType(),
       proposedDisposalDate = container.proposedDisposalDate,
-      disposedDate = container.disposedDate,
+      removalOutcome = container.removalOutcome,
+      removalDate = container.removalDate,
       createDateTime = container.createDateTime,
       createdByUserId = container.createdByUserId,
     )

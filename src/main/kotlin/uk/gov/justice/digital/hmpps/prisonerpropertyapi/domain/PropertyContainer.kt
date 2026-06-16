@@ -42,8 +42,12 @@ class PropertyContainer(
   @Column(name = "proposed_disposal_date")
   var proposedDisposalDate: LocalDate? = null,
 
-  @Column(name = "disposed_date")
-  var disposedDate: LocalDate? = null,
+  @Enumerated(EnumType.STRING)
+  @Column(name = "removal_outcome")
+  var removalOutcome: RemovalOutcome? = null,
+
+  @Column(name = "removal_date")
+  var removalDate: LocalDate? = null,
 
   @Column(name = "current_seal_number")
   var currentSealNumber: String? = null,
@@ -56,31 +60,35 @@ class PropertyContainer(
   @Column(name = "id", updatable = false, nullable = false)
   var id: UUID? = null,
 ) {
+  /** Whether the container has left active storage (disposed, returned, transferred, combined). */
+  fun isRemoved(): Boolean = removalOutcome != null
+
   /**
-   * The current status. A recorded disposal date takes precedence over the latest event so that a
-   * later correction (e.g. a seal fix) does not "un-dispose" the container; otherwise it derives
-   * from the most recent event (defaulting to STORED before any event).
+   * The current status. A removal outcome takes precedence over the latest event so that a later
+   * correction (e.g. a seal fix) does not "un-remove" the container; otherwise a proposed disposal
+   * date shows DISPOSAL_REQUIRED, else it derives from the most recent event (defaulting to STORED
+   * before any event).
    */
   fun currentStatus(): ContainerStatus = when {
-    disposedDate != null -> ContainerStatus.DISPOSED
+    removalOutcome != null -> removalOutcome!!.status
     proposedDisposalDate != null -> ContainerStatus.DISPOSAL_REQUIRED
     else -> latestEvent()?.eventType?.status ?: ContainerStatus.STORED
   }
 
   /**
    * The current internal location id, from the most recent location-bearing event. Null when the
-   * container is offsite at Branston (no internal id), has no recorded location, or is disposed (its
-   * location history is retained on the events).
+   * container is offsite at Branston (no internal id), has no recorded location, or has been removed
+   * (its location history is retained on the events).
    */
-  fun currentLocation(): UUID? = if (disposedDate != null) null else latestLocationEvent()?.toInternalLocationId
+  fun currentLocation(): UUID? = if (isRemoved()) null else latestLocationEvent()?.toInternalLocationId
 
   /**
    * The current storage location type (internal prison location vs the offsite Branston warehouse),
    * from the most recent location-bearing event. Null when there is no recorded location or the
-   * container is disposed. Falls back to [StorageLocationType.INTERNAL] for older events that recorded
-   * an internal location id without an explicit type.
+   * container has been removed. Falls back to [StorageLocationType.INTERNAL] for older events that
+   * recorded an internal location id without an explicit type.
    */
-  fun currentLocationType(): StorageLocationType? = if (disposedDate != null) {
+  fun currentLocationType(): StorageLocationType? = if (isRemoved()) {
     null
   } else {
     latestLocationEvent()?.let {

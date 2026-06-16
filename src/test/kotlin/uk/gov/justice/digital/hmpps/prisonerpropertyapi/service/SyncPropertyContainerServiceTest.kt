@@ -14,6 +14,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.NomisContainerCode
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
@@ -97,7 +98,8 @@ class SyncPropertyContainerServiceTest {
     service.sync(request(expiryDate = LocalDate.parse("2026-09-15")))
 
     val saved = captureSaved()
-    assertThat(saved.disposedDate).isEqualTo(LocalDate.parse("2026-09-15"))
+    assertThat(saved.removalOutcome).isEqualTo(RemovalOutcome.DISPOSED)
+    assertThat(saved.removalDate).isEqualTo(LocalDate.parse("2026-09-15"))
     assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.DISPOSED)
     assertThat(saved.currentLocation()).isNull()
     assertThat(saved.events.map { it.eventType }).contains(PropertyEventType.DISPOSED)
@@ -151,7 +153,8 @@ class SyncPropertyContainerServiceTest {
 
     service.sync(request(dpsId = existing.id, expiryDate = LocalDate.parse("2026-09-15")))
 
-    assertThat(existing.disposedDate).isEqualTo(LocalDate.parse("2026-09-15"))
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.DISPOSED)
+    assertThat(existing.removalDate).isEqualTo(LocalDate.parse("2026-09-15"))
     assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.DISPOSED)
     assertThat(existing.currentLocation()).isNull()
     assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.DISPOSED)
