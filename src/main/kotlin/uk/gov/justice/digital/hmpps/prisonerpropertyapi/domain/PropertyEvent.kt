@@ -54,6 +54,9 @@ class PropertyEvent(
   @Column(name = "event_date")
   val eventDate: LocalDate? = null,
 
+  @Column(name = "related_container_id")
+  val relatedContainerId: UUID? = null,
+
   @Id
   @GeneratedUuidV7
   @Column(name = "id", updatable = false, nullable = false)

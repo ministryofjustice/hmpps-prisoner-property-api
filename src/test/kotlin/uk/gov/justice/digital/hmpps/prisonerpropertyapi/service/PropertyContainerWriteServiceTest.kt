@@ -18,6 +18,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
@@ -235,6 +236,95 @@ class PropertyContainerWriteServiceTest {
     assertThatThrownBy { service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.RETURNED), "A_USER") }
       .isInstanceOf(ContainerAlreadyRemovedException::class.java)
     verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `combine creates a new sealed container and marks the sources as combined`() {
+    stubSaveAssigningId()
+    val a = sourceContainer("A1234BC", "SEALA")
+    val b = sourceContainer("A1234BC", "SEALB")
+    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findById(b.id!!)).thenReturn(Optional.of(b))
+
+    val result = service.combine(
+      CombineContainersRequest(sourceContainerIds = listOf(a.id!!, b.id!!), containerType = ContainerType.VALUABLES, sealNumber = "NEWSEAL", internalLocationId = LOCATION),
+      "A_USER",
+    )
+
+    assertThat(result.container.currentSealNumber).isEqualTo("NEWSEAL")
+    assertThat(result.container.containerType).isEqualTo(ContainerType.VALUABLES)
+    assertThat(result.container.currentStatus).isEqualTo(ContainerStatus.STORED)
+    assertThat(a.removalOutcome).isEqualTo(RemovalOutcome.COMBINED)
+    assertThat(b.removalOutcome).isEqualTo(RemovalOutcome.COMBINED)
+    assertThat(a.currentStatus()).isEqualTo(ContainerStatus.COMBINED)
+    assertThat(a.events.last().eventType).isEqualTo(PropertyEventType.COMBINED)
+    assertThat(a.events.last().relatedContainerId).isEqualTo(result.container.id)
+    assertThat(result.events.map { it.eventType })
+      .containsExactly("prison-property.container.created", "prison-property.container.updated", "prison-property.container.updated")
+  }
+
+  @Test
+  fun `combine rejects sources belonging to different prisoners`() {
+    val a = sourceContainer("A1234BC", "SEALA")
+    val b = sourceContainer("B2345CD", "SEALB")
+    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findById(b.id!!)).thenReturn(Optional.of(b))
+
+    assertThatThrownBy { service.combine(CombineContainersRequest(listOf(a.id!!, b.id!!), ContainerType.STANDARD, "NEWSEAL"), "A_USER") }
+      .isInstanceOf(ValidationException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `combine rejects a seal already held by an active container`() {
+    val a = sourceContainer("A1234BC", "SEALA")
+    val b = sourceContainer("A1234BC", "SEALB")
+    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findById(b.id!!)).thenReturn(Optional.of(b))
+    whenever(repository.existsByCurrentSealNumberAndRemovalOutcomeIsNull("NEWSEAL")).thenReturn(true)
+
+    assertThatThrownBy { service.combine(CombineContainersRequest(listOf(a.id!!, b.id!!), ContainerType.STANDARD, "NEWSEAL"), "A_USER") }
+      .isInstanceOf(DuplicateSealNumberException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `combine rejects an already-removed source`() {
+    val a = sourceContainer("A1234BC", "SEALA").apply { removalOutcome = RemovalOutcome.DISPOSED }
+    val b = sourceContainer("A1234BC", "SEALB")
+    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findById(b.id!!)).thenReturn(Optional.of(b))
+
+    assertThatThrownBy { service.combine(CombineContainersRequest(listOf(a.id!!, b.id!!), ContainerType.STANDARD, "NEWSEAL"), "A_USER") }
+      .isInstanceOf(ValidationException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `combine with an unknown source throws not found`() {
+    val a = sourceContainer("A1234BC", "SEALA")
+    val unknown = UUID.randomUUID()
+    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findById(unknown)).thenReturn(Optional.empty())
+
+    assertThatThrownBy { service.combine(CombineContainersRequest(listOf(a.id!!, unknown), ContainerType.STANDARD, "NEWSEAL"), "A_USER") }
+      .isInstanceOf(PropertyContainerNotFoundException::class.java)
+  }
+
+  private fun sourceContainer(prisonerNumber: String, seal: String): PropertyContainer {
+    val container = PropertyContainer(
+      prisonerNumber = prisonerNumber,
+      prisonId = "LEI",
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "A_USER",
+      createDateTime = LocalDateTime.parse("2026-01-01T09:00:00"),
+      currentSealNumber = seal,
+      id = UUID.randomUUID(),
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, LocalDateTime.parse("2026-01-01T09:00:00"), "A_USER", sealNumber = seal, toInternalLocationId = LOCATION, toStorageLocationType = StorageLocationType.INTERNAL),
+    )
+    return container
   }
 
   private fun stubSaveAssigningId() {

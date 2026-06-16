@@ -10,4 +10,5 @@ enum class RemovalOutcome(val status: ContainerStatus, val eventType: PropertyEv
   DISPOSED(ContainerStatus.DISPOSED, PropertyEventType.DISPOSED),
   RETURNED(ContainerStatus.RETURNED, PropertyEventType.RETURNED),
   TRANSFERRED(ContainerStatus.TRANSFER, PropertyEventType.TRANSFERRED),
+  COMBINED(ContainerStatus.COMBINED, PropertyEventType.COMBINED),
 }
