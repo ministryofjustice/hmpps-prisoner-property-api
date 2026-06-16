@@ -12,16 +12,24 @@ This service is the system of record for **prisoner property** in HMPPS. It mode
 sealed **containers** and a full history of **events** against each container, and it keeps that
 data in step with NOMIS.
 
-It will provide endpoints to:
+It provides endpoints to:
 
-- Record a new sealed **property container** for a prisoner (Standard, Excess, Valuables or
+- **Read** a prisoner's containers (or all containers in a prison, or a single container by id),
+  including each container's current seal, status, type and location.
+- **Create** a new sealed **property container** for a prisoner (Standard, Excess, Valuables or
   Confiscated).
-- Record **events** against a container over its lifetime — created/sealed, seal changed,
-  container-type changed, moved (internal location), transferred, returned and disposed.
-- Read a prisoner's containers and their current seal, status and location.
+- **Update** a container's mutable details (type, seal, location, proposed disposal date),
+  recording any change in its history.
+- **Move** a container to an internal prison location or offsite to the Branston warehouse.
+- **Combine** two or more source containers into a single new sealed container.
+- **Remove** a container from active storage by returning it to the prisoner or transferring it
+  to another prison.
+- **Dispose** of a container (destruction), taking it out of active storage.
+- **Sync / migrate** containers from NOMIS, and read them back by DPS id for reconciliation.
 
-> **Status:** the persistence model and messaging foundation are in place. The REST API surface
-> is being built — see the [open PRs](https://github.com/ministryofjustice/hmpps-prisoner-property-api/pulls).
+Every write builds the corresponding **event** in the container's history, and (except for
+migration) raises an HMPPS domain event after the transaction commits so downstream systems can
+follow the change.
 
 ### Domain model
 
@@ -34,20 +42,58 @@ PropertyContainer 1 ──────< * PropertyEvent
   prisonerNumber                eventType (enum)
   prisonId                      sealNumber
   containerType (enum)          eventDateTime
-  createdByUserId               from/to internal location id (UUID)
+  proposedDisposalDate          from/to internal location id (UUID)
+  createdByUserId               from/to location type (enum)
   createDateTime                from/to prison id
   (derived) currentSealNumber   eventUserId
   (derived) currentStatus
   (derived) currentLocation
+  (derived) currentLocationType
+  removalOutcome / removalDate
 ```
 
 - **Container types:** `STANDARD`, `EXCESS`, `VALUABLES`, `CONFISCATED`.
 - **Event types:** `CREATED_SEALED`, `SEAL_CHANGED`, `CONTAINER_TYPE_CHANGE`, `MOVED`,
-  `TRANSFERRED`, `RETURNED`, `DISPOSED`.
-- **Status (derived):** `STORED`, `DISPOSED`, `RETURNED`, `TRANSFER`.
+  `TRANSFERRED`, `RETURNED`, `DISPOSAL_REQUIRED`, `DISPOSED`, `COMBINED`.
+- **Status (derived):** `STORED`, `DISPOSAL_REQUIRED`, `DISPOSED`, `RETURNED`, `TRANSFER`,
+  `COMBINED`.
+- **Storage location types:** `INTERNAL` (a `hmpps-locations-inside-prison-api` location UUID) or
+  `BRANSTON` (the offsite warehouse, where there is no internal location id).
+- **Removal outcomes:** when a container leaves active storage its `removalOutcome` records why —
+  `DISPOSED`, `RETURNED`, `TRANSFERRED` or `COMBINED` — alongside the `removalDate`.
 - Internal location ids reference the `hmpps-locations-inside-prison-api` location UUID.
 - A container is only created once a seal has been entered; changing a seal keeps the same
   container id.
+- Once a container has left active storage it cannot be moved, removed or disposed again
+  (those endpoints return `409 Conflict`).
+
+### API endpoints
+
+All endpoints are JSON and require an HMPPS Auth bearer token. Reads require
+`ROLE_PRISONER_PROPERTY__RO`; writes require `ROLE_PRISONER_PROPERTY__RW`; the NOMIS sync
+endpoints require `ROLE_PRISONER_PROPERTY__SYNC`.
+
+**Property containers** (`/property-containers`)
+
+| Method & path | Role | Description |
+| --- | --- | --- |
+| `GET /prisoner/{prisonerNumber}` | RO | All containers held for a prisoner |
+| `GET /prison/{prisonId}` | RO | All containers held in a prison |
+| `GET /{id}` | RO | A single container by id |
+| `POST /` | RW | Create a new sealed container |
+| `PUT /{id}` | RW | Update a container's type, seal, location and proposed disposal date |
+| `POST /{id}/move` | RW | Move a container to an internal location or to Branston |
+| `POST /combine` | RW | Combine two or more source containers into a new sealed container |
+| `POST /{id}/remove` | RW | Remove from storage by returning or transferring |
+| `POST /{id}/dispose` | RW | Dispose of (destroy) a container |
+
+**Sync with NOMIS** (`/sync/property-containers`)
+
+| Method & path | Role | Description |
+| --- | --- | --- |
+| `POST /upsert` | SYNC | Create or update a container from an ongoing NOMIS change (raises a domain event) |
+| `POST /migrate` | SYNC | Bulk-migrate a container from NOMIS (raises no domain event) |
+| `GET /{id}` | SYNC | Read a synced container by DPS id, for reconciliation |
 
 ### NOMIS synchronisation
 
