@@ -10,4 +10,5 @@ enum class ContainerStatus {
   DISPOSED,
   RETURNED,
   TRANSFER,
+  COMBINED,
 }

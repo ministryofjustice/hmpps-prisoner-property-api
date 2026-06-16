@@ -21,12 +21,14 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.CombineResult
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerWriteService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.WriteResult
@@ -50,6 +52,12 @@ class PropertyContainerResource(
   /** Publishes the domain event (if any) after the service transaction has committed. */
   private fun WriteResult.publishAfterCommit(): PropertyContainerDto {
     event?.let(domainEventPublisher::publish)
+    return container
+  }
+
+  /** Publishes all the combine domain events after the service transaction has committed. */
+  private fun CombineResult.publishAllAfterCommit(): PropertyContainerDto {
+    events.forEach(domainEventPublisher::publish)
     return container
   }
 
@@ -182,6 +190,23 @@ class PropertyContainerResource(
     id: UUID,
     @Valid @RequestBody request: RemoveContainerRequest,
   ): PropertyContainerDto = propertyContainerWriteService.remove(id, request, currentUsername()).publishAfterCommit()
+
+  @PostMapping("/combine")
+  @ResponseStatus(HttpStatus.CREATED)
+  @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
+  @Operation(
+    summary = "Combine containers into a new sealed container",
+    description = "Combines the property of two or more source containers into a single new sealed container. The sources must share one prisoner and prison (inherited by the new container) and are taken out of active storage (COMBINED). Requires role ROLE_PRISONER_PROPERTY__RW.",
+    responses = [
+      ApiResponse(responseCode = "201", description = "New combined container created"),
+      ApiResponse(responseCode = "400", description = "Invalid request (mismatched or removed sources, fewer than two)", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RW role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "404", description = "A source container was not found", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "409", description = "The seal number is already in use by another active container", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun combine(@Valid @RequestBody request: CombineContainersRequest): PropertyContainerDto = propertyContainerWriteService.combine(request, currentUsername()).publishAllAfterCommit()
 
   private fun currentUsername(): String = authenticationHolder.username ?: authenticationHolder.principal
 }

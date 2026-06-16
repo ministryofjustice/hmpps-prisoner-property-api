@@ -3,10 +3,13 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.check
+import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
@@ -14,12 +17,14 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -219,6 +224,66 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
     webTestClient.post().uri("/property-containers/{id}/remove", id)
       .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
       .bodyValue(RemoveContainerRequest(outcome = RemovalOutcome.TRANSFERRED))
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
+  @Test
+  fun `combines two containers into a new sealed container and removes the sources`() {
+    val a = repository.save(seedContainer(seal = "SEALA")).id!!
+    val b = repository.save(seedContainer(seal = "SEALB")).id!!
+
+    val created = webTestClient.post().uri("/property-containers/combine")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(CombineContainersRequest(sourceContainerIds = listOf(a, b), containerType = ContainerType.STANDARD, sealNumber = "NEWSEAL", internalLocationId = LOCATION))
+      .exchange()
+      .expectStatus().isCreated
+      .expectBody(PropertyContainerDto::class.java)
+      .returnResult().responseBody!!
+
+    assertThat(created.currentSealNumber).isEqualTo("NEWSEAL")
+    assertThat(created.currentStatus).isEqualTo(ContainerStatus.STORED)
+    assertThat(repository.findById(a).get().removalOutcome).isEqualTo(RemovalOutcome.COMBINED)
+    assertThat(repository.findById(b).get().removalOutcome).isEqualTo(RemovalOutcome.COMBINED)
+
+    val captor = argumentCaptor<HmppsDomainEvent>()
+    verify(domainEventPublisher, times(3)).publish(captor.capture())
+    assertThat(captor.allValues.map { it.eventType })
+      .containsExactly("prison-property.container.created", "prison-property.container.updated", "prison-property.container.updated")
+  }
+
+  @Test
+  fun `rejects combining containers from different prisoners`() {
+    val a = repository.save(seedContainer(prisonerNumber = "A1234BC", seal = "SEALA")).id!!
+    val b = repository.save(seedContainer(prisonerNumber = "B2345CD", seal = "SEALB")).id!!
+
+    webTestClient.post().uri("/property-containers/combine")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(CombineContainersRequest(sourceContainerIds = listOf(a, b), containerType = ContainerType.STANDARD, sealNumber = "NEWSEAL"))
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
+  @Test
+  fun `rejects combining into a seal already used by an active container`() {
+    repository.save(seedContainer(prisonerNumber = "C3456DE", seal = "TAKEN"))
+    val a = repository.save(seedContainer(seal = "SEALA")).id!!
+    val b = repository.save(seedContainer(seal = "SEALB")).id!!
+
+    webTestClient.post().uri("/property-containers/combine")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(CombineContainersRequest(sourceContainerIds = listOf(a, b), containerType = ContainerType.STANDARD, sealNumber = "TAKEN"))
+      .exchange()
+      .expectStatus().isEqualTo(409)
+  }
+
+  @Test
+  fun `rejects combining fewer than two containers`() {
+    val a = repository.save(seedContainer(seal = "SEALA")).id!!
+
+    webTestClient.post().uri("/property-containers/combine")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(CombineContainersRequest(sourceContainerIds = listOf(a), containerType = ContainerType.STANDARD, sealNumber = "NEWSEAL"))
       .exchange()
       .expectStatus().isBadRequest
   }
