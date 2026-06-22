@@ -34,11 +34,31 @@ class PropertyContainerWriteService(
   private val repository: PropertyContainerRepository,
 ) {
 
+  /**
+   * Create a new sealed container. When [CreatePropertyContainerRequest.previousSealNumber] is supplied and
+   * matches a container the same prisoner has due for transfer out at another prison, that container is the
+   * property physically arriving here on transfer: it is linked to the new record and deactivated (TRANSFERRED)
+   * so its seal and location are freed and no ghost record is left behind. An unmatched previous seal is
+   * ignored (the add still succeeds). Returns the created container plus the events to publish after commit -
+   * one for the new container, and one for the source when a transfer-in was reconciled.
+   */
   @Transactional
-  fun create(request: CreatePropertyContainerRequest, username: String): WriteResult {
-    if (repository.existsByCurrentSealNumberAndRemovalOutcomeIsNull(request.sealNumber)) {
+  fun create(request: CreatePropertyContainerRequest, username: String): CreateResult {
+    val source = request.previousSealNumber?.let { previousSeal ->
+      repository.findByPrisonerNumber(request.prisonerNumber).firstOrNull {
+        !it.isRemoved() &&
+          it.prisonId != request.prisonId &&
+          it.currentSealNumber == previousSeal &&
+          it.currentStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT
+      }
+    }
+
+    val sealInUse = source?.let { repository.existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot(request.sealNumber, it.id!!) }
+      ?: repository.existsByCurrentSealNumberAndRemovalOutcomeIsNull(request.sealNumber)
+    if (sealInUse) {
       throw DuplicateSealNumberException(request.sealNumber)
     }
+
     val now = LocalDateTime.now()
     val container = PropertyContainer(
       prisonerNumber = request.prisonerNumber,
@@ -59,6 +79,7 @@ class PropertyContainerWriteService(
         toInternalLocationId = request.internalLocationId,
         toStorageLocationType = request.internalLocationId?.let { StorageLocationType.INTERNAL },
         toPrisonId = request.prisonId,
+        relatedContainerId = source?.id,
       ),
     )
     if (request.proposedDisposalDate != null) {
@@ -68,8 +89,21 @@ class PropertyContainerWriteService(
     }
 
     val saved = repository.save(container)
-    val event = PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, request.prisonerNumber, changedFields = null)
-    return WriteResult(PropertyContainerDto.from(saved), event)
+    val events = mutableListOf(
+      PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, request.prisonerNumber, changedFields = null),
+    )
+
+    source?.let {
+      it.events.add(
+        PropertyEvent(it, PropertyEventType.TRANSFERRED, now, username, eventDate = LocalDate.now(), fromPrisonId = it.prisonId, toPrisonId = request.prisonId, relatedContainerId = saved.id),
+      )
+      it.removalOutcome = RemovalOutcome.TRANSFERRED
+      it.removalDate = LocalDate.now()
+      repository.save(it)
+      events += PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, it.id!!, it.prisonerNumber, listOf("removalOutcome"))
+    }
+
+    return CreateResult(PropertyContainerDto.from(saved), events)
   }
 
   @Transactional
@@ -315,3 +349,10 @@ data class WriteResult(val container: PropertyContainerDto, val event: HmppsDoma
  * transaction commits (a created event for the new container and an updated event per source).
  */
 data class CombineResult(val container: PropertyContainerDto, val events: List<HmppsDomainEvent>)
+
+/**
+ * The outcome of a create: the new [container] plus the domain [events] to publish *after* the
+ * transaction commits (a created event for the new container, and - when an arriving container was
+ * reconciled against a due-for-transfer-out record - an updated event for that source).
+ */
+data class CreateResult(val container: PropertyContainerDto, val events: List<HmppsDomainEvent>)

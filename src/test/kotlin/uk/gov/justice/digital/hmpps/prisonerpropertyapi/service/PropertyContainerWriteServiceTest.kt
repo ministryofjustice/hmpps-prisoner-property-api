@@ -8,6 +8,7 @@ import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
+import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
@@ -50,8 +51,10 @@ class PropertyContainerWriteServiceTest {
     assertThat(saved.events).singleElement().extracting { it.eventType }.isEqualTo(PropertyEventType.CREATED_SEALED)
 
     assertThat(result.container.createdByUserId).isEqualTo("A_USER")
-    assertThat(result.event?.eventType).isEqualTo("prison-property.container.created")
-    assertThat(result.event?.prisonerNumber).isEqualTo("A1234BC")
+    assertThat(result.events).singleElement().satisfies({
+      assertThat(it.eventType).isEqualTo("prison-property.container.created")
+      assertThat(it.prisonerNumber).isEqualTo("A1234BC")
+    })
   }
 
   @Test
@@ -120,6 +123,62 @@ class PropertyContainerWriteServiceTest {
     assertThatThrownBy { service.create(createRequest(), "A_USER") }
       .isInstanceOf(DuplicateSealNumberException::class.java)
     verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `create reconciles a matching due-for-transfer-out container arriving from another prison`() {
+    stubSaveAssigningId()
+    val source = dueForTransferOut("LEI", "OLDSEAL", toPrisonId = "MDI")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+
+    val result = service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
+
+    // the new container is created at the receiving prison and linked back to the source
+    assertThat(result.container.prisonId).isEqualTo("MDI")
+    assertThat(result.container.currentSealNumber).isEqualTo("NEWSEAL")
+    val captor = argumentCaptor<PropertyContainer>()
+    verify(repository, times(2)).save(captor.capture())
+    val newContainer = captor.allValues.first { it.prisonId == "MDI" }
+    assertThat(newContainer.events.single { it.eventType == PropertyEventType.CREATED_SEALED }.relatedContainerId).isEqualTo(source.id)
+
+    // the source container is deactivated as transferred to the receiving prison, linked to the new record
+    assertThat(source.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+    assertThat(source.removalDate).isEqualTo(LocalDate.now())
+    val transferred = source.events.last()
+    assertThat(transferred.eventType).isEqualTo(PropertyEventType.TRANSFERRED)
+    assertThat(transferred.fromPrisonId).isEqualTo("LEI")
+    assertThat(transferred.toPrisonId).isEqualTo("MDI")
+    assertThat(transferred.relatedContainerId).isEqualTo(newContainer.id)
+
+    // both the created (new) and updated (source) events are returned to publish
+    assertThat(result.events.map { it.eventType })
+      .containsExactly("prison-property.container.created", "prison-property.container.updated")
+  }
+
+  @Test
+  fun `create with the same arriving seal succeeds because the reconciled source frees its seal`() {
+    stubSaveAssigningId()
+    val source = dueForTransferOut("LEI", "SAMESEAL", toPrisonId = "MDI")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    // the seal is still held by the source at this point; the create must exclude the source it is reconciling
+    whenever(repository.existsByCurrentSealNumberAndRemovalOutcomeIsNull("SAMESEAL")).thenReturn(true)
+
+    val result = service.create(createRequest(prisonId = "MDI", sealNumber = "SAMESEAL", previousSealNumber = "SAMESEAL"), "A_USER")
+
+    assertThat(result.container.currentSealNumber).isEqualTo("SAMESEAL")
+    assertThat(source.isRemoved()).isTrue()
+  }
+
+  @Test
+  fun `create ignores a previous seal that matches no due-for-transfer-out container`() {
+    stubSaveAssigningId()
+    val storedElsewhere = containerAt("MDI", "OLDSEAL") // active elsewhere but not due for transfer out
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(storedElsewhere))
+
+    val result = service.create(createRequest(prisonId = "LEI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
+
+    assertThat(result.events).singleElement().extracting { it.eventType }.isEqualTo("prison-property.container.created")
+    assertThat(storedElsewhere.isRemoved()).isFalse()
   }
 
   @Test
@@ -437,6 +496,15 @@ class PropertyContainerWriteServiceTest {
     return container
   }
 
+  /** An active container at [prisonId] flagged due for transfer out to [toPrisonId] (a PRISONER_RECEIVED event). */
+  private fun dueForTransferOut(prisonId: String, seal: String, toPrisonId: String): PropertyContainer {
+    val container = containerAt(prisonId, seal)
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.PRISONER_RECEIVED, LocalDateTime.parse("2026-02-01T09:00:00"), "PRISONER_PROPERTY_API", fromPrisonId = prisonId, toPrisonId = toPrisonId),
+    )
+    return container
+  }
+
   private fun sourceContainer(prisonerNumber: String, seal: String): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = prisonerNumber,
@@ -481,13 +549,19 @@ class PropertyContainerWriteServiceTest {
     return container
   }
 
-  private fun createRequest(proposedDisposalDate: LocalDate? = null) = CreatePropertyContainerRequest(
+  private fun createRequest(
+    proposedDisposalDate: LocalDate? = null,
+    prisonId: String = "LEI",
+    sealNumber: String = "SEAL1",
+    previousSealNumber: String? = null,
+  ) = CreatePropertyContainerRequest(
     prisonerNumber = "A1234BC",
-    prisonId = "LEI",
+    prisonId = prisonId,
     containerType = ContainerType.STANDARD,
-    sealNumber = "SEAL1",
+    sealNumber = sealNumber,
     internalLocationId = LOCATION,
     proposedDisposalDate = proposedDisposalDate,
+    previousSealNumber = previousSealNumber,
   )
 
   private fun updateRequest(
