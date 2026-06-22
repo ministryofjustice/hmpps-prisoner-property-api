@@ -24,7 +24,7 @@ class PropertyContainerServiceTest {
 
   @Test
   fun `getByPrisonerNumber maps containers to DTOs with derived fields`() {
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerWithHistory()))
+    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerWithHistory()))
 
     val result = service.getByPrisonerNumber("A1234BC")
 
@@ -34,17 +34,17 @@ class PropertyContainerServiceTest {
       assertThat(it.currentStatus).isEqualTo(ContainerStatus.STORED)
       assertThat(it.currentLocation).isEqualTo(LOCATION_B)
     })
-    verify(repository).findByPrisonerNumber("A1234BC")
+    verify(repository).findByPrisonerNumberAndArchivedFalse("A1234BC")
   }
 
   @Test
   fun `getByPrisonId maps containers to DTOs`() {
-    whenever(repository.findByPrisonId("LEI")).thenReturn(listOf(containerWithHistory()))
+    whenever(repository.findByPrisonIdAndArchivedFalse("LEI")).thenReturn(listOf(containerWithHistory()))
 
     val result = service.getByPrisonId("LEI")
 
     assertThat(result).singleElement().extracting { it.prisonId }.isEqualTo("LEI")
-    verify(repository).findByPrisonId("LEI")
+    verify(repository).findByPrisonIdAndArchivedFalse("LEI")
   }
 
   @Test

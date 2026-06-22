@@ -52,6 +52,13 @@ class PropertyContainer(
   @Column(name = "current_seal_number")
   var currentSealNumber: String? = null,
 
+  /**
+   * Whether the container is archived (NOMIS ACTIVE_FLAG = 'N'). Archived containers are retained but
+   * hidden from normal reads, surfaced only when fetched explicitly by id (e.g. a future archive screen).
+   */
+  @Column(name = "archived", nullable = false)
+  var archived: Boolean = false,
+
   @OneToMany(mappedBy = "container", cascade = [CascadeType.ALL], orphanRemoval = true)
   val events: MutableList<PropertyEvent> = mutableListOf(),
 

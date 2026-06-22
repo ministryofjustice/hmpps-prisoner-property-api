@@ -33,7 +33,7 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
   fun `persists a container with its events and finds it by prisoner number`() {
     val container = containerRepository.save(containerWithSealMoveHistory())
 
-    val found = containerRepository.findByPrisonerNumber("A1234BC")
+    val found = containerRepository.findByPrisonerNumberAndArchivedFalse("A1234BC")
     assertThat(found).singleElement().extracting { it.id }.isEqualTo(container.id)
 
     val events = eventRepository.findByContainerIdOrderByEventDateTimeDesc(container.id!!)
@@ -45,12 +45,22 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
   fun `persists a container with its events and finds it by prison id`() {
     val container = containerRepository.save(containerWithSealMoveHistory())
 
-    val found = containerRepository.findByPrisonId("LEI")
+    val found = containerRepository.findByPrisonIdAndArchivedFalse("LEI")
     assertThat(found).singleElement().extracting { it.id }.isEqualTo(container.id)
 
     val events = eventRepository.findByContainerIdOrderByEventDateTimeDesc(container.id!!)
     assertThat(events).extracting<PropertyEventType> { it.eventType }
       .containsExactly(PropertyEventType.MOVED, PropertyEventType.SEAL_CHANGED, PropertyEventType.CREATED_SEALED)
+  }
+
+  @Test
+  fun `excludes archived containers from list reads but still finds them by id`() {
+    val container = containerWithSealMoveHistory().apply { archived = true }
+    val saved = containerRepository.save(container)
+
+    assertThat(containerRepository.findByPrisonerNumberAndArchivedFalse("A1234BC")).isEmpty()
+    assertThat(containerRepository.findByPrisonIdAndArchivedFalse("LEI")).isEmpty()
+    assertThat(containerRepository.findById(saved.id!!)).get().extracting { it.archived }.isEqualTo(true)
   }
 
   @Test

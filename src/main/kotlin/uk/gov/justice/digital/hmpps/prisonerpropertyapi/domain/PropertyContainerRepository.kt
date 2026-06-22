@@ -11,8 +11,9 @@ interface PropertyContainerRepository : JpaRepository<PropertyContainer, UUID> {
   @EntityGraph("PropertyContainer.withEvents")
   override fun findById(id: UUID): Optional<PropertyContainer>
 
-  fun findByPrisonerNumber(prisonerNumber: String): List<PropertyContainer>
-  fun findByPrisonId(prisonId: String): List<PropertyContainer>
+  // List reads exclude archived containers - they are only returned when fetched explicitly by id.
+  fun findByPrisonerNumberAndArchivedFalse(prisonerNumber: String): List<PropertyContainer>
+  fun findByPrisonIdAndArchivedFalse(prisonId: String): List<PropertyContainer>
 
   /** Whether any active (not removed) container already holds this seal number - used to enforce staff seal uniqueness. */
   fun existsByCurrentSealNumberAndRemovalOutcomeIsNull(currentSealNumber: String): Boolean

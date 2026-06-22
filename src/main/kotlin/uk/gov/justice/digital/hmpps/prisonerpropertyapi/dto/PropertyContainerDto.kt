@@ -50,6 +50,9 @@ data class PropertyContainerDto(
 
   @Schema(description = "Id of the user who created the container", example = "AUSER_GEN")
   val createdByUserId: String,
+
+  @Schema(description = "Whether the container is archived (hidden from normal reads, e.g. NOMIS inactive containers)", example = "false")
+  val archived: Boolean,
 ) {
   companion object {
     fun from(container: PropertyContainer) = PropertyContainerDto(
@@ -66,6 +69,7 @@ data class PropertyContainerDto(
       removalDate = container.removalDate,
       createDateTime = container.createDateTime,
       createdByUserId = container.createdByUserId,
+      archived = container.archived,
     )
   }
 }
