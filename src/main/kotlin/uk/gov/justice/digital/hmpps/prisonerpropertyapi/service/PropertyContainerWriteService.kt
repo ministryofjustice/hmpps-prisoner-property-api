@@ -3,6 +3,7 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 import jakarta.validation.ValidationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
@@ -250,6 +251,39 @@ class PropertyContainerWriteService(
     return WriteResult(PropertyContainerDto.from(container), event)
   }
 
+  /**
+   * Handle a prisoner being received into [newPrisonId]. Every active container still recorded at a
+   * different prison is flagged due for transfer out by appending a [PropertyEventType.PRISONER_RECEIVED]
+   * event (the container itself stays at the sending prison until the receiving prison adds it - only its
+   * derived status and history change). Idempotent: containers already due for transfer out to this same
+   * destination are skipped, so repeated/duplicate receive events do nothing. Returns one
+   * [PropertyDomainEventType.CONTAINER_UPDATED] event per container changed, for the caller to publish
+   * after commit.
+   */
+  @Transactional
+  fun prisonerReceived(prisonerNumber: String, newPrisonId: String): List<HmppsDomainEvent> {
+    val now = LocalDateTime.now()
+    return repository.findByPrisonerNumber(prisonerNumber)
+      .filter { !it.isRemoved() && it.prisonId != newPrisonId && !it.isAlreadyDueForTransferOut(newPrisonId) }
+      .map { container ->
+        container.events.add(
+          PropertyEvent(
+            container,
+            PropertyEventType.PRISONER_RECEIVED,
+            now,
+            SYSTEM_USER,
+            fromPrisonId = container.prisonId,
+            toPrisonId = newPrisonId,
+          ),
+        )
+        repository.save(container)
+        PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, listOf("currentStatus"))
+      }
+  }
+
+  private fun PropertyContainer.isAlreadyDueForTransferOut(newPrisonId: String): Boolean = currentStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT &&
+    events.maxByOrNull { it.eventDateTime }?.toPrisonId == newPrisonId
+
   private fun loadActive(id: UUID): PropertyContainer {
     val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
     container.removalOutcome?.let { throw ContainerAlreadyRemovedException(id, it) }
@@ -262,6 +296,11 @@ class PropertyContainerWriteService(
     repository.save(this)
     val event = PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, listOf("removalOutcome"))
     return WriteResult(PropertyContainerDto.from(this), event)
+  }
+
+  private companion object {
+    /** Event user id recorded for changes driven by an external domain event rather than a member of staff. */
+    private const val SYSTEM_USER = "PRISONER_PROPERTY_API"
   }
 }
 

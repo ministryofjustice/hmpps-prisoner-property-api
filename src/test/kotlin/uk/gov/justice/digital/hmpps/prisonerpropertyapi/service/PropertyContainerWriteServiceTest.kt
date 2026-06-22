@@ -377,6 +377,66 @@ class PropertyContainerWriteServiceTest {
       .isInstanceOf(PropertyContainerNotFoundException::class.java)
   }
 
+  @Test
+  fun `prisonerReceived flags active containers at a different prison as due for transfer out`() {
+    val atSendingPrison = containerAt("LEI", "SEAL1")
+    val atNewPrison = containerAt("MDI", "SEAL2")
+    val removedAtSendingPrison = containerAt("LEI", "SEAL3").apply { removalOutcome = RemovalOutcome.RETURNED }
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(atSendingPrison, atNewPrison, removedAtSendingPrison))
+
+    val events = service.prisonerReceived("A1234BC", "MDI")
+
+    assertThat(atSendingPrison.currentStatus()).isEqualTo(ContainerStatus.DUE_FOR_TRANSFER_OUT)
+    val received = atSendingPrison.events.last()
+    assertThat(received.eventType).isEqualTo(PropertyEventType.PRISONER_RECEIVED)
+    assertThat(received.fromPrisonId).isEqualTo("LEI")
+    assertThat(received.toPrisonId).isEqualTo("MDI")
+
+    // the container already at the new prison and the removed container are untouched
+    assertThat(atNewPrison.events.map { it.eventType }).doesNotContain(PropertyEventType.PRISONER_RECEIVED)
+    assertThat(removedAtSendingPrison.events.map { it.eventType }).doesNotContain(PropertyEventType.PRISONER_RECEIVED)
+
+    assertThat(events).singleElement().extracting { it.eventType }.isEqualTo("prison-property.container.updated")
+    assertThat(events.single().prisonerNumber).isEqualTo("A1234BC")
+    verify(repository).save(atSendingPrison)
+  }
+
+  @Test
+  fun `prisonerReceived is idempotent - a repeated receive to the same prison does nothing`() {
+    val atSendingPrison = containerAt("LEI", "SEAL1")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(atSendingPrison))
+
+    service.prisonerReceived("A1234BC", "MDI")
+    val secondCallEvents = service.prisonerReceived("A1234BC", "MDI")
+
+    assertThat(secondCallEvents).isEmpty()
+    assertThat(atSendingPrison.events.count { it.eventType == PropertyEventType.PRISONER_RECEIVED }).isEqualTo(1)
+  }
+
+  @Test
+  fun `prisonerReceived with no property at another prison returns no events`() {
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("MDI", "SEAL1")))
+
+    assertThat(service.prisonerReceived("A1234BC", "MDI")).isEmpty()
+    verify(repository, never()).save(any())
+  }
+
+  private fun containerAt(prisonId: String, seal: String): PropertyContainer {
+    val container = PropertyContainer(
+      prisonerNumber = "A1234BC",
+      prisonId = prisonId,
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "A_USER",
+      createDateTime = LocalDateTime.parse("2026-01-01T09:00:00"),
+      currentSealNumber = seal,
+      id = UUID.randomUUID(),
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, LocalDateTime.parse("2026-01-01T09:00:00"), "A_USER", sealNumber = seal, toPrisonId = prisonId),
+    )
+    return container
+  }
+
   private fun sourceContainer(prisonerNumber: String, seal: String): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = prisonerNumber,
