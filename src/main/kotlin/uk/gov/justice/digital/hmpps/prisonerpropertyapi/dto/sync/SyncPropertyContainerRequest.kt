@@ -68,4 +68,11 @@ data class SyncPropertyContainerRequest(
 
   @Schema(description = "NOMIS MODIFY_USER_ID", example = "QWILLIS", nullable = true)
   val modifyUsername: String? = null,
+
+  @Schema(
+    description = "NOMIS ACTIVE_FLAG. False (inactive) archives the container - it is retained but hidden from normal reads.",
+    example = "true",
+    defaultValue = "true",
+  )
+  val active: Boolean = true,
 )

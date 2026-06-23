@@ -59,6 +59,36 @@ class SyncPropertyContainerServiceTest {
   }
 
   @Test
+  fun `create defaults to not archived when active`() {
+    stubSaveAssigningId()
+
+    service.sync(request())
+
+    assertThat(captureSaved().archived).isFalse()
+  }
+
+  @Test
+  fun `create archives the container when inactive`() {
+    stubSaveAssigningId()
+
+    service.sync(request(active = false))
+
+    assertThat(captureSaved().archived).isTrue()
+  }
+
+  @Test
+  fun `archiving an existing container flips the flag and reports an archived change`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    val result = service.sync(request(dpsId = existing.id, active = false))
+
+    assertThat(existing.archived).isTrue()
+    assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("archived"))
+  }
+
+  @Test
   fun `migrate returns no event to publish`() {
     stubSaveAssigningId()
 
@@ -195,6 +225,7 @@ class SyncPropertyContainerServiceTest {
     containerCode: NomisContainerCode = NomisContainerCode.BULK,
     proposedDisposalDate: LocalDate? = null,
     expiryDate: LocalDate? = null,
+    active: Boolean = true,
   ) = SyncPropertyContainerRequest(
     nomisPropertyContainerId = 123,
     dpsId = dpsId,
@@ -209,6 +240,7 @@ class SyncPropertyContainerServiceTest {
     createUsername = "USER1",
     modifyDateTime = MODIFY_TIME,
     modifyUsername = "USER2",
+    active = active,
   )
 
   private companion object {

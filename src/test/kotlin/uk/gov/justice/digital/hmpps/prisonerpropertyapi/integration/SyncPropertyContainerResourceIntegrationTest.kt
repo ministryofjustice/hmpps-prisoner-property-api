@@ -135,6 +135,26 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `an inactive snapshot archives the container, hiding it from list reads but not get-by-id`() {
+    val created = upsert(request(active = false))
+
+    getById(created.dpsId).jsonPath("$.archived").isEqualTo(true)
+    listByPrisoner("A1234BC").jsonPath("$.length()").isEqualTo(0)
+    listByPrison("LEI").jsonPath("$.length()").isEqualTo(0)
+  }
+
+  @Test
+  fun `archiving an existing container removes it from list reads`() {
+    val created = upsert(request())
+    listByPrisoner("A1234BC").jsonPath("$.length()").isEqualTo(1)
+
+    upsert(request(dpsId = created.dpsId, active = false))
+
+    listByPrisoner("A1234BC").jsonPath("$.length()").isEqualTo(0)
+    getById(created.dpsId).jsonPath("$.archived").isEqualTo(true)
+  }
+
+  @Test
   fun `rejects an unknown container code`() {
     val body = """
       {
@@ -209,6 +229,18 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     .expectStatus().isOk
     .expectBody()
 
+  private fun listByPrisoner(prisonerNumber: String) = webTestClient.get().uri("/property-containers/prisoner/{prisonerNumber}", prisonerNumber)
+    .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+    .exchange()
+    .expectStatus().isOk
+    .expectBody()
+
+  private fun listByPrison(prisonId: String) = webTestClient.get().uri("/property-containers/prison/{prisonId}", prisonId)
+    .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+    .exchange()
+    .expectStatus().isOk
+    .expectBody()
+
   private fun request(
     dpsId: UUID? = null,
     sealMark: String? = "SEAL1",
@@ -216,6 +248,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     containerCode: NomisContainerCode = NomisContainerCode.BULK,
     proposedDisposalDate: LocalDate? = null,
     expiryDate: LocalDate? = null,
+    active: Boolean = true,
   ) = SyncPropertyContainerRequest(
     nomisPropertyContainerId = 123,
     dpsId = dpsId,
@@ -230,6 +263,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     createUsername = "QWILLIS",
     modifyDateTime = LocalDateTime.parse("2026-02-01T09:00:00"),
     modifyUsername = "QWILLIS",
+    active = active,
   )
 
   private companion object {

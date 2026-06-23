@@ -54,6 +54,7 @@ class SyncPropertyContainerService(
       createdByUserId = request.createUsername,
       createDateTime = request.createDateTime,
       proposedDisposalDate = request.proposedDisposalDate,
+      archived = !request.active,
     )
     if (request.expiryDate != null) {
       container.removalOutcome = RemovalOutcome.DISPOSED
@@ -151,6 +152,11 @@ class SyncPropertyContainerService(
         existing.removalDate = null
       }
       changed += "disposedDate"
+    }
+
+    if (!request.active != existing.archived) {
+      existing.archived = !request.active
+      changed += "archived"
     }
 
     var event: HmppsDomainEvent? = null

@@ -12,10 +12,10 @@ class PropertyContainerService(
 ) {
 
   @Transactional(readOnly = true)
-  fun getByPrisonerNumber(prisonerNumber: String): List<PropertyContainerDto> = repository.findByPrisonerNumber(prisonerNumber).map(PropertyContainerDto::from)
+  fun getByPrisonerNumber(prisonerNumber: String): List<PropertyContainerDto> = repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber).map(PropertyContainerDto::from)
 
   @Transactional(readOnly = true)
-  fun getByPrisonId(prisonId: String): List<PropertyContainerDto> = repository.findByPrisonId(prisonId).map(PropertyContainerDto::from)
+  fun getByPrisonId(prisonId: String): List<PropertyContainerDto> = repository.findByPrisonIdAndArchivedFalse(prisonId).map(PropertyContainerDto::from)
 
   @Transactional(readOnly = true)
   fun getById(id: UUID): PropertyContainerDto = repository.findById(id)
