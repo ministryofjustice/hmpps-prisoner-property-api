@@ -30,6 +30,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerReque
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.CombineResult
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.CreateResult
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerWriteService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.WriteResult
@@ -58,6 +59,12 @@ class PropertyContainerResource(
 
   /** Publishes all the combine domain events after the service transaction has committed. */
   private fun CombineResult.publishAllAfterCommit(): PropertyContainerDto {
+    events.forEach(domainEventPublisher::publish)
+    return container
+  }
+
+  /** Publishes all the create domain events (the new container, plus any reconciled transfer-in source) after commit. */
+  private fun CreateResult.publishAllAfterCommit(): PropertyContainerDto {
     events.forEach(domainEventPublisher::publish)
     return container
   }
@@ -120,15 +127,18 @@ class PropertyContainerResource(
   @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
   @Operation(
     summary = "Create a new property container",
-    description = "Requires role ROLE_PRISONER_PROPERTY__RW.",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RW. If `previousSealNumber` matches a container the " +
+      "prisoner has due for transfer out at another prison, that container is reconciled as the property " +
+      "arriving here on transfer: it is linked to the new record and deactivated (transferred).",
     responses = [
       ApiResponse(responseCode = "201", description = "Property container created"),
       ApiResponse(responseCode = "400", description = "Invalid request", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RW role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "409", description = "The seal number is already in use by another active container", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )
-  fun create(@Valid @RequestBody request: CreatePropertyContainerRequest): PropertyContainerDto = propertyContainerWriteService.create(request, currentUsername()).publishAfterCommit()
+  fun create(@Valid @RequestBody request: CreatePropertyContainerRequest): PropertyContainerDto = propertyContainerWriteService.create(request, currentUsername()).publishAllAfterCommit()
 
   @PutMapping("/{id}")
   @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")

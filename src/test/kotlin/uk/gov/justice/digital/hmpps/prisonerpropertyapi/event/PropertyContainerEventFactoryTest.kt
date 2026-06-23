@@ -30,8 +30,8 @@ class PropertyContainerEventFactoryTest {
   }
 
   @Test
-  fun `staffEvent omits the NOMIS id and uses the staff description`() {
-    val event = PropertyContainerEventFactory.staffEvent(
+  fun `changeEvent omits the NOMIS id and uses the DPS change description`() {
+    val event = PropertyContainerEventFactory.changeEvent(
       PropertyDomainEventType.CONTAINER_CREATED,
       dpsId,
       prisonerNumber = "A1234BC",
@@ -39,7 +39,7 @@ class PropertyContainerEventFactoryTest {
     )
 
     assertThat(event.eventType).isEqualTo("prison-property.container.created")
-    assertThat(event.description).isEqualTo("A prisoner property container was changed by a member of staff")
+    assertThat(event.description).isEqualTo("A prisoner property container was changed in DPS")
     assertThat(event.prisonerNumber).isEqualTo("A1234BC")
     assertThat(event.additionalInformation).containsExactly(
       entry("dpsId", dpsId.toString()),
