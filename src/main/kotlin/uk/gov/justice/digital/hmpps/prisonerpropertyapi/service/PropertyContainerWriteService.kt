@@ -45,7 +45,7 @@ class PropertyContainerWriteService(
   @Transactional
   fun create(request: CreatePropertyContainerRequest, username: String): CreateResult {
     val source = request.previousSealNumber?.let { previousSeal ->
-      repository.findByPrisonerNumber(request.prisonerNumber).firstOrNull {
+      repository.findByPrisonerNumberAndArchivedFalse(request.prisonerNumber).firstOrNull {
         !it.isRemoved() &&
           it.prisonId != request.prisonId &&
           it.currentSealNumber == previousSeal &&
@@ -293,7 +293,7 @@ class PropertyContainerWriteService(
   @Transactional
   fun prisonerReceived(prisonerNumber: String, newPrisonId: String): List<HmppsDomainEvent> {
     val now = LocalDateTime.now()
-    return repository.findByPrisonerNumber(prisonerNumber)
+    return repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber)
       .filter { !it.isRemoved() && it.prisonId != newPrisonId && !it.isAlreadyDueForTransferOut(newPrisonId) }
       .map { container ->
         container.events.add(
