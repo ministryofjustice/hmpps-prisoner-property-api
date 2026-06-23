@@ -90,7 +90,7 @@ class PropertyContainerWriteService(
 
     val saved = repository.save(container)
     val events = mutableListOf(
-      PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, request.prisonerNumber, changedFields = null),
+      PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, request.prisonerNumber, changedFields = null),
     )
 
     source?.let {
@@ -99,8 +99,7 @@ class PropertyContainerWriteService(
       )
       it.removalOutcome = RemovalOutcome.TRANSFERRED
       it.removalDate = LocalDate.now()
-      repository.save(it)
-      events += PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, it.id!!, it.prisonerNumber, listOf("removalOutcome"))
+      events += PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, it.id!!, it.prisonerNumber, listOf("removalOutcome"))
     }
 
     return CreateResult(PropertyContainerDto.from(saved), events)
@@ -154,8 +153,7 @@ class PropertyContainerWriteService(
 
     var event: HmppsDomainEvent? = null
     if (changed.isNotEmpty()) {
-      repository.save(container)
-      event = PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, changed)
+      event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, changed)
     }
     return WriteResult(PropertyContainerDto.from(container), event)
   }
@@ -238,7 +236,7 @@ class PropertyContainerWriteService(
     val saved = repository.save(combined)
 
     val events = mutableListOf(
-      PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, prisonerNumber, changedFields = null),
+      PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, prisonerNumber, changedFields = null),
     )
     sources.forEach { source ->
       source.events.add(
@@ -246,8 +244,7 @@ class PropertyContainerWriteService(
       )
       source.removalOutcome = RemovalOutcome.COMBINED
       source.removalDate = today
-      repository.save(source)
-      events += PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, source.id!!, source.prisonerNumber, listOf("removalOutcome"))
+      events += PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, source.id!!, source.prisonerNumber, listOf("removalOutcome"))
     }
 
     return CombineResult(PropertyContainerDto.from(saved), events)
@@ -280,8 +277,7 @@ class PropertyContainerWriteService(
         toStorageLocationType = request.locationType,
       ),
     )
-    repository.save(container)
-    val event = PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, listOf("location"))
+    val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, listOf("location"))
     return WriteResult(PropertyContainerDto.from(container), event)
   }
 
@@ -310,8 +306,7 @@ class PropertyContainerWriteService(
             toPrisonId = newPrisonId,
           ),
         )
-        repository.save(container)
-        PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, listOf("currentStatus"))
+        PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, listOf("currentStatus"))
       }
   }
 
@@ -327,8 +322,7 @@ class PropertyContainerWriteService(
   private fun PropertyContainer.removeWith(outcome: RemovalOutcome, date: LocalDate): WriteResult {
     removalOutcome = outcome
     removalDate = date
-    repository.save(this)
-    val event = PropertyContainerEventFactory.staffEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, listOf("removalOutcome"))
+    val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, listOf("removalOutcome"))
     return WriteResult(PropertyContainerDto.from(this), event)
   }
 

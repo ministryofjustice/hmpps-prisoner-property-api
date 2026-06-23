@@ -136,8 +136,9 @@ class PropertyContainerWriteServiceTest {
     // the new container is created at the receiving prison and linked back to the source
     assertThat(result.container.prisonId).isEqualTo("MDI")
     assertThat(result.container.currentSealNumber).isEqualTo("NEWSEAL")
+    // only the new container is persisted explicitly; the source's changes flush via dirty checking
     val captor = argumentCaptor<PropertyContainer>()
-    verify(repository, times(2)).save(captor.capture())
+    verify(repository).save(captor.capture())
     val newContainer = captor.allValues.first { it.prisonId == "MDI" }
     assertThat(newContainer.events.single { it.eventType == PropertyEventType.CREATED_SEALED }.relatedContainerId).isEqualTo(source.id)
 
@@ -457,7 +458,6 @@ class PropertyContainerWriteServiceTest {
 
     assertThat(events).singleElement().extracting { it.eventType }.isEqualTo("prison-property.container.updated")
     assertThat(events.single().prisonerNumber).isEqualTo("A1234BC")
-    verify(repository).save(atSendingPrison)
   }
 
   @Test
