@@ -45,6 +45,11 @@ generic-service:
   namespace_secrets:
     hmpps-prisoner-property-api-application-insights:
       APPLICATIONINSIGHTS_CONNECTION_STRING: "APPLICATIONINSIGHTS_CONNECTION_STRING"
+    # HMPPS Auth system client (client_credentials) for calling prisoner-search and
+    # locations-inside-prison. Secret provisioned in cloud-platform-environments.
+    hmpps-prisoner-property-api-client-creds:
+      SYSTEM_CLIENT_ID: "API_CLIENT_ID"
+      SYSTEM_CLIENT_SECRET: "API_CLIENT_SECRET"
     # Postgres RDS (prisoner-property-rds.tf)
     prisoner-property-rds-instance-output:
       DATABASE_ENDPOINT: "rds_instance_endpoint"
