@@ -49,6 +49,12 @@ spring:
           jwk-set-uri: ${hmpps-auth.url}/.well-known/jwks.json
 
       client:
+        registration:
+          prisoner-property-api:
+            provider: hmpps-auth
+            client-id: ${system.client.id}
+            client-secret: ${system.client.secret}
+            authorization-grant-type: client_credentials
         provider:
           hmpps-auth:
             token-uri: ${hmpps-auth.url}/oauth/token
@@ -98,6 +104,15 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+api:
+  base:
+    url:
+      prisoner-search: ${PRISONER_SEARCH_URL}
+      prison-register: ${PRISON_REGISTER_URL}
+      locations-inside-prison: ${LOCATIONS_INSIDE_PRISON_URL}
+  health-timeout: 2s
+  timeout: 20s
 
 hmpps.sqs:
   queueAdminRole: ROLE_PRISONER_PROPERTY_QUEUE_ADMIN
