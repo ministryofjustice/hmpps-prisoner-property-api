@@ -1,6 +1,18 @@
 hmpps-auth:
   url: "http://localhost:8090/auth"
 
+api:
+  base:
+    url:
+      prisoner-search: "http://localhost:8083"
+      prison-register: "http://localhost:8084"
+      locations-inside-prison: "http://localhost:8085"
+
+system:
+  client:
+    id: ${SYSTEM_CLIENT_ID:clientid}
+    secret: ${SYSTEM_CLIENT_SECRET:clientsecret}
+
 spring:
   datasource:
     url: 'jdbc:postgresql://localhost:5432/prisoner_property'

@@ -10,3 +10,12 @@ import uk.gov.justice.hmpps.kotlin.health.HealthPingCheck
 // HMPPS Auth health ping is required if your service calls HMPPS Auth to get a token to call other services
 @Component("hmppsAuth")
 class HmppsAuthHealthPing(@Qualifier("hmppsAuthHealthWebClient") webClient: WebClient) : HealthPingCheck(webClient)
+
+@Component("prisonerSearchApi")
+class PrisonerSearchApiHealthPing(@Qualifier("prisonerSearchHealthWebClient") webClient: WebClient) : HealthPingCheck(webClient)
+
+@Component("prisonRegisterApi")
+class PrisonRegisterApiHealthPing(@Qualifier("prisonRegisterWebClient") webClient: WebClient) : HealthPingCheck(webClient)
+
+@Component("locationsInsidePrisonApi")
+class LocationsInsidePrisonApiHealthPing(@Qualifier("locationsHealthWebClient") webClient: WebClient) : HealthPingCheck(webClient)

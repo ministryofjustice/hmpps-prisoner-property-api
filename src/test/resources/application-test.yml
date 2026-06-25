@@ -8,6 +8,18 @@ management.endpoint:
 hmpps-auth:
   url: "http://localhost:8090/auth"
 
+api:
+  base:
+    url:
+      prisoner-search: "http://localhost:8091"
+      prison-register: "http://localhost:8092"
+      locations-inside-prison: "http://localhost:8093"
+
+system:
+  client:
+    id: clientid
+    secret: clientsecret
+
 spring:
   datasource:
     url: 'jdbc:postgresql://localhost:5432/prisoner_property'
