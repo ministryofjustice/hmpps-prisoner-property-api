@@ -172,6 +172,20 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `rejects creating a container in a location that is not a property box`() {
+    val nonBoxLocation = UUID.fromString("88888888-8888-8888-8888-888888888888")
+    locations.stubGetLocation(nonBoxLocation.toString(), locationType = "STORE")
+
+    webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(createRequest().copy(internalLocationId = nonBoxLocation))
+      .exchange()
+      .expectStatus().isBadRequest
+      .expectBody()
+      .jsonPath("$.userMessage").isEqualTo("Internal location is not a property box: $nonBoxLocation")
+  }
+
+  @Test
   fun `rejects moving a container to an internal location that does not exist`() {
     val id = repository.save(seedContainer()).id!!
     val unknownLocation = UUID.fromString("99999999-9999-9999-9999-999999999999")

@@ -43,7 +43,7 @@ class PropertyContainerWriteServiceTest {
   fun stubLocationsResolveByDefault() {
     whenever(locationsClient.getLocation(any())).thenAnswer { invocation ->
       val id = invocation.arguments[0] as UUID
-      LocationDetail(id = id, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Reception Property Store")
+      LocationDetail(id = id, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Reception Property Store", locationType = "BOX")
     }
   }
 
@@ -143,6 +143,18 @@ class PropertyContainerWriteServiceTest {
 
     assertThatThrownBy { service.create(createRequest(), "A_USER") }
       .isInstanceOf(InvalidLocationException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `create rejects an internal location that is not a property box`() {
+    whenever(locationsClient.getLocation(LOCATION)).thenReturn(
+      LocationDetail(id = LOCATION, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Reception Store", locationType = "STORE"),
+    )
+
+    assertThatThrownBy { service.create(createRequest(), "A_USER") }
+      .isInstanceOf(InvalidLocationException::class.java)
+      .hasMessageContaining("is not a property box")
     verify(repository, never()).save(any())
   }
 

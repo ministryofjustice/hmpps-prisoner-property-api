@@ -12,7 +12,7 @@ import java.util.UUID
 
 /**
  * Calls locations-inside-prison-api to resolve a property's internal location id - used to validate
- * that a location UUID exists and to return its name rather than the raw UUID.
+ * that a location is a known non-residential location and to return its name rather than the raw UUID.
  */
 @Component
 class LocationsClient(
@@ -24,14 +24,15 @@ class LocationsClient(
   }
 
   /**
-   * Look up a location by its id. Returns null if not found.
+   * Look up a non-residential location by its id. Returns null if it is not a known non-residential
+   * location (the endpoint returns 404 for unknown or residential ids).
    */
   fun getLocation(id: UUID): LocationDetail? {
-    log.debug("Looking up location {}", id)
+    log.debug("Looking up non-residential location {}", id)
     try {
       return locationsWebClient
         .get()
-        .uri("/locations/{id}", id)
+        .uri("/locations/non-residential/{id}", id)
         .retrieve()
         .bodyToMono<LocationDetail>()
         .block()
@@ -54,4 +55,7 @@ data class LocationDetail(
 ) {
   /** A human-friendly location name, preferring the local name and falling back to the path hierarchy. */
   fun displayName(): String = localName ?: pathHierarchy
+
+  /** Whether this location is a property box - the only location type property may be stored in. */
+  fun isBox(): Boolean = locationType == "BOX"
 }

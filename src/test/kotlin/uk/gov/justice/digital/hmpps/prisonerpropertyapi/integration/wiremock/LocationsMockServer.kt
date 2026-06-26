@@ -47,9 +47,9 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
     )
   }
 
-  fun stubGetLocation(id: String) {
+  fun stubGetLocation(id: String, locationType: String = "BOX") {
     stubFor(
-      get(urlPathEqualTo("/locations/$id")).willReturn(
+      get(urlPathEqualTo("/locations/non-residential/$id")).willReturn(
         aResponse()
           .withHeader("Content-Type", "application/json")
           .withStatus(200)
@@ -61,7 +61,7 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
                 "code": "PROP",
                 "pathHierarchy": "RECP-PROP",
                 "localName": "Reception Property Store",
-                "locationType": "STORE"
+                "locationType": "$locationType"
               }
             """.trimIndent(),
           ),
@@ -71,7 +71,7 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
 
   fun stubGetLocationNotFound(id: String) {
     stubFor(
-      get(urlPathEqualTo("/locations/$id")).willReturn(
+      get(urlPathEqualTo("/locations/non-residential/$id")).willReturn(
         aResponse()
           .withHeader("Content-Type", "application/json")
           .withStatus(404)

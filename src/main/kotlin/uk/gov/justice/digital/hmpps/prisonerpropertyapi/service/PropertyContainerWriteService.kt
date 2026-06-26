@@ -36,10 +36,16 @@ class PropertyContainerWriteService(
   private val locationsClient: LocationsClient,
 ) {
 
-  /** Reject an internal location that does not exist in locations-inside-prison-api (raises a 400). */
+  /**
+   * Reject an internal location that is not a known non-residential location, or that is not a property
+   * box - property may only be stored in a BOX location (raises a 400).
+   */
   private fun requireValidLocation(internalLocationId: UUID?) {
-    if (internalLocationId != null && locationsClient.getLocation(internalLocationId) == null) {
-      throw InvalidLocationException(internalLocationId)
+    if (internalLocationId == null) return
+    val location = locationsClient.getLocation(internalLocationId)
+      ?: throw InvalidLocationException(internalLocationId, "not found")
+    if (!location.isBox()) {
+      throw InvalidLocationException(internalLocationId, "is not a property box")
     }
   }
 
