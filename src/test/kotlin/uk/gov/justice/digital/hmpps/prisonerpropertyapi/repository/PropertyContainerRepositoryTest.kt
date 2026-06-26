@@ -142,6 +142,24 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
       .singleElement().extracting { it.currentSealNumber }.isEqualTo("SEAL-Z")
   }
 
+  @Test
+  fun `countContainersByLocation counts only containers physically present in an internal box`() {
+    saveActive("A0001AA", "S1", location = LOCATION_A)
+    saveActive("B0002BB", "S2", location = LOCATION_A)
+    saveActive("C0003CC", "S3", location = LOCATION_B)
+    saveActive("D0004DD", "S4", branston = true) // offsite - no internal location, not counted
+    saveActive("E0005EE", "S5", location = LOCATION_A).apply {
+      removalOutcome = RemovalOutcome.DISPOSED
+      removalDate = LocalDate.parse("2026-02-01")
+      refreshDerivedState() // removed - location cleared, not counted
+      containerRepository.save(this)
+    }
+
+    val counts = containerRepository.countContainersByLocation("LEI").associate { it.locationId to it.count }
+
+    assertThat(counts).containsExactlyInAnyOrderEntriesOf(mapOf(LOCATION_A to 2L, LOCATION_B to 1L))
+  }
+
   private fun saveActive(
     prisonerNumber: String,
     seal: String,

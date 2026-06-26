@@ -2,6 +2,8 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain
 
 import org.springframework.data.jpa.repository.EntityGraph
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
 import java.util.Optional
 import java.util.UUID
 
@@ -15,11 +17,31 @@ interface PropertyContainerRepository :
 
   // List reads exclude archived containers - they are only returned when fetched explicitly by id.
   fun findByPrisonerNumberAndArchivedFalse(prisonerNumber: String): List<PropertyContainer>
+
   fun findByPrisonIdAndArchivedFalse(prisonId: String): List<PropertyContainer>
+
+  /**
+   * How many containers are currently held in each internal location of a prison, read straight from the
+   * denormalised current_internal_location_id (null once a container is removed or held offsite), so only
+   * containers physically present in an internal box are counted - no events are loaded.
+   */
+  @Query(
+    "select c.currentInternalLocationId as locationId, count(c) as count " +
+      "from PropertyContainer c " +
+      "where c.prisonId = :prisonId and c.archived = false and c.currentInternalLocationId is not null " +
+      "group by c.currentInternalLocationId",
+  )
+  fun countContainersByLocation(@Param("prisonId") prisonId: String): List<LocationContainerCount>
 
   /** Whether any active (not removed) container already holds this seal number - used to enforce staff seal uniqueness. */
   fun existsByCurrentSealNumberAndRemovalOutcomeIsNull(currentSealNumber: String): Boolean
 
   /** As above, excluding a given container (so a container amending its own seal does not clash with itself). */
   fun existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot(currentSealNumber: String, id: UUID): Boolean
+}
+
+/** Projection for [PropertyContainerRepository.countContainersByLocation]: a location id and its container count. */
+interface LocationContainerCount {
+  val locationId: UUID
+  val count: Long
 }

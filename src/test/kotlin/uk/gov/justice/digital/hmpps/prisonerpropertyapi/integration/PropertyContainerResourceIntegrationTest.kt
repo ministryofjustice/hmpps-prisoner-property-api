@@ -4,6 +4,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.cache.CacheManager
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
@@ -21,10 +22,16 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   @Autowired
   private lateinit var repository: PropertyContainerRepository
 
+  @Autowired
+  private lateinit var cacheManager: CacheManager
+
   private lateinit var containerId: UUID
 
   @BeforeEach
   fun setUp() {
+    // getLocationsByType is @Cacheable and several tests here stub it with different boxes for the same
+    // prison - clear so each resolves against its own stub rather than a prior test's cached result.
+    cacheManager.cacheNames.forEach { cacheManager.getCache(it)?.clear() }
     containerId = repository.save(seedContainer()).id!!
   }
 
@@ -131,14 +138,14 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `filters the prison list by storage location code resolved against locations-inside-prison`() {
+  fun `filters the prison list by a storage location code or local name resolved against locations-inside-prison`() {
     hmppsAuth.stubGrantToken()
     prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
     prisonRegister.stubGetPrisons()
     locations.stubPostLocationsBatch(LOCATION_B.toString())
-    locations.stubGetNonResidentialLocations("LEI", "PB5638" to LOCATION_B.toString())
+    locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PB5638", "Reception Property Store")))
 
-    // matching code returns the container held in that location
+    // matching by code returns the container held in that location
     webTestClient.get().uri("/property-containers/prison/LEI?storageLocation=PB5638")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
@@ -147,7 +154,16 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.totalElements").isEqualTo(1)
       .jsonPath("$.content[0].containers[0].currentLocation").isEqualTo(LOCATION_B.toString())
 
-    // a code that resolves to no location returns nothing
+    // matching by local name resolves to the same box
+    webTestClient.get().uri("/property-containers/prison/LEI?storageLocation=Reception Property Store")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentLocation").isEqualTo(LOCATION_B.toString())
+
+    // a term that resolves to no location returns nothing
     webTestClient.get().uri("/property-containers/prison/LEI?storageLocation=UNKNOWN")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
@@ -206,6 +222,71 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .expectStatus().isBadRequest
   }
 
+  @Test
+  fun `returns the prison's box locations with container counts, alphabetically by default`() {
+    // the seeded container's current location is LOCATION_B
+    hmppsAuth.stubGrantToken()
+    locations.stubGetBoxLocations(
+      "LEI",
+      listOf(
+        Triple(LOCATION_B.toString(), "PROP2", "Box Two"),
+        Triple(LOCATION_A.toString(), "PROP1", "Box One"),
+        Triple(EMPTY_BOX.toString(), "PROP3", "Box Three"),
+      ),
+    )
+
+    webTestClient.get().uri("/property-containers/prison/LEI/box-locations")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.length()").isEqualTo(3)
+      .jsonPath("$[0].name").isEqualTo("Box One")
+      .jsonPath("$[0].containerCount").isEqualTo(0)
+      .jsonPath("$[1].name").isEqualTo("Box Three")
+      .jsonPath("$[1].containerCount").isEqualTo(0)
+      .jsonPath("$[2].name").isEqualTo("Box Two")
+      .jsonPath("$[2].containerCount").isEqualTo(1)
+  }
+
+  @Test
+  fun `returns the prison's box locations emptiest first when sorted by container count`() {
+    hmppsAuth.stubGrantToken()
+    locations.stubGetBoxLocations(
+      "LEI",
+      listOf(
+        Triple(LOCATION_B.toString(), "PROP2", "Box Two"),
+        Triple(EMPTY_BOX.toString(), "PROP3", "Box Three"),
+      ),
+    )
+
+    webTestClient.get().uri("/property-containers/prison/LEI/box-locations?sort=FEWEST_CONTAINERS")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$[0].name").isEqualTo("Box Three")
+      .jsonPath("$[0].containerCount").isEqualTo(0)
+      .jsonPath("$[1].name").isEqualTo("Box Two")
+      .jsonPath("$[1].containerCount").isEqualTo(1)
+  }
+
+  @Test
+  fun `box locations returns forbidden without the read role`() {
+    webTestClient.get().uri("/property-containers/prison/LEI/box-locations")
+      .headers(setAuthorisation(roles = listOf("ROLE_WRONG")))
+      .exchange()
+      .expectStatus().isForbidden
+  }
+
+  @Test
+  fun `box locations returns bad request for an invalid prison id`() {
+    webTestClient.get().uri("/property-containers/prison/ZZZ/box-locations")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
   private fun seedContainer(): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
@@ -231,5 +312,6 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     private val baseTime: LocalDateTime = LocalDateTime.parse("2026-01-01T09:00:00")
     private val LOCATION_A: UUID = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val LOCATION_B: UUID = UUID.fromString("22222222-2222-2222-2222-222222222222")
+    private val EMPTY_BOX: UUID = UUID.fromString("33333333-3333-3333-3333-333333333333")
   }
 }

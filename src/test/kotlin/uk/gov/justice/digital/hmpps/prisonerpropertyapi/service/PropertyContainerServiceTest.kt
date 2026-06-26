@@ -9,6 +9,7 @@ import org.mockito.kotlin.check
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
+import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import org.springframework.data.domain.PageImpl
@@ -165,18 +166,23 @@ class PropertyContainerServiceTest {
   }
 
   @Test
-  fun `getPrisonProperty resolves a storage-location code to location ids before querying`() {
-    whenever(locationsClient.getNonResidentialLocations("LEI")).thenReturn(
+  fun `getPrisonProperty resolves a storage-location term to box location ids by code, local name or path hierarchy`() {
+    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
       listOf(
-        LocationDetail(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638"),
-        LocationDetail(id = LOCATION_B, prisonId = "LEI", code = "PB0200", pathHierarchy = "PROP-PB0200"),
+        LocationDetail(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638", localName = "Reception Box A"),
+        LocationDetail(id = LOCATION_B, prisonId = "LEI", code = "PB0200", pathHierarchy = "PROP-PB0200", localName = "Reception Box B"),
       ),
     )
     whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
 
+    // by code (case-insensitive)
     service.getPrisonProperty("LEI", storageLocation = "pb5638", pageable = PAGE)
+    // by local name
+    service.getPrisonProperty("LEI", storageLocation = "Reception Box A", pageable = PAGE)
+    // by path hierarchy
+    service.getPrisonProperty("LEI", storageLocation = "PROP-PB5638", pageable = PAGE)
 
-    verify(repository).findPrisonerNumbersPage(
+    verify(repository, times(3)).findPrisonerNumbersPage(
       eq("LEI"),
       check<PrisonPropertyFilter> {
         assertThat(it.locationIds).containsExactly(LOCATION_A)
@@ -200,7 +206,7 @@ class PropertyContainerServiceTest {
       },
       any(),
     )
-    verify(locationsClient, never()).getNonResidentialLocations(any())
+    verify(locationsClient, never()).getLocationsByType(any(), any())
   }
 
   @Test

@@ -80,8 +80,12 @@ class PropertyContainerService(
   ): Page<PrisonerPropertyGroupDto> {
     val branstonOnly = storageLocation.equals(BRANSTON_SEARCH_TERM, ignoreCase = true)
     val locationIds = if (storageLocation != null && !branstonOnly) {
-      locationsClient.getNonResidentialLocations(prisonId)
-        .filter { it.code.equals(storageLocation, ignoreCase = true) }
+      locationsClient.getLocationsByType(prisonId, BOX_LOCATION_TYPE)
+        .filter {
+          it.code.equals(storageLocation, ignoreCase = true) ||
+            it.localName.equals(storageLocation, ignoreCase = true) ||
+            it.pathHierarchy.equals(storageLocation, ignoreCase = true)
+        }
         .map { it.id }
     } else {
       null
@@ -132,5 +136,8 @@ class PropertyContainerService(
   private companion object {
     /** The storage-location search term that means "held offsite at Branston" rather than an internal code. */
     const val BRANSTON_SEARCH_TERM = "BRANSTON"
+
+    /** The locations-inside-prison location type property is stored in - the only type the search resolves against. */
+    const val BOX_LOCATION_TYPE = "BOX"
   }
 }
