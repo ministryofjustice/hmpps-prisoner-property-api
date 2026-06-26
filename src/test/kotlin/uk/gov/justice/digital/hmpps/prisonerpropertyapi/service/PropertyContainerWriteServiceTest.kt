@@ -3,6 +3,7 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 import jakarta.validation.ValidationException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
@@ -11,6 +12,8 @@ import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationDetail
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
@@ -33,7 +36,16 @@ import java.util.UUID
 class PropertyContainerWriteServiceTest {
 
   private val repository = mock<PropertyContainerRepository>()
-  private val service = PropertyContainerWriteService(repository)
+  private val locationsClient = mock<LocationsClient>()
+  private val service = PropertyContainerWriteService(repository, locationsClient)
+
+  @BeforeEach
+  fun stubLocationsResolveByDefault() {
+    whenever(locationsClient.getLocation(any())).thenAnswer { invocation ->
+      val id = invocation.arguments[0] as UUID
+      LocationDetail(id = id, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Reception Property Store")
+    }
+  }
 
   @Test
   fun `create persists a sealed container with the authenticated user and returns a created event`() {
@@ -122,6 +134,50 @@ class PropertyContainerWriteServiceTest {
 
     assertThatThrownBy { service.create(createRequest(), "A_USER") }
       .isInstanceOf(DuplicateSealNumberException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `create rejects an internal location that does not exist`() {
+    whenever(locationsClient.getLocation(LOCATION)).thenReturn(null)
+
+    assertThatThrownBy { service.create(createRequest(), "A_USER") }
+      .isInstanceOf(InvalidLocationException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `update rejects an internal location that does not exist`() {
+    val existing = existingContainer()
+    val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(locationsClient.getLocation(newLocation)).thenReturn(null)
+
+    assertThatThrownBy { service.update(existing.id!!, updateRequest(internalLocationId = newLocation), "A_USER") }
+      .isInstanceOf(InvalidLocationException::class.java)
+  }
+
+  @Test
+  fun `move rejects an internal location that does not exist`() {
+    val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
+    whenever(locationsClient.getLocation(newLocation)).thenReturn(null)
+
+    assertThatThrownBy { service.move(UUID.randomUUID(), MoveContainerRequest(StorageLocationType.INTERNAL, internalLocationId = newLocation), "A_USER") }
+      .isInstanceOf(InvalidLocationException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `combine rejects an internal location that does not exist`() {
+    val a = sourceContainer("A1234BC", "SEALA")
+    val b = sourceContainer("A1234BC", "SEALB")
+    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findById(b.id!!)).thenReturn(Optional.of(b))
+    whenever(locationsClient.getLocation(LOCATION)).thenReturn(null)
+
+    assertThatThrownBy {
+      service.combine(CombineContainersRequest(listOf(a.id!!, b.id!!), ContainerType.STANDARD, "NEWSEAL", internalLocationId = LOCATION), "A_USER")
+    }.isInstanceOf(InvalidLocationException::class.java)
     verify(repository, never()).save(any())
   }
 
