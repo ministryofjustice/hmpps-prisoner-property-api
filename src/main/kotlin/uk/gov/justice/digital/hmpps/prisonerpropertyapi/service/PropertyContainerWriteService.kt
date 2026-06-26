@@ -3,6 +3,7 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 import jakarta.validation.ValidationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
@@ -32,7 +33,21 @@ import java.util.UUID
 @Service
 class PropertyContainerWriteService(
   private val repository: PropertyContainerRepository,
+  private val locationsClient: LocationsClient,
 ) {
+
+  /**
+   * Reject an internal location that is not a known non-residential location, or that is not a property
+   * box - property may only be stored in a BOX location (raises a 400).
+   */
+  private fun requireValidLocation(internalLocationId: UUID?) {
+    if (internalLocationId == null) return
+    val location = locationsClient.getLocation(internalLocationId)
+      ?: throw InvalidLocationException(internalLocationId, "not found")
+    if (!location.isBox()) {
+      throw InvalidLocationException(internalLocationId, "is not a property box")
+    }
+  }
 
   /**
    * Create a new sealed container. When [CreatePropertyContainerRequest.previousSealNumber] is supplied and
@@ -44,6 +59,8 @@ class PropertyContainerWriteService(
    */
   @Transactional
   fun create(request: CreatePropertyContainerRequest, username: String): CreateResult {
+    requireValidLocation(request.internalLocationId)
+
     val source = request.previousSealNumber?.let { previousSeal ->
       repository.findByPrisonerNumberAndArchivedFalse(request.prisonerNumber).firstOrNull {
         !it.isRemoved() &&
@@ -107,6 +124,8 @@ class PropertyContainerWriteService(
 
   @Transactional
   fun update(id: UUID, request: UpdatePropertyContainerRequest, username: String): WriteResult {
+    requireValidLocation(request.internalLocationId)
+
     val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
     val now = LocalDateTime.now()
     val changed = mutableListOf<String>()
@@ -212,6 +231,7 @@ class PropertyContainerWriteService(
     val today = LocalDate.now()
     val locationType = request.locationType ?: request.internalLocationId?.let { StorageLocationType.INTERNAL }
     val internalLocationId = if (locationType == StorageLocationType.INTERNAL) request.internalLocationId else null
+    requireValidLocation(internalLocationId)
 
     val combined = PropertyContainer(
       prisonerNumber = prisonerNumber,
@@ -259,8 +279,10 @@ class PropertyContainerWriteService(
     if (request.locationType == StorageLocationType.BRANSTON && request.internalLocationId != null) {
       throw ValidationException("internalLocationId must not be set for a Branston move")
     }
-    val container = loadActive(id)
     val targetId = if (request.locationType == StorageLocationType.INTERNAL) request.internalLocationId else null
+    requireValidLocation(targetId)
+
+    val container = loadActive(id)
 
     if (request.locationType == container.currentLocationType() && targetId == container.currentLocation()) {
       return WriteResult(PropertyContainerDto.from(container), null)

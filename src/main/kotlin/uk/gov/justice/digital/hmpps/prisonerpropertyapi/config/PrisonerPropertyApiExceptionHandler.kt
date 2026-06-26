@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.servlet.resource.NoResourceFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.ContainerAlreadyRemovedException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicateSealNumberException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.InvalidLocationException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerNotFoundException
 import uk.gov.justice.hmpps.kotlin.common.ErrorResponse
 
@@ -42,6 +43,17 @@ class PrisonerPropertyApiExceptionHandler {
         developerMessage = e.message,
       ),
     ).also { log.info("Validation exception: {}", e.message) }
+
+  @ExceptionHandler(InvalidLocationException::class)
+  fun handleInvalidLocationException(e: InvalidLocationException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(BAD_REQUEST)
+    .body(
+      ErrorResponse(
+        status = BAD_REQUEST,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Invalid location: {}", e.message) }
 
   @ExceptionHandler(MethodArgumentNotValidException::class)
   fun handleMethodArgumentNotValidException(e: MethodArgumentNotValidException): ResponseEntity<ErrorResponse> = ResponseEntity

@@ -2,6 +2,7 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.check
@@ -26,6 +27,8 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerReque
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -37,6 +40,13 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
 
   @MockitoSpyBean
   private lateinit var domainEventPublisher: DomainEventPublisher
+
+  @BeforeEach
+  fun stubLocationLookups() {
+    hmppsAuth.stubGrantToken()
+    locations.stubGetLocation(LOCATION.toString())
+    locations.stubGetLocation("33333333-3333-3333-3333-333333333333")
+  }
 
   @AfterEach
   fun cleanUp() = repository.deleteAll()
@@ -145,6 +155,47 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .bodyValue(updateRequest())
       .exchange()
       .expectStatus().isNotFound
+  }
+
+  @Test
+  fun `rejects creating a container with an internal location that does not exist`() {
+    val unknownLocation = UUID.fromString("99999999-9999-9999-9999-999999999999")
+    locations.stubGetLocationNotFound(unknownLocation.toString())
+
+    webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(createRequest().copy(internalLocationId = unknownLocation))
+      .exchange()
+      .expectStatus().isBadRequest
+      .expectBody()
+      .jsonPath("$.userMessage").isEqualTo("Internal location not found: $unknownLocation")
+  }
+
+  @Test
+  fun `rejects creating a container in a location that is not a property box`() {
+    val nonBoxLocation = UUID.fromString("88888888-8888-8888-8888-888888888888")
+    locations.stubGetLocation(nonBoxLocation.toString(), locationType = "STORE")
+
+    webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(createRequest().copy(internalLocationId = nonBoxLocation))
+      .exchange()
+      .expectStatus().isBadRequest
+      .expectBody()
+      .jsonPath("$.userMessage").isEqualTo("Internal location is not a property box: $nonBoxLocation")
+  }
+
+  @Test
+  fun `rejects moving a container to an internal location that does not exist`() {
+    val id = repository.save(seedContainer()).id!!
+    val unknownLocation = UUID.fromString("99999999-9999-9999-9999-999999999999")
+    locations.stubGetLocationNotFound(unknownLocation.toString())
+
+    webTestClient.post().uri("/property-containers/{id}/move", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(MoveContainerRequest(locationType = StorageLocationType.INTERNAL, internalLocationId = unknownLocation))
+      .exchange()
+      .expectStatus().isBadRequest
   }
 
   @Test
