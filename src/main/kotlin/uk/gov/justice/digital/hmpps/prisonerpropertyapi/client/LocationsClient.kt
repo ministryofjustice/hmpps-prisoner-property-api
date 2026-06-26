@@ -42,6 +42,15 @@ class LocationsClient(
       throw ex
     }
   }
+
+  /**
+   * Resolve several locations at once, keyed by id. Ids are de-duplicated and any that are not found
+   * are simply absent from the result. Currently fans out to [getLocation] per distinct id; this can
+   * be swapped for a single batch call to locations-inside-prison-api later without changing callers.
+   */
+  fun getLocations(ids: Collection<UUID>): Map<UUID, LocationDetail> = ids.distinct()
+    .mapNotNull { getLocation(it) }
+    .associateBy { it.id }
 }
 
 data class LocationDetail(
