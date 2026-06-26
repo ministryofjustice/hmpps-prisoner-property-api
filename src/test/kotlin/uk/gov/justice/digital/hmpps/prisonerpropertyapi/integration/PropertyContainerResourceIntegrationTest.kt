@@ -9,6 +9,10 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonerSearchApiExtension.Companion.prisonerSearch
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -28,7 +32,12 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   fun cleanUp() = repository.deleteAll()
 
   @Test
-  fun `returns the property containers for a prisoner`() {
+  fun `returns the property containers for a prisoner enriched with names`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+
     webTestClient.get().uri("/property-containers/prisoner/A1234BC")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
@@ -37,9 +46,30 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.length()").isEqualTo(1)
       .jsonPath("$[0].id").isEqualTo(containerId.toString())
       .jsonPath("$[0].prisonerNumber").isEqualTo("A1234BC")
+      .jsonPath("$[0].prisonerName").isEqualTo("JOHN SMITH")
+      .jsonPath("$[0].prisonId").isEqualTo("LEI")
+      .jsonPath("$[0].prisonName").isEqualTo("Leeds (HMP)")
+      // the stubbed prisoner is at MDI, this container is held at LEI
+      .jsonPath("$[0].inPrisonersCurrentPrison").isEqualTo(false)
       .jsonPath("$[0].currentSealNumber").isEqualTo("SEAL002")
       .jsonPath("$[0].currentStatus").isEqualTo("STORED")
       .jsonPath("$[0].currentLocation").isEqualTo(LOCATION_B.toString())
+      .jsonPath("$[0].locationDescription").isEqualTo("Reception Property Store")
+  }
+
+  @Test
+  fun `filters the prisoner's containers by status`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC?status=DISPOSED")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.length()").isEqualTo(0)
   }
 
   @Test

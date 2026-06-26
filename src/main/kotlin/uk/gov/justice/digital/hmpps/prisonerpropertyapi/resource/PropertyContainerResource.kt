@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Pattern
+import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType.APPLICATION_JSON_VALUE
 import org.springframework.security.access.prepost.PreAuthorize
@@ -19,12 +20,15 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
@@ -72,7 +76,11 @@ class PropertyContainerResource(
   @GetMapping("/prisoner/{prisonerNumber}")
   @Operation(
     summary = "Get the property containers held for a prisoner",
-    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns an empty list if the prisoner has no property containers.",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns an empty list if the prisoner has no property " +
+      "containers. Each container is enriched with the prisoner name (prisoner-search), the name of the prison " +
+      "holding it (prison-register) and a description of its current location (locations-inside-prison-api), and " +
+      "flags whether it is held in the prisoner's current prison. Results can be filtered by status and sorted by " +
+      "when each container was last updated.",
     responses = [
       ApiResponse(responseCode = "200", description = "Property containers returned"),
       ApiResponse(responseCode = "400", description = "Invalid prisoner number", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
@@ -85,7 +93,13 @@ class PropertyContainerResource(
     @Pattern(regexp = "([a-zA-Z][0-9]{4}[a-zA-Z]{2})", message = "Prisoner number must be in the format A1234BC")
     @PathVariable
     prisonerNumber: String,
-  ): List<PropertyContainerDto> = propertyContainerService.getByPrisonerNumber(prisonerNumber)
+    @Parameter(description = "Only return containers with one of these statuses. Repeatable; omit for all statuses.", example = "STORED")
+    @RequestParam(required = false)
+    status: List<ContainerStatus>?,
+    @Parameter(description = "Sort direction by last-updated date.", example = "DESC")
+    @RequestParam(required = false, defaultValue = "DESC")
+    sortDirection: Sort.Direction,
+  ): List<PrisonerPropertyContainerDto> = propertyContainerService.getByPrisonerNumber(prisonerNumber, status ?: emptyList(), sortDirection)
 
   @GetMapping("/prison/{prisonId}")
   @Operation(

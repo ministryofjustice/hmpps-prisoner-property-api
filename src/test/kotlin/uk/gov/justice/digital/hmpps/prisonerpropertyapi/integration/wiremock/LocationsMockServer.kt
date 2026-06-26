@@ -3,6 +3,7 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.client.WireMock.aResponse
 import com.github.tomakehurst.wiremock.client.WireMock.get
+import com.github.tomakehurst.wiremock.client.WireMock.post
 import com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo
 import org.junit.jupiter.api.extension.AfterAllCallback
 import org.junit.jupiter.api.extension.BeforeAllCallback
@@ -76,6 +77,43 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
           .withHeader("Content-Type", "application/json")
           .withStatus(404)
           .withBody("""{"status":404,"userMessage":"Location $id not found"}"""),
+      ),
+    )
+  }
+
+  /** Stub the batch lookup, returning one non-residential location object per supplied id. */
+  fun stubPostLocationsBatch(vararg ids: String) {
+    val body = ids.joinToString(prefix = "[", postfix = "]") { id ->
+      """
+        {
+          "id": "$id",
+          "prisonId": "MDI",
+          "code": "PROP",
+          "pathHierarchy": "RECP-PROP",
+          "localName": "Reception Property Store",
+          "locationType": "STORE",
+          "status": "ACTIVE"
+        }
+      """.trimIndent()
+    }
+    stubFor(
+      post(urlPathEqualTo("/locations/non-residential/batch")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(200)
+          .withBody(body),
+      ),
+    )
+  }
+
+  /** Stub the batch lookup to fail, to exercise graceful degradation. */
+  fun stubPostLocationsBatchError(status: Int = 500) {
+    stubFor(
+      post(urlPathEqualTo("/locations/non-residential/batch")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(status)
+          .withBody("""{"status":$status,"userMessage":"error"}"""),
       ),
     )
   }
