@@ -36,7 +36,7 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     hmppsAuth.stubGrantToken()
     prisonerSearch.stubGetPrisoner("A1234BC")
     prisonRegister.stubGetPrisons()
-    locations.stubGetLocation(LOCATION_B.toString())
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
 
     webTestClient.get().uri("/property-containers/prisoner/A1234BC")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
@@ -62,7 +62,7 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     hmppsAuth.stubGrantToken()
     prisonerSearch.stubGetPrisoner("A1234BC")
     prisonRegister.stubGetPrisons()
-    locations.stubGetLocation(LOCATION_B.toString())
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
 
     webTestClient.get().uri("/property-containers/prisoner/A1234BC?status=DISPOSED")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))

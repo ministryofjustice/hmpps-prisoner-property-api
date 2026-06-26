@@ -44,13 +44,29 @@ class LocationsClient(
   }
 
   /**
-   * Resolve several locations at once, keyed by id. Ids are de-duplicated and any that are not found
-   * are simply absent from the result. Currently fans out to [getLocation] per distinct id; this can
-   * be swapped for a single batch call to locations-inside-prison-api later without changing callers.
+   * Resolve several non-residential locations at once, keyed by id, in a single call to
+   * locations-inside-prison-api. Ids are de-duplicated; ids that are not non-residential locations (or
+   * are unknown) are simply absent from the result. Degrades gracefully: if the batch call fails the
+   * caller gets an empty map (and so null location names) rather than a failed read.
    */
-  fun getLocations(ids: Collection<UUID>): Map<UUID, LocationDetail> = ids.distinct()
-    .mapNotNull { getLocation(it) }
-    .associateBy { it.id }
+  fun getLocations(ids: Collection<UUID>): Map<UUID, LocationDetail> {
+    val distinctIds = ids.distinct()
+    if (distinctIds.isEmpty()) return emptyMap()
+    return try {
+      locationsWebClient
+        .post()
+        .uri("/locations/non-residential/batch")
+        .bodyValue(distinctIds)
+        .retrieve()
+        .bodyToMono<List<LocationDetail>>()
+        .block()
+        ?.associateBy { it.id }
+        ?: emptyMap()
+    } catch (ex: WebClientResponseException) {
+      log.warn("Batch location lookup failed ({}), returning no location names", ex.statusCode)
+      emptyMap()
+    }
+  }
 }
 
 data class LocationDetail(
