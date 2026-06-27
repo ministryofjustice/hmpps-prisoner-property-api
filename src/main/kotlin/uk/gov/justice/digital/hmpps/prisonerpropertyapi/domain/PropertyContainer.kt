@@ -53,6 +53,22 @@ class PropertyContainer(
   var currentSealNumber: String? = null,
 
   /**
+   * Denormalised mirrors of the derived [currentStatus]/[currentLocation]/[currentLocationType], refreshed
+   * via [refreshDerivedState] on every write. They exist so the establishment-wide list can filter and
+   * paginate without loading each container's events; the derived methods remain authoritative.
+   */
+  @Enumerated(EnumType.STRING)
+  @Column(name = "current_status", nullable = false)
+  var currentStatusValue: ContainerStatus = ContainerStatus.STORED,
+
+  @Column(name = "current_internal_location_id")
+  var currentInternalLocationId: UUID? = null,
+
+  @Enumerated(EnumType.STRING)
+  @Column(name = "current_storage_location_type")
+  var currentStorageLocationType: StorageLocationType? = null,
+
+  /**
    * Whether the container is archived (NOMIS ACTIVE_FLAG = 'N'). Archived containers are retained but
    * hidden from normal reads, surfaced only when fetched explicitly by id (e.g. a future archive screen).
    */
@@ -101,6 +117,17 @@ class PropertyContainer(
     latestLocationEvent()?.let {
       it.toStorageLocationType ?: it.toInternalLocationId?.let { StorageLocationType.INTERNAL }
     }
+  }
+
+  /**
+   * Refresh the denormalised [currentStatusValue]/[currentInternalLocationId]/[currentStorageLocationType]
+   * mirrors from the authoritative event-derived state. Must be called by every write path after appending
+   * events or changing the removal outcome, so the establishment-wide list query stays in step.
+   */
+  fun refreshDerivedState() {
+    currentStatusValue = currentStatus()
+    currentInternalLocationId = currentLocation()
+    currentStorageLocationType = currentLocationType()
   }
 
   private fun latestEvent(): PropertyEvent? = events.maxByOrNull { it.eventDateTime }

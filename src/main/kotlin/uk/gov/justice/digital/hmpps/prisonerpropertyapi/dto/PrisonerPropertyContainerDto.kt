@@ -96,5 +96,36 @@ data class PrisonerPropertyContainerDto(
       createdByUserId = container.createdByUserId,
       archived = container.archived,
     )
+
+    /**
+     * As [from], but reads the denormalised current status/location columns instead of deriving from the
+     * container's events - so the establishment-wide list can render rows without loading any events.
+     */
+    fun fromColumns(
+      container: PropertyContainer,
+      prisonerName: String?,
+      prisonName: String?,
+      locationDescription: String?,
+      inPrisonersCurrentPrison: Boolean,
+    ) = PrisonerPropertyContainerDto(
+      id = container.id!!,
+      prisonerNumber = container.prisonerNumber,
+      prisonerName = prisonerName,
+      prisonId = container.prisonId,
+      prisonName = prisonName,
+      inPrisonersCurrentPrison = inPrisonersCurrentPrison,
+      containerType = container.containerType,
+      currentSealNumber = container.currentSealNumber,
+      currentStatus = container.currentStatusValue,
+      currentLocation = container.currentInternalLocationId,
+      currentLocationType = container.currentStorageLocationType,
+      locationDescription = locationDescription,
+      proposedDisposalDate = container.proposedDisposalDate,
+      removalOutcome = container.removalOutcome,
+      removalDate = container.removalDate,
+      createDateTime = container.createDateTime,
+      createdByUserId = container.createdByUserId,
+      archived = container.archived,
+    )
   }
 }

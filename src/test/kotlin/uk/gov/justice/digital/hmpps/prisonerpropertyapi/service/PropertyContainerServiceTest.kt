@@ -5,10 +5,15 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
+import org.mockito.kotlin.check
+import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import org.springframework.data.domain.PageImpl
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationDetail
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
@@ -17,6 +22,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.Prisoner
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonPropertyFilter
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
@@ -121,13 +127,91 @@ class PropertyContainerServiceTest {
   }
 
   @Test
-  fun `getByPrisonId maps containers to DTOs`() {
-    whenever(repository.findByPrisonIdAndArchivedFalse("LEI")).thenReturn(listOf(containerWithHistory()))
+  fun `getPrisonProperty groups a page of containers by prisoner, enriched from the denormalised columns`() {
+    whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(
+      mapOf(
+        "A1234BC" to prisoner(prisonId = "LEI"),
+        "B2345CD" to Prisoner("B2345CD", "Sam", "Jones", "MDI", "Moorland (HMP)", "B-2-002"),
+      ),
+    )
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any()))
+      .thenReturn(PageImpl(listOf("A1234BC", "B2345CD"), PAGE, 2))
+    whenever(repository.findContainers(eq("LEI"), any(), eq(listOf("A1234BC", "B2345CD")))).thenReturn(
+      listOf(
+        containerWithHistory(),
+        containerAt("LEI", "SEALA", prisonerNumber = "A1234BC"),
+        containerAt("LEI", "SEALB", prisonerNumber = "B2345CD"),
+      ),
+    )
 
-    val result = service.getByPrisonId("LEI")
+    val page = service.getPrisonProperty("LEI", pageable = PAGE)
 
-    assertThat(result).singleElement().extracting { it.prisonId }.isEqualTo("LEI")
-    verify(repository).findByPrisonIdAndArchivedFalse("LEI")
+    assertThat(page.totalElements).isEqualTo(2)
+    assertThat(page.content).hasSize(2)
+    assertThat(page.content[0]).satisfies({
+      assertThat(it.prisonerNumber).isEqualTo("A1234BC")
+      assertThat(it.prisonerName).isEqualTo("John Smith")
+      assertThat(it.prisonerCurrentPrisonId).isEqualTo("LEI")
+      assertThat(it.prisonerCurrentPrisonName).isEqualTo("Leeds (HMP)")
+      assertThat(it.containers).hasSize(2)
+      assertThat(it.containers).allSatisfy({ c -> assertThat(c.inPrisonersCurrentPrison).isTrue() })
+      assertThat(it.containers.first { c -> c.currentSealNumber == "SEAL002" }.locationDescription).isEqualTo("Reception Property Store")
+    })
+    assertThat(page.content[1]).satisfies({
+      assertThat(it.prisonerNumber).isEqualTo("B2345CD")
+      assertThat(it.prisonerName).isEqualTo("Sam Jones")
+      assertThat(it.containers).singleElement().satisfies({ c -> assertThat(c.inPrisonersCurrentPrison).isFalse() })
+    })
+  }
+
+  @Test
+  fun `getPrisonProperty resolves a storage-location code to location ids before querying`() {
+    whenever(locationsClient.getNonResidentialLocations("LEI")).thenReturn(
+      listOf(
+        LocationDetail(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638"),
+        LocationDetail(id = LOCATION_B, prisonId = "LEI", code = "PB0200", pathHierarchy = "PROP-PB0200"),
+      ),
+    )
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    service.getPrisonProperty("LEI", storageLocation = "pb5638", pageable = PAGE)
+
+    verify(repository).findPrisonerNumbersPage(
+      eq("LEI"),
+      check<PrisonPropertyFilter> {
+        assertThat(it.locationIds).containsExactly(LOCATION_A)
+        assertThat(it.branstonOnly).isFalse()
+      },
+      any(),
+    )
+  }
+
+  @Test
+  fun `getPrisonProperty treats the BRANSTON search term as an offsite filter`() {
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    service.getPrisonProperty("LEI", storageLocation = "Branston", pageable = PAGE)
+
+    verify(repository).findPrisonerNumbersPage(
+      eq("LEI"),
+      check<PrisonPropertyFilter> {
+        assertThat(it.branstonOnly).isTrue()
+        assertThat(it.locationIds).isNull()
+      },
+      any(),
+    )
+    verify(locationsClient, never()).getNonResidentialLocations(any())
+  }
+
+  @Test
+  fun `getPrisonProperty returns an empty page without enrichment when no prisoners match`() {
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    val page = service.getPrisonProperty("LEI", pageable = PAGE)
+
+    assertThat(page.content).isEmpty()
+    assertThat(page.totalElements).isZero()
+    verify(prisonerSearchClient, never()).getPrisoners(any())
   }
 
   @Test
@@ -160,9 +244,9 @@ class PropertyContainerServiceTest {
     cellLocation = "A-1-001",
   )
 
-  private fun containerAt(prisonId: String, seal: String, eventTime: LocalDateTime = baseTime): PropertyContainer {
+  private fun containerAt(prisonId: String, seal: String, eventTime: LocalDateTime = baseTime, prisonerNumber: String = "A1234BC"): PropertyContainer {
     val container = PropertyContainer(
-      prisonerNumber = "A1234BC",
+      prisonerNumber = prisonerNumber,
       prisonId = prisonId,
       containerType = ContainerType.STANDARD,
       createdByUserId = "USER1",
@@ -173,6 +257,7 @@ class PropertyContainerServiceTest {
     container.events.add(
       PropertyEvent(container, PropertyEventType.CREATED_SEALED, eventTime, "USER1", sealNumber = seal),
     )
+    container.refreshDerivedState()
     return container
   }
 
@@ -194,6 +279,7 @@ class PropertyContainerServiceTest {
     container.events.add(
       PropertyEvent(container, PropertyEventType.MOVED, baseTime.plusHours(2), "USER1", toInternalLocationId = LOCATION_B),
     )
+    container.refreshDerivedState()
     return container
   }
 
@@ -201,5 +287,6 @@ class PropertyContainerServiceTest {
     private val baseTime: LocalDateTime = LocalDateTime.parse("2026-01-01T09:00:00")
     private val LOCATION_A: UUID = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val LOCATION_B: UUID = UUID.fromString("22222222-2222-2222-2222-222222222222")
+    private val PAGE: Pageable = PageRequest.of(0, 20)
   }
 }

@@ -4,14 +4,19 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.data.domain.PageRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonPropertyFilter
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.IntegrationTestBase
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -84,6 +89,83 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
     container.events.add(event(container, PropertyEventType.DISPOSED, baseTime.plusDays(2)))
 
     assertThat(container.currentStatus()).isEqualTo(ContainerStatus.DISPOSED)
+  }
+
+  @Test
+  fun `findPrisonerNumbersPage pages by prisoner and counts distinct prisoners`() {
+    saveActive("A0001AA", "S1")
+    saveActive("A0001AA", "S2")
+    saveActive("B0002BB", "S3")
+    saveActive("C0003CC", "S4")
+
+    val firstPage = containerRepository.findPrisonerNumbersPage("LEI", PrisonPropertyFilter(), PageRequest.of(0, 2))
+    assertThat(firstPage.totalElements).isEqualTo(3)
+    assertThat(firstPage.content).containsExactly("A0001AA", "B0002BB")
+
+    val secondPage = containerRepository.findPrisonerNumbersPage("LEI", PrisonPropertyFilter(), PageRequest.of(1, 2))
+    assertThat(secondPage.content).containsExactly("C0003CC")
+  }
+
+  @Test
+  fun `hides removed containers unless their status is requested`() {
+    saveActive("A0001AA", "S1")
+    saveActive("A0001AA", "S2").apply {
+      removalOutcome = RemovalOutcome.DISPOSED
+      removalDate = LocalDate.parse("2026-02-01")
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+
+    val defaultContainers = containerRepository.findContainers("LEI", PrisonPropertyFilter(), listOf("A0001AA"))
+    assertThat(defaultContainers).singleElement().extracting { it.currentSealNumber }.isEqualTo("S1")
+
+    val disposedFilter = PrisonPropertyFilter(statuses = listOf(ContainerStatus.DISPOSED))
+    val disposedContainers = containerRepository.findContainers("LEI", disposedFilter, listOf("A0001AA"))
+    assertThat(disposedContainers).singleElement().extracting { it.currentSealNumber }.isEqualTo("S2")
+    assertThat(containerRepository.findPrisonerNumbersPage("LEI", PrisonPropertyFilter(), PageRequest.of(0, 10)).totalElements).isEqualTo(1)
+  }
+
+  @Test
+  fun `filters by seal number, container type, location id and branston`() {
+    val a = saveActive("A0001AA", "SEAL-X", location = LOCATION_A, type = ContainerType.VALUABLES)
+    saveActive("A0001AA", "SEAL-Y", location = LOCATION_B)
+    saveActive("A0001AA", "SEAL-Z", branston = true)
+
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(sealNumber = "SEAL-X"), listOf("A0001AA")))
+      .singleElement().extracting { it.id }.isEqualTo(a.id)
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(containerType = ContainerType.VALUABLES), listOf("A0001AA")))
+      .singleElement().extracting { it.id }.isEqualTo(a.id)
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(locationIds = listOf(LOCATION_A)), listOf("A0001AA")))
+      .singleElement().extracting { it.id }.isEqualTo(a.id)
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(locationIds = emptyList()), listOf("A0001AA"))).isEmpty()
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(branstonOnly = true), listOf("A0001AA")))
+      .singleElement().extracting { it.currentSealNumber }.isEqualTo("SEAL-Z")
+  }
+
+  private fun saveActive(
+    prisonerNumber: String,
+    seal: String,
+    location: UUID? = null,
+    branston: Boolean = false,
+    type: ContainerType = ContainerType.STANDARD,
+  ): PropertyContainer {
+    val container = PropertyContainer(
+      prisonerNumber = prisonerNumber,
+      prisonId = "LEI",
+      containerType = type,
+      createdByUserId = "USER1",
+      currentSealNumber = seal,
+    )
+    val storageType = when {
+      branston -> StorageLocationType.BRANSTON
+      location != null -> StorageLocationType.INTERNAL
+      else -> null
+    }
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, baseTime, "USER1", sealNumber = seal, toInternalLocationId = location, toStorageLocationType = storageType),
+    )
+    container.refreshDerivedState()
+    return containerRepository.save(container)
   }
 
   private fun containerWithSealMoveHistory(): PropertyContainer {

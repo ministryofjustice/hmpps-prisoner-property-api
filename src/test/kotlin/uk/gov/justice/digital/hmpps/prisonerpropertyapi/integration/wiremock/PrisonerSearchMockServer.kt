@@ -3,6 +3,7 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.client.WireMock.aResponse
 import com.github.tomakehurst.wiremock.client.WireMock.get
+import com.github.tomakehurst.wiremock.client.WireMock.post
 import com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo
 import org.junit.jupiter.api.extension.AfterAllCallback
 import org.junit.jupiter.api.extension.BeforeAllCallback
@@ -65,6 +66,30 @@ class PrisonerSearchMockServer : WireMockServer(WIREMOCK_PORT) {
               }
             """.trimIndent(),
           ),
+      ),
+    )
+  }
+
+  /** Stub the bulk number lookup, returning one prisoner per supplied (prisonerNumber to prisonId) pair. */
+  fun stubFindByNumbers(vararg prisoners: Pair<String, String>) {
+    val body = prisoners.joinToString(prefix = "[", postfix = "]") { (number, prison) ->
+      """
+        {
+          "prisonerNumber": "$number",
+          "firstName": "JOHN",
+          "lastName": "SMITH",
+          "prisonId": "$prison",
+          "prisonName": "Moorland (HMP & YOI)",
+          "cellLocation": "1-1-001"
+        }
+      """.trimIndent()
+    }
+    stubFor(
+      post(urlPathEqualTo("/prisoner-search/prisoner-numbers")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(200)
+          .withBody(body),
       ),
     )
   }

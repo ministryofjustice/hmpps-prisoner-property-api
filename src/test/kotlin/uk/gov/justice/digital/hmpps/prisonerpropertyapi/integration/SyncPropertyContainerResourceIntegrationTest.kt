@@ -2,6 +2,7 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
@@ -14,6 +15,10 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.NomisContainerC
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonerSearchApiExtension.Companion.prisonerSearch
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -25,6 +30,16 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   @Autowired
   private lateinit var eventRepository: PropertyEventRepository
+
+  // Stub the enrichment calls the list endpoints make, so they do not depend on another test warming the caches.
+  @BeforeEach
+  fun stubEnrichment() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION.toString())
+  }
 
   @AfterEach
   fun cleanUp() = repository.deleteAll()
@@ -140,7 +155,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
     getById(created.dpsId).jsonPath("$.archived").isEqualTo(true)
     listByPrisoner("A1234BC").jsonPath("$.length()").isEqualTo(0)
-    listByPrison("LEI").jsonPath("$.length()").isEqualTo(0)
+    listByPrison("LEI").jsonPath("$.totalElements").isEqualTo(0)
   }
 
   @Test

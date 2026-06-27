@@ -5,7 +5,9 @@ import org.springframework.data.jpa.repository.JpaRepository
 import java.util.Optional
 import java.util.UUID
 
-interface PropertyContainerRepository : JpaRepository<PropertyContainer, UUID> {
+interface PropertyContainerRepository :
+  JpaRepository<PropertyContainer, UUID>,
+  PropertyContainerRepositoryCustom {
   // Fetch the events in the same query when loading a single container - its current seal, status and
   // location are derived from them, so a lazy load would otherwise mean an extra query (N+1).
   @EntityGraph("PropertyContainer.withEvents")
