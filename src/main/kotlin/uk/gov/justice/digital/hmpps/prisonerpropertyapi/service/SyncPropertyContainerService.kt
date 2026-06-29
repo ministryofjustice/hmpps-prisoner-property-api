@@ -84,6 +84,7 @@ class SyncPropertyContainerService(
       container.events.add(disposedEvent(container, request.expiryDate, disposalTime, request.createUsername))
     }
 
+    container.refreshDerivedState()
     val saved = repository.save(container)
     // Migration is a one-off bulk load; downstream systems only care about subsequent changes, so no event is raised.
     val event = if (migrating) {
@@ -161,6 +162,7 @@ class SyncPropertyContainerService(
 
     var event: HmppsDomainEvent? = null
     if (changed.isNotEmpty()) {
+      existing.refreshDerivedState()
       repository.save(existing)
       if (!migrating) {
         event = PropertyContainerEventFactory.syncEvent(PropertyDomainEventType.CONTAINER_UPDATED, existing.id!!, request.nomisPropertyContainerId, request.prisonerNumber, changed)

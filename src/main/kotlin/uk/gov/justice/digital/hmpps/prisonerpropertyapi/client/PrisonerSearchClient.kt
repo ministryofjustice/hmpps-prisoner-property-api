@@ -40,7 +40,33 @@ class PrisonerSearchClient(
       throw ex
     }
   }
+
+  /**
+   * Look up several prisoners at once by prisoner number, keyed by prisoner number, in a single call.
+   * Numbers are de-duplicated; numbers that do not resolve are simply absent from the result. Degrades
+   * gracefully: if the call fails the caller gets an empty map (and so null names) rather than a failed read.
+   */
+  fun getPrisoners(prisonerNumbers: Collection<String>): Map<String, Prisoner> {
+    val distinct = prisonerNumbers.distinct()
+    if (distinct.isEmpty()) return emptyMap()
+    return try {
+      prisonerSearchWebClient
+        .post()
+        .uri("/prisoner-search/prisoner-numbers")
+        .bodyValue(PrisonerNumbers(distinct))
+        .retrieve()
+        .bodyToMono<List<Prisoner>>()
+        .block()
+        ?.associateBy { it.prisonerNumber }
+        ?: emptyMap()
+    } catch (ex: WebClientResponseException) {
+      log.warn("Bulk prisoner lookup failed ({}), returning no prisoner details", ex.statusCode)
+      emptyMap()
+    }
+  }
 }
+
+data class PrisonerNumbers(val prisonerNumbers: List<String>)
 
 data class Prisoner(
   val prisonerNumber: String,

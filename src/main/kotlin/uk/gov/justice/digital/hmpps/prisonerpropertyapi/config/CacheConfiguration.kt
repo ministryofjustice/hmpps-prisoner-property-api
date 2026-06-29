@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 class CacheConfiguration {
 
   @Bean
-  fun cacheManager(): CacheManager = ConcurrentMapCacheManager(PRISON_NAMES_CACHE_NAME)
+  fun cacheManager(): CacheManager = ConcurrentMapCacheManager(PRISON_NAMES_CACHE_NAME, NON_RESIDENTIAL_LOCATIONS_CACHE_NAME)
 
   @CacheEvict(value = [PRISON_NAMES_CACHE_NAME], allEntries = true)
   @Scheduled(fixedDelay = TTL_PRISON_NAMES, timeUnit = TimeUnit.HOURS)
@@ -26,9 +26,17 @@ class CacheConfiguration {
     log.info("Evicting cache: {} after {} hours", PRISON_NAMES_CACHE_NAME, TTL_PRISON_NAMES)
   }
 
+  @CacheEvict(value = [NON_RESIDENTIAL_LOCATIONS_CACHE_NAME], allEntries = true)
+  @Scheduled(fixedDelay = TTL_NON_RESIDENTIAL_LOCATIONS, timeUnit = TimeUnit.HOURS)
+  fun cacheEvictNonResidentialLocations() {
+    log.info("Evicting cache: {} after {} hours", NON_RESIDENTIAL_LOCATIONS_CACHE_NAME, TTL_NON_RESIDENTIAL_LOCATIONS)
+  }
+
   companion object {
     val log: Logger = LoggerFactory.getLogger(this::class.java)
     const val PRISON_NAMES_CACHE_NAME: String = "prisonNames"
     const val TTL_PRISON_NAMES: Long = 24
+    const val NON_RESIDENTIAL_LOCATIONS_CACHE_NAME: String = "nonResidentialLocations"
+    const val TTL_NON_RESIDENTIAL_LOCATIONS: Long = 6
   }
 }

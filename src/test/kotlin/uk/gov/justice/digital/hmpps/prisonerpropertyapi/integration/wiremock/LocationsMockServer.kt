@@ -106,6 +106,33 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
     )
   }
 
+  /**
+   * Stub the per-prison non-residential locations lookup (used to resolve a searched storage-location code),
+   * returning one BOX location per supplied (code to id) pair.
+   */
+  fun stubGetNonResidentialLocations(prisonId: String, vararg codesToIds: Pair<String, String>) {
+    val body = codesToIds.joinToString(prefix = "[", postfix = "]") { (code, id) ->
+      """
+        {
+          "id": "$id",
+          "prisonId": "$prisonId",
+          "code": "$code",
+          "pathHierarchy": "PROP-$code",
+          "localName": "Property box $code",
+          "locationType": "BOX"
+        }
+      """.trimIndent()
+    }
+    stubFor(
+      get(urlPathEqualTo("/locations/prison/$prisonId/non-residential")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(200)
+          .withBody(body),
+      ),
+    )
+  }
+
   /** Stub the batch lookup to fail, to exercise graceful degradation. */
   fun stubPostLocationsBatchError(status: Int = 500) {
     stubFor(

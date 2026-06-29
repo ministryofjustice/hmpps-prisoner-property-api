@@ -9,6 +9,9 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Pattern
+import org.springdoc.core.annotations.ParameterObject
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType.APPLICATION_JSON_VALUE
@@ -24,11 +27,13 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyGroupDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
@@ -103,10 +108,17 @@ class PropertyContainerResource(
 
   @GetMapping("/prison/{prisonId}")
   @Operation(
-    summary = "Get the property containers held in a prison",
-    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns an empty list if the prison has no property containers.",
+    summary = "Get the property containers held in a prison, paged and grouped by prisoner",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns the establishment-wide property list as a page " +
+      "of prisoners (each with all their matching containers), so a prisoner's containers are never split across a " +
+      "page boundary - the page total is the number of matching prisoners. Each container is enriched with the " +
+      "prisoner name (prisoner-search), prison name (prison-register) and location description " +
+      "(locations-inside-prison-api). Optionally filtered by prisoner number, seal number, container type, status " +
+      "and storage location. With no status filter, containers that have left active storage (disposed, returned, " +
+      "transferred, combined) are hidden; pass a status filter to include them. Use the standard page, size and " +
+      "sort query parameters for pagination.",
     responses = [
-      ApiResponse(responseCode = "200", description = "Property containers returned"),
+      ApiResponse(responseCode = "200", description = "Page of prisoners with their property containers returned"),
       ApiResponse(responseCode = "400", description = "Invalid prison id", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RO role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
@@ -117,7 +129,32 @@ class PropertyContainerResource(
     @Pattern(regexp = "^[A-Z]{2}I|ZZGHI$", message = "Prison id must be 3 characters ending in an I, or ZZGHI")
     @PathVariable
     prisonId: String,
-  ): List<PropertyContainerDto> = propertyContainerService.getByPrisonId(prisonId)
+    @Parameter(description = "Filter to a single prisoner number", example = "A1234BC")
+    @RequestParam(required = false)
+    prisonerNumber: String?,
+    @Parameter(description = "Filter to a single seal number", example = "SN8842K1")
+    @RequestParam(required = false)
+    sealNumber: String?,
+    @Parameter(description = "Filter to a single container type", example = "STANDARD")
+    @RequestParam(required = false)
+    containerType: ContainerType?,
+    @Parameter(description = "Filter to these statuses (repeatable). Omit to hide containers that have left active storage.", example = "STORED")
+    @RequestParam(required = false)
+    status: List<ContainerStatus>?,
+    @Parameter(description = "Filter to a storage location code (e.g. PB5638), or BRANSTON for offsite storage", example = "PB5638")
+    @RequestParam(required = false)
+    storageLocation: String?,
+    @ParameterObject
+    pageable: Pageable,
+  ): Page<PrisonerPropertyGroupDto> = propertyContainerService.getPrisonProperty(
+    prisonId = prisonId,
+    prisonerNumber = prisonerNumber,
+    sealNumber = sealNumber,
+    containerType = containerType,
+    statuses = status ?: emptyList(),
+    storageLocation = storageLocation,
+    pageable = pageable,
+  )
 
   @GetMapping("/{id}")
   @Operation(

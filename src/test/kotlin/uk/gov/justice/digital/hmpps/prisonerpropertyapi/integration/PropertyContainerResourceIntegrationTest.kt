@@ -73,14 +73,87 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `returns the property containers for a prison`() {
+  fun `returns the prison property as a page of prisoners with their enriched containers`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbers("A1234BC" to "MDI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+
     webTestClient.get().uri("/property-containers/prison/LEI")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$.length()").isEqualTo(1)
-      .jsonPath("$[0].prisonId").isEqualTo("LEI")
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content.length()").isEqualTo(1)
+      .jsonPath("$.content[0].prisonerNumber").isEqualTo("A1234BC")
+      .jsonPath("$.content[0].prisonerName").isEqualTo("JOHN SMITH")
+      // the prisoner is now at MDI, the property stays at LEI
+      .jsonPath("$.content[0].prisonerCurrentPrisonId").isEqualTo("MDI")
+      .jsonPath("$.content[0].containers.length()").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].prisonId").isEqualTo("LEI")
+      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo("STORED")
+      .jsonPath("$.content[0].containers[0].currentLocation").isEqualTo(LOCATION_B.toString())
+      .jsonPath("$.content[0].containers[0].locationDescription").isEqualTo("Reception Property Store")
+      .jsonPath("$.content[0].containers[0].inPrisonersCurrentPrison").isEqualTo(false)
+  }
+
+  @Test
+  fun `hides removed containers by default but reveals them when their status is requested`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    val disposed = seedContainer().apply {
+      removalOutcome = uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome.DISPOSED
+      removalDate = baseTime.toLocalDate()
+      refreshDerivedState()
+    }
+    repository.save(disposed)
+
+    // default: only the active container is returned (the disposed one is hidden)
+    webTestClient.get().uri("/property-containers/prison/LEI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].containers.length()").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo("STORED")
+
+    // requesting DISPOSED reveals the removed container
+    webTestClient.get().uri("/property-containers/prison/LEI?status=DISPOSED")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].containers.length()").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo("DISPOSED")
+  }
+
+  @Test
+  fun `filters the prison list by storage location code resolved against locations-inside-prison`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    locations.stubGetNonResidentialLocations("LEI", "PB5638" to LOCATION_B.toString())
+
+    // matching code returns the container held in that location
+    webTestClient.get().uri("/property-containers/prison/LEI?storageLocation=PB5638")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentLocation").isEqualTo(LOCATION_B.toString())
+
+    // a code that resolves to no location returns nothing
+    webTestClient.get().uri("/property-containers/prison/LEI?storageLocation=UNKNOWN")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(0)
   }
 
   @Test
@@ -150,6 +223,7 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     container.events.add(
       PropertyEvent(container, PropertyEventType.MOVED, baseTime.plusHours(2), "USER1", toInternalLocationId = LOCATION_B),
     )
+    container.refreshDerivedState()
     return container
   }
 

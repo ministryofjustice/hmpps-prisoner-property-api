@@ -105,6 +105,7 @@ class PropertyContainerWriteService(
       )
     }
 
+    container.refreshDerivedState()
     val saved = repository.save(container)
     val events = mutableListOf(
       PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, request.prisonerNumber, changedFields = null),
@@ -116,6 +117,7 @@ class PropertyContainerWriteService(
       )
       it.removalOutcome = RemovalOutcome.TRANSFERRED
       it.removalDate = LocalDate.now()
+      it.refreshDerivedState()
       events += PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, it.id!!, it.prisonerNumber, listOf("removalOutcome"))
     }
 
@@ -172,6 +174,7 @@ class PropertyContainerWriteService(
 
     var event: HmppsDomainEvent? = null
     if (changed.isNotEmpty()) {
+      container.refreshDerivedState()
       event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, changed)
     }
     return WriteResult(PropertyContainerDto.from(container), event)
@@ -253,6 +256,7 @@ class PropertyContainerWriteService(
         toPrisonId = prisonId,
       ),
     )
+    combined.refreshDerivedState()
     val saved = repository.save(combined)
 
     val events = mutableListOf(
@@ -264,6 +268,7 @@ class PropertyContainerWriteService(
       )
       source.removalOutcome = RemovalOutcome.COMBINED
       source.removalDate = today
+      source.refreshDerivedState()
       events += PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, source.id!!, source.prisonerNumber, listOf("removalOutcome"))
     }
 
@@ -299,6 +304,7 @@ class PropertyContainerWriteService(
         toStorageLocationType = request.locationType,
       ),
     )
+    container.refreshDerivedState()
     val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, listOf("location"))
     return WriteResult(PropertyContainerDto.from(container), event)
   }
@@ -328,6 +334,7 @@ class PropertyContainerWriteService(
             toPrisonId = newPrisonId,
           ),
         )
+        container.refreshDerivedState()
         PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, listOf("currentStatus"))
       }
   }
@@ -344,6 +351,7 @@ class PropertyContainerWriteService(
   private fun PropertyContainer.removeWith(outcome: RemovalOutcome, date: LocalDate): WriteResult {
     removalOutcome = outcome
     removalDate = date
+    refreshDerivedState()
     val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, listOf("removalOutcome"))
     return WriteResult(PropertyContainerDto.from(this), event)
   }

@@ -3,11 +3,13 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.client
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.cache.annotation.Cacheable
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.WebClientResponseException
 import org.springframework.web.reactive.function.client.bodyToMono
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.config.CacheConfiguration
 import java.util.UUID
 
 /**
@@ -66,6 +68,29 @@ class LocationsClient(
     } catch (ex: WebClientResponseException) {
       log.warn("Batch location lookup failed ({}), returning no location names", ex.statusCode)
       emptyMap()
+    }
+  }
+
+  /**
+   * All active non-residential locations for a prison (including property boxes), used to resolve a
+   * searched storage-location code to its location id(s). Cached per prison - the set rarely changes.
+   * Degrades gracefully to an empty list if the call fails. Uses the deprecated per-prison endpoint
+   * because the newer summary endpoint excludes BOX locations, which is exactly where property is stored.
+   */
+  @Cacheable(CacheConfiguration.NON_RESIDENTIAL_LOCATIONS_CACHE_NAME)
+  fun getNonResidentialLocations(prisonId: String): List<LocationDetail> {
+    log.debug("Looking up non-residential locations for prison {}", prisonId)
+    return try {
+      locationsWebClient
+        .get()
+        .uri("/locations/prison/{prisonId}/non-residential", prisonId)
+        .retrieve()
+        .bodyToMono<List<LocationDetail>>()
+        .block()
+        ?: emptyList()
+    } catch (ex: WebClientResponseException) {
+      log.warn("Non-residential locations lookup for {} failed ({}), returning none", prisonId, ex.statusCode)
+      emptyList()
     }
   }
 }
