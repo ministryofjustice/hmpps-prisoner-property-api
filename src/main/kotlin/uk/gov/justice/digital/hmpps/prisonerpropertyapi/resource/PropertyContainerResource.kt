@@ -28,6 +28,8 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.BoxLocationDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.BoxLocationSort
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
@@ -38,6 +40,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.BoxLocationService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.CombineResult
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.CreateResult
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerService
@@ -56,6 +59,7 @@ import java.util.UUID
 class PropertyContainerResource(
   private val propertyContainerService: PropertyContainerService,
   private val propertyContainerWriteService: PropertyContainerWriteService,
+  private val boxLocationService: BoxLocationService,
   private val domainEventPublisher: DomainEventPublisher,
   private val authenticationHolder: HmppsAuthenticationHolder,
 ) {
@@ -155,6 +159,30 @@ class PropertyContainerResource(
     storageLocation = storageLocation,
     pageable = pageable,
   )
+
+  @GetMapping("/prison/{prisonId}/box-locations")
+  @Operation(
+    summary = "Get the property box locations in a prison with their current container counts",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns every BOX location in the prison " +
+      "(from locations-inside-prison-api) annotated with how many property containers are currently held " +
+      "there, so a user can pick a suitable place to store property. Empty boxes are included with a count " +
+      "of 0. Ordered alphabetically by name by default, or emptiest-first with sort=FEWEST_CONTAINERS.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Box locations returned"),
+      ApiResponse(responseCode = "400", description = "Invalid prison id", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RO role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun getBoxLocations(
+    @Parameter(description = "Id of the prison", example = "LEI", required = true)
+    @Pattern(regexp = "^[A-Z]{2}I|ZZGHI$", message = "Prison id must be 3 characters ending in an I, or ZZGHI")
+    @PathVariable
+    prisonId: String,
+    @Parameter(description = "Ordering of the returned boxes.", example = "NAME")
+    @RequestParam(required = false, defaultValue = "NAME")
+    sort: BoxLocationSort,
+  ): List<BoxLocationDto> = boxLocationService.getBoxLocations(prisonId, sort)
 
   @GetMapping("/{id}")
   @Operation(

@@ -106,33 +106,6 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
     )
   }
 
-  /**
-   * Stub the per-prison non-residential locations lookup (used to resolve a searched storage-location code),
-   * returning one BOX location per supplied (code to id) pair.
-   */
-  fun stubGetNonResidentialLocations(prisonId: String, vararg codesToIds: Pair<String, String>) {
-    val body = codesToIds.joinToString(prefix = "[", postfix = "]") { (code, id) ->
-      """
-        {
-          "id": "$id",
-          "prisonId": "$prisonId",
-          "code": "$code",
-          "pathHierarchy": "PROP-$code",
-          "localName": "Property box $code",
-          "locationType": "BOX"
-        }
-      """.trimIndent()
-    }
-    stubFor(
-      get(urlPathEqualTo("/locations/prison/$prisonId/non-residential")).willReturn(
-        aResponse()
-          .withHeader("Content-Type", "application/json")
-          .withStatus(200)
-          .withBody(body),
-      ),
-    )
-  }
-
   /** Stub the batch lookup to fail, to exercise graceful degradation. */
   fun stubPostLocationsBatchError(status: Int = 500) {
     stubFor(
@@ -141,6 +114,34 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
           .withHeader("Content-Type", "application/json")
           .withStatus(status)
           .withBody("""{"status":$status,"userMessage":"error"}"""),
+      ),
+    )
+  }
+
+  /**
+   * Stub the by-type lookup for a prison. Each box is a Triple of (id, code, localName); pathHierarchy
+   * is set to the code for simplicity.
+   */
+  fun stubGetBoxLocations(prisonId: String, boxes: List<Triple<String, String, String>>) {
+    val body = boxes.joinToString(prefix = "[", postfix = "]") { (id, code, localName) ->
+      """
+        {
+          "id": "$id",
+          "prisonId": "$prisonId",
+          "code": "$code",
+          "pathHierarchy": "$code",
+          "localName": "$localName",
+          "locationType": "BOX",
+          "status": "ACTIVE"
+        }
+      """.trimIndent()
+    }
+    stubFor(
+      get(urlPathEqualTo("/locations/prison/$prisonId/location-type/BOX")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(200)
+          .withBody(body),
       ),
     )
   }

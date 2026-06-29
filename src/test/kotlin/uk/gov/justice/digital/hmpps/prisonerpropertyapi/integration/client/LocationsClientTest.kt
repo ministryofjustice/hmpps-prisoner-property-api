@@ -4,6 +4,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.cache.CacheManager
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.IntegrationTestBase
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
@@ -15,9 +16,14 @@ class LocationsClientTest : IntegrationTestBase() {
   @Autowired
   private lateinit var locationsClient: LocationsClient
 
+  @Autowired
+  private lateinit var cacheManager: CacheManager
+
   @BeforeEach
   fun stubToken() {
     hmppsAuth.stubGrantToken()
+    // getLocationsByType is @Cacheable - clear so each case resolves against its own stub, not a prior one's.
+    cacheManager.cacheNames.forEach { cacheManager.getCache(it)?.clear() }
   }
 
   @Test
@@ -63,5 +69,25 @@ class LocationsClientTest : IntegrationTestBase() {
     locations.stubPostLocationsBatchError(500)
 
     assertThat(locationsClient.getLocations(listOf(UUID.randomUUID()))).isEmpty()
+  }
+
+  @Test
+  fun `getLocationsByType returns the boxes for a prison`() {
+    val box1 = "11111111-1111-1111-1111-111111111111"
+    val box2 = "22222222-2222-2222-2222-222222222222"
+    locations.stubGetBoxLocations(
+      "LEI",
+      listOf(Triple(box1, "PROP1", "Property Box 1"), Triple(box2, "PROP2", "Property Box 2")),
+    )
+
+    val result = locationsClient.getLocationsByType("LEI", "BOX")
+
+    assertThat(result.map { it.id.toString() }).containsExactly(box1, box2)
+    assertThat(result[0].displayName()).isEqualTo("Property Box 1")
+  }
+
+  @Test
+  fun `getLocationsByType returns an empty list when the prison has no such locations`() {
+    assertThat(locationsClient.getLocationsByType("LEI", "BOX")).isEmpty()
   }
 }

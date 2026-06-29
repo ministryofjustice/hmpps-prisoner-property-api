@@ -72,25 +72,27 @@ class LocationsClient(
   }
 
   /**
-   * All active non-residential locations for a prison (including property boxes), used to resolve a
-   * searched storage-location code to its location id(s). Cached per prison - the set rarely changes.
-   * Degrades gracefully to an empty list if the call fails. Uses the deprecated per-prison endpoint
-   * because the newer summary endpoint excludes BOX locations, which is exactly where property is stored.
+   * All locations of the given type in a prison (e.g. the BOX locations property is stored in) - used both
+   * to list a prison's boxes and to resolve a searched storage-location term (code, local name or path
+   * hierarchy) to its location id(s). Cached per (prison, type) - the set rarely changes. Returns an empty
+   * list if the prison has none or is unknown.
    */
-  @Cacheable(CacheConfiguration.NON_RESIDENTIAL_LOCATIONS_CACHE_NAME)
-  fun getNonResidentialLocations(prisonId: String): List<LocationDetail> {
-    log.debug("Looking up non-residential locations for prison {}", prisonId)
-    return try {
-      locationsWebClient
+  @Cacheable(CacheConfiguration.LOCATIONS_BY_TYPE_CACHE_NAME)
+  fun getLocationsByType(prisonId: String, locationType: String): List<LocationDetail> {
+    log.debug("Looking up {} locations for prison {}", locationType, prisonId)
+    try {
+      return locationsWebClient
         .get()
-        .uri("/locations/prison/{prisonId}/non-residential", prisonId)
+        .uri("/locations/prison/{prisonId}/location-type/{locationType}", prisonId, locationType)
         .retrieve()
         .bodyToMono<List<LocationDetail>>()
         .block()
         ?: emptyList()
     } catch (ex: WebClientResponseException) {
-      log.warn("Non-residential locations lookup for {} failed ({}), returning none", prisonId, ex.statusCode)
-      emptyList()
+      if (ex.statusCode == HttpStatus.NOT_FOUND) {
+        return emptyList()
+      }
+      throw ex
     }
   }
 }
