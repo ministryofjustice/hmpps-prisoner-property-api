@@ -192,6 +192,46 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `returns a container's events newest first`() {
+    webTestClient.get().uri("/property-containers/{id}/events", containerId)
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.length()").isEqualTo(3)
+      .jsonPath("$[0].eventType").isEqualTo("MOVED")
+      .jsonPath("$[0].toInternalLocationId").isEqualTo(LOCATION_B.toString())
+      .jsonPath("$[1].eventType").isEqualTo("SEAL_CHANGED")
+      .jsonPath("$[1].sealNumber").isEqualTo("SEAL002")
+      .jsonPath("$[2].eventType").isEqualTo("CREATED_SEALED")
+      .jsonPath("$[2].sealNumber").isEqualTo("SEAL001")
+      .jsonPath("$[2].eventUserId").isEqualTo("USER1")
+  }
+
+  @Test
+  fun `returns not found for the events of an unknown container`() {
+    webTestClient.get().uri("/property-containers/{id}/events", UUID.randomUUID())
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isNotFound
+  }
+
+  @Test
+  fun `events returns forbidden without the read role`() {
+    webTestClient.get().uri("/property-containers/{id}/events", containerId)
+      .headers(setAuthorisation(roles = listOf("ROLE_WRONG")))
+      .exchange()
+      .expectStatus().isForbidden
+  }
+
+  @Test
+  fun `events returns unauthorized when no token is presented`() {
+    webTestClient.get().uri("/property-containers/{id}/events", containerId)
+      .exchange()
+      .expectStatus().isUnauthorized
+  }
+
+  @Test
   fun `returns unauthorized when no token is presented`() {
     webTestClient.get().uri("/property-containers/prisoner/A1234BC")
       .exchange()

@@ -37,6 +37,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyGroupDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyEventDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
@@ -200,6 +201,26 @@ class PropertyContainerResource(
     @PathVariable
     id: UUID,
   ): PropertyContainerDto = propertyContainerService.getById(id)
+
+  @GetMapping("/{id}/events")
+  @Operation(
+    summary = "Get a property container's history (its events), newest first",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns the ordered list of events that make up the " +
+      "container's history (created, sealed, moved, transferred, returned, disposed, combined, etc.), newest first. " +
+      "Each event carries only the fields relevant to it (e.g. seal number for seal events, from/to location for " +
+      "moves, from/to prison for transfers, related container for combines).",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Property container events returned"),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RO role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "404", description = "Property container not found", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun getEvents(
+    @Parameter(description = "Property container id", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d", required = true)
+    @PathVariable
+    id: UUID,
+  ): List<PropertyEventDto> = propertyContainerService.getEvents(id)
 
   @PostMapping
   @ResponseStatus(HttpStatus.CREATED)

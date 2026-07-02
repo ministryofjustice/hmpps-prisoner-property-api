@@ -241,6 +241,35 @@ class PropertyContainerServiceTest {
       .hasMessageContaining(id.toString())
   }
 
+  @Test
+  fun `getEvents returns the container's events newest first mapped to DTOs`() {
+    val container = containerWithHistory()
+    container.events.forEach { it.id = UUID.randomUUID() }
+    whenever(repository.findById(any())).thenReturn(Optional.of(container))
+
+    val result = service.getEvents(container.id!!)
+
+    assertThat(result.map { it.eventType }).containsExactly(
+      PropertyEventType.MOVED,
+      PropertyEventType.SEAL_CHANGED,
+      PropertyEventType.CREATED_SEALED,
+    )
+    assertThat(result.first().toInternalLocationId).isEqualTo(LOCATION_B)
+    assertThat(result.last().sealNumber).isEqualTo("SEAL001")
+    assertThat(result.last().fromInternalLocationId).isNull()
+    verify(repository).findById(container.id!!)
+  }
+
+  @Test
+  fun `getEvents throws when the container is not found`() {
+    val id = UUID.randomUUID()
+    whenever(repository.findById(id)).thenReturn(Optional.empty())
+
+    assertThatThrownBy { service.getEvents(id) }
+      .isInstanceOf(PropertyContainerNotFoundException::class.java)
+      .hasMessageContaining(id.toString())
+  }
+
   private fun prisoner(prisonId: String) = Prisoner(
     prisonerNumber = "A1234BC",
     firstName = "John",

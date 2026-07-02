@@ -18,6 +18,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyGroupDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyEventDto
 import java.util.UUID
 
 @Service
@@ -125,6 +126,14 @@ class PropertyContainerService(
   fun getById(id: UUID): PropertyContainerDto = repository.findById(id)
     .map(PropertyContainerDto::from)
     .orElseThrow { PropertyContainerNotFoundException(id) }
+
+  /** A container's full history, newest event first. Throws [PropertyContainerNotFoundException] if the container does not exist. */
+  @Transactional(readOnly = true)
+  fun getEvents(id: UUID): List<PropertyEventDto> = repository.findById(id)
+    .orElseThrow { PropertyContainerNotFoundException(id) }
+    .events
+    .sortedByDescending { it.eventDateTime }
+    .map(PropertyEventDto::from)
 
   /** When the container was last touched - the most recent event, falling back to its creation time. */
   private fun PropertyContainer.lastUpdated() = events.maxOfOrNull { it.eventDateTime } ?: createDateTime
