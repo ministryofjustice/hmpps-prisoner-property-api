@@ -280,13 +280,37 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$.length()").isEqualTo(3)
-      .jsonPath("$[0].name").isEqualTo("Box One")
-      .jsonPath("$[0].containerCount").isEqualTo(0)
-      .jsonPath("$[1].name").isEqualTo("Box Three")
-      .jsonPath("$[1].containerCount").isEqualTo(0)
-      .jsonPath("$[2].name").isEqualTo("Box Two")
-      .jsonPath("$[2].containerCount").isEqualTo(1)
+      .jsonPath("$.totalElements").isEqualTo(3)
+      .jsonPath("$.content.length()").isEqualTo(3)
+      .jsonPath("$.content[0].name").isEqualTo("Box One")
+      .jsonPath("$.content[0].containerCount").isEqualTo(0)
+      .jsonPath("$.content[1].name").isEqualTo("Box Three")
+      .jsonPath("$.content[1].containerCount").isEqualTo(0)
+      .jsonPath("$.content[2].name").isEqualTo("Box Two")
+      .jsonPath("$.content[2].containerCount").isEqualTo(1)
+  }
+
+  @Test
+  fun `filters and paginates the prison's box locations by search query`() {
+    hmppsAuth.stubGrantToken()
+    locations.stubGetBoxLocations(
+      "LEI",
+      listOf(
+        Triple(LOCATION_A.toString(), "PROP1", "Reception Store"),
+        Triple(LOCATION_B.toString(), "PROP2", "Wing Store"),
+        Triple(EMPTY_BOX.toString(), "PROP3", "Reserve Store"),
+      ),
+    )
+
+    webTestClient.get().uri("/property-containers/prison/LEI/box-locations?query=re*store&size=1")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // "re*store" matches "Reception Store" and "Reserve Store" (name), paged one at a time
+      .jsonPath("$.totalElements").isEqualTo(2)
+      .jsonPath("$.content.length()").isEqualTo(1)
+      .jsonPath("$.content[0].name").isEqualTo("Reception Store")
   }
 
   @Test
@@ -305,10 +329,10 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$[0].name").isEqualTo("Box Three")
-      .jsonPath("$[0].containerCount").isEqualTo(0)
-      .jsonPath("$[1].name").isEqualTo("Box Two")
-      .jsonPath("$[1].containerCount").isEqualTo(1)
+      .jsonPath("$.content[0].name").isEqualTo("Box Three")
+      .jsonPath("$.content[0].containerCount").isEqualTo(0)
+      .jsonPath("$.content[1].name").isEqualTo("Box Two")
+      .jsonPath("$.content[1].containerCount").isEqualTo(1)
   }
 
   @Test

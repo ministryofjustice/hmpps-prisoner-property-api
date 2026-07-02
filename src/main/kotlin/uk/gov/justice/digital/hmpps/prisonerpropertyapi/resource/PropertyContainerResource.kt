@@ -164,12 +164,16 @@ class PropertyContainerResource(
   @GetMapping("/prison/{prisonId}/box-locations")
   @Operation(
     summary = "Get the property box locations in a prison with their current container counts",
-    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns every BOX location in the prison " +
+    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns a page of the BOX locations in the prison " +
       "(from locations-inside-prison-api) annotated with how many property containers are currently held " +
       "there, so a user can pick a suitable place to store property. Empty boxes are included with a count " +
-      "of 0. Ordered alphabetically by name by default, or emptiest-first with sort=FEWEST_CONTAINERS.",
+      "of 0. Optionally filtered by a search query matched (case-insensitively) against the box code, local " +
+      "name and path hierarchy - the query supports * (any run of characters) and ? (a single character) " +
+      "wildcards, and a query with no wildcards is a substring match. Ordered alphabetically by name by " +
+      "default, or emptiest-first with sort=FEWEST_CONTAINERS. Use the standard page and size query " +
+      "parameters for pagination.",
     responses = [
-      ApiResponse(responseCode = "200", description = "Box locations returned"),
+      ApiResponse(responseCode = "200", description = "Page of box locations returned"),
       ApiResponse(responseCode = "400", description = "Invalid prison id", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RO role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
@@ -183,7 +187,12 @@ class PropertyContainerResource(
     @Parameter(description = "Ordering of the returned boxes.", example = "NAME")
     @RequestParam(required = false, defaultValue = "NAME")
     sort: BoxLocationSort,
-  ): List<BoxLocationDto> = boxLocationService.getBoxLocations(prisonId, sort)
+    @Parameter(description = "Filter to boxes whose code, name or path matches this term (supports * and ? wildcards)", example = "recp*")
+    @RequestParam(required = false)
+    query: String?,
+    @ParameterObject
+    pageable: Pageable,
+  ): Page<BoxLocationDto> = boxLocationService.getBoxLocations(prisonId, sort, query, pageable)
 
   @GetMapping("/{id}")
   @Operation(
