@@ -61,6 +61,8 @@ class PropertyContainerServiceTest {
       assertThat(it.prisonerNumber).isEqualTo("A1234BC")
       assertThat(it.prisonerName).isEqualTo("John Smith")
       assertThat(it.prisonName).isEqualTo("Leeds (HMP)")
+      assertThat(it.prisonerCurrentPrisonId).isEqualTo("LEI")
+      assertThat(it.prisonerCurrentPrisonName).isEqualTo("Leeds (HMP)")
       assertThat(it.inPrisonersCurrentPrison).isTrue()
       assertThat(it.currentSealNumber).isEqualTo("SEAL002")
       assertThat(it.currentStatus).isEqualTo(ContainerStatus.STORED)
@@ -112,8 +114,13 @@ class PropertyContainerServiceTest {
     whenever(prisonerSearchClient.getPrisoner("A1234BC")).thenReturn(prisoner(prisonId = "MDI"))
     whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
 
-    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement()
-      .satisfies({ assertThat(it.inPrisonersCurrentPrison).isFalse() })
+    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
+      assertThat(it.inPrisonersCurrentPrison).isFalse()
+      // The prisoner's current establishment is still surfaced even though none of their property is held there.
+      assertThat(it.prisonerCurrentPrisonId).isEqualTo("MDI")
+      assertThat(it.prisonerCurrentPrisonName).isEqualTo("Moorland (HMP)")
+      assertThat(it.prisonName).isEqualTo("Leeds (HMP)")
+    })
   }
 
   @Test
@@ -123,6 +130,8 @@ class PropertyContainerServiceTest {
 
     assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
       assertThat(it.prisonerName).isNull()
+      assertThat(it.prisonerCurrentPrisonId).isNull()
+      assertThat(it.prisonerCurrentPrisonName).isNull()
       assertThat(it.inPrisonersCurrentPrison).isFalse()
     })
   }

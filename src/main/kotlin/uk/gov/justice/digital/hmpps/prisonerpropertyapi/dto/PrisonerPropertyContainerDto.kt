@@ -30,6 +30,12 @@ data class PrisonerPropertyContainerDto(
   @Schema(description = "Name of the prison holding the container, from prison-register. Null if the prison could not be resolved", example = "Leeds (HMP)", nullable = true)
   val prisonName: String?,
 
+  @Schema(description = "Id of the prisoner's current prison, from prisoner-search. Distinct from the holding prison; null if the prisoner could not be resolved", example = "IWI", nullable = true)
+  val prisonerCurrentPrisonId: String?,
+
+  @Schema(description = "Name of the prisoner's current prison, from prison-register. Distinct from the holding prison; null if it could not be resolved", example = "Isle of Wight (HMP)", nullable = true)
+  val prisonerCurrentPrisonName: String?,
+
   @Schema(description = "Whether the container is currently held in the prisoner's current prison. False flags property left behind at a prison the prisoner has moved on from", example = "true")
   val inPrisonersCurrentPrison: Boolean,
 
@@ -74,6 +80,8 @@ data class PrisonerPropertyContainerDto(
       container: PropertyContainer,
       prisonerName: String?,
       prisonName: String?,
+      prisonerCurrentPrisonId: String?,
+      prisonerCurrentPrisonName: String?,
       locationDescription: String?,
       inPrisonersCurrentPrison: Boolean,
     ) = PrisonerPropertyContainerDto(
@@ -82,6 +90,8 @@ data class PrisonerPropertyContainerDto(
       prisonerName = prisonerName,
       prisonId = container.prisonId,
       prisonName = prisonName,
+      prisonerCurrentPrisonId = prisonerCurrentPrisonId,
+      prisonerCurrentPrisonName = prisonerCurrentPrisonName,
       inPrisonersCurrentPrison = inPrisonersCurrentPrison,
       containerType = container.containerType,
       currentSealNumber = container.currentSealNumber,
@@ -105,6 +115,8 @@ data class PrisonerPropertyContainerDto(
       container: PropertyContainer,
       prisonerName: String?,
       prisonName: String?,
+      prisonerCurrentPrisonId: String?,
+      prisonerCurrentPrisonName: String?,
       locationDescription: String?,
       inPrisonersCurrentPrison: Boolean,
     ) = PrisonerPropertyContainerDto(
@@ -113,6 +125,8 @@ data class PrisonerPropertyContainerDto(
       prisonerName = prisonerName,
       prisonId = container.prisonId,
       prisonName = prisonName,
+      prisonerCurrentPrisonId = prisonerCurrentPrisonId,
+      prisonerCurrentPrisonName = prisonerCurrentPrisonName,
       inPrisonersCurrentPrison = inPrisonersCurrentPrison,
       containerType = container.containerType,
       currentSealNumber = container.currentSealNumber,

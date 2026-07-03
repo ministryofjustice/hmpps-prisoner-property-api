@@ -56,6 +56,8 @@ class PropertyContainerService(
         container = container,
         prisonerName = prisoner.fullName(),
         prisonName = prisonNames[container.prisonId],
+        prisonerCurrentPrisonId = prisoner?.prisonId,
+        prisonerCurrentPrisonName = prisoner?.prisonId?.let { prisonNames[it] },
         locationDescription = container.currentLocation()?.let { locations[it]?.displayName() },
         inPrisonersCurrentPrison = prisoner?.prisonId == container.prisonId,
       )
@@ -113,6 +115,8 @@ class PropertyContainerService(
             container = container,
             prisonerName = prisoner.fullName(),
             prisonName = prisonNames[container.prisonId],
+            prisonerCurrentPrisonId = prisoner?.prisonId,
+            prisonerCurrentPrisonName = prisoner?.prisonId?.let { prisonNames[it] },
             locationDescription = container.currentInternalLocationId?.let { locations[it]?.displayName() },
             inPrisonersCurrentPrison = prisoner?.prisonId == container.prisonId,
           )
