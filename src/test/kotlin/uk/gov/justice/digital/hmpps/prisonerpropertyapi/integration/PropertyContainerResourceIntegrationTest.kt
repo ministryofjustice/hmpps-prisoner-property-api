@@ -56,7 +56,10 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$[0].prisonerName").isEqualTo("JOHN SMITH")
       .jsonPath("$[0].prisonId").isEqualTo("LEI")
       .jsonPath("$[0].prisonName").isEqualTo("Leeds (HMP)")
-      // the stubbed prisoner is at MDI, this container is held at LEI
+      // the stubbed prisoner is at MDI, this container is held at LEI - the current establishment is
+      // still surfaced even though no property is held there
+      .jsonPath("$[0].prisonerCurrentPrisonId").isEqualTo("MDI")
+      .jsonPath("$[0].prisonerCurrentPrisonName").isEqualTo("Moorland (HMP & YOI)")
       .jsonPath("$[0].inPrisonersCurrentPrison").isEqualTo(false)
       .jsonPath("$[0].currentSealNumber").isEqualTo("SEAL002")
       .jsonPath("$[0].currentStatus").isEqualTo("STORED")
