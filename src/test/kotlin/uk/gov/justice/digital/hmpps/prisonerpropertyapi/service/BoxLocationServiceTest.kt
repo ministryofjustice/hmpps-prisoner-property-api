@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
+import org.springframework.data.domain.PageRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationDetail
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.LocationContainerCount
@@ -33,7 +34,7 @@ class BoxLocationServiceTest {
       listOf(count(BOX_A, 2), count(BOX_B, 1)),
     )
 
-    val result = service.getBoxLocations("LEI", BoxLocationSort.NAME).associateBy { it.id }
+    val result = service.getBoxLocations("LEI", BoxLocationSort.NAME).content.associateBy { it.id }
 
     assertThat(result[BOX_A]!!.containerCount).isEqualTo(2)
     assertThat(result[BOX_B]!!.containerCount).isEqualTo(1)
@@ -44,7 +45,7 @@ class BoxLocationServiceTest {
   fun `sorts alphabetically by name by default`() {
     whenever(repository.countContainersByLocation("LEI")).thenReturn(listOf(count(BOX_C, 2)))
 
-    assertThat(service.getBoxLocations("LEI", BoxLocationSort.NAME).map { it.name })
+    assertThat(service.getBoxLocations("LEI", BoxLocationSort.NAME).content.map { it.name })
       .containsExactly("Box A", "Box B", "Box C")
   }
 
@@ -54,10 +55,53 @@ class BoxLocationServiceTest {
       listOf(count(BOX_A, 2), count(BOX_B, 1)),
     )
 
-    val result = service.getBoxLocations("LEI", BoxLocationSort.FEWEST_CONTAINERS)
+    val result = service.getBoxLocations("LEI", BoxLocationSort.FEWEST_CONTAINERS).content
 
     assertThat(result.map { it.name }).containsExactly("Box C", "Box B", "Box A")
     assertThat(result.map { it.containerCount }).containsExactly(0, 1, 2)
+  }
+
+  @Test
+  fun `filters by a case-insensitive substring across code, name and path`() {
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
+
+    // "box b" matches the local name "Box B" only
+    assertThat(service.getBoxLocations("LEI", query = "box b").content.map { it.name }).containsExactly("Box B")
+    // "recp-boxa" matches the path hierarchy of Box A only
+    assertThat(service.getBoxLocations("LEI", query = "recp-boxa").content.map { it.name }).containsExactly("Box A")
+    // "boxc" matches the code of Box C only
+    assertThat(service.getBoxLocations("LEI", query = "boxc").content.map { it.name }).containsExactly("Box C")
+  }
+
+  @Test
+  fun `supports star and question mark wildcards`() {
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
+
+    // "*a" anchors nothing but ends with a - Box A code is "BoxA"
+    assertThat(service.getBoxLocations("LEI", query = "box?").content.map { it.name })
+      .containsExactly("Box A", "Box B", "Box C")
+    assertThat(service.getBoxLocations("LEI", query = "recp*a").content.map { it.name }).containsExactly("Box A")
+  }
+
+  @Test
+  fun `a blank query returns all boxes`() {
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
+
+    assertThat(service.getBoxLocations("LEI", query = "   ").content).hasSize(3)
+  }
+
+  @Test
+  fun `paginates the filtered, sorted results and reports the full total`() {
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
+
+    val firstPage = service.getBoxLocations("LEI", pageable = PageRequest.of(0, 2))
+    assertThat(firstPage.content.map { it.name }).containsExactly("Box A", "Box B")
+    assertThat(firstPage.totalElements).isEqualTo(3)
+    assertThat(firstPage.totalPages).isEqualTo(2)
+
+    val secondPage = service.getBoxLocations("LEI", pageable = PageRequest.of(1, 2))
+    assertThat(secondPage.content.map { it.name }).containsExactly("Box C")
+    assertThat(secondPage.totalElements).isEqualTo(3)
   }
 
   private fun box(id: UUID, localName: String) = LocationDetail(
