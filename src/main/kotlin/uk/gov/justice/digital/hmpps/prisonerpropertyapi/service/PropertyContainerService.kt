@@ -15,10 +15,13 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonPropertyFilter
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyGroupDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerTimelineItemDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyEventDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.TimelineItemType
 import java.util.UUID
 
 @Service
@@ -138,6 +141,60 @@ class PropertyContainerService(
     .events
     .sortedByDescending { it.eventDateTime }
     .map(PropertyEventDto::from)
+
+  /**
+   * A prisoner's whole-property history: every event across all of their (non-archived) containers, interleaved
+   * newest first, plus a de-duplicated "arrived at ..." item for each prison the prisoner moved into. Prison and
+   * location ids are resolved to names, and each container event carries the seal number and acting establishment
+   * as at that point in the container's history (a container never changes prison, so its acting establishment is
+   * the prison holding it; the seal is carried forward from the container's seal events). Returns an empty list if
+   * the prisoner has no property.
+   */
+  @Transactional(readOnly = true)
+  fun getPrisonerTimeline(prisonerNumber: String): List<PrisonerTimelineItemDto> {
+    val containers = repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber)
+    if (containers.isEmpty()) return emptyList()
+
+    val prisonNames = prisonRegisterClient.getPrisonNames()
+    val prisonerName = prisonerSearchClient.getPrisoner(prisonerNumber).fullName()
+    val locations = locationsClient.getLocations(containers.mapNotNull { it.currentLocation() })
+
+    val containerItems = containers.flatMap { container ->
+      val actingEstablishmentName = prisonNames[container.prisonId]
+      val locationDescription = container.currentLocation()?.let { locations[it]?.displayName() }
+      var sealAsOfEvent: String? = null
+      container.events.sortedBy { it.eventDateTime }.map { event ->
+        event.sealNumber?.let { sealAsOfEvent = it }
+        PrisonerTimelineItemDto.containerEvent(
+          event = event,
+          container = container,
+          sealAsOfEvent = sealAsOfEvent,
+          actingEstablishmentName = actingEstablishmentName,
+          fromPrisonName = event.fromPrisonId?.let { prisonNames[it] },
+          toPrisonName = event.toPrisonId?.let { prisonNames[it] },
+          containerLocationDescription = locationDescription,
+        )
+      }
+    }
+
+    // One "arrived at ..." item per prison move, de-duplicated across the containers that each recorded it.
+    val movementItems = containers.flatMap { it.events }
+      .filter { it.eventType == PropertyEventType.PRISONER_RECEIVED && it.toPrisonId != null }
+      .distinctBy { it.toPrisonId to it.eventDateTime }
+      .map { event ->
+        PrisonerTimelineItemDto.prisonerMovement(
+          event = event,
+          prisonerName = prisonerName,
+          toPrisonName = event.toPrisonId?.let { prisonNames[it] },
+        )
+      }
+
+    // Newest first; at the same instant a movement sits above the container events it triggered.
+    return (containerItems + movementItems).sortedWith(
+      compareByDescending<PrisonerTimelineItemDto> { it.eventDateTime }
+        .thenByDescending { it.itemType == TimelineItemType.PRISONER_MOVEMENT },
+    )
+  }
 
   /** When the container was last touched - the most recent event, falling back to its creation time. */
   private fun PropertyContainer.lastUpdated() = events.maxOfOrNull { it.eventDateTime } ?: createDateTime
