@@ -3,6 +3,7 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto
 import io.swagger.v3.oas.annotations.media.Schema
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerMovementStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
@@ -35,6 +36,9 @@ data class PrisonerPropertyContainerDto(
 
   @Schema(description = "Name of the prisoner's current prison, from prison-register. Distinct from the holding prison; null if it could not be resolved", example = "Isle of Wight (HMP)", nullable = true)
   val prisonerCurrentPrisonName: String?,
+
+  @Schema(description = "The prisoner's movement status, from prisoner-search: whether they are held in an establishment, in transit between prisons, or released. Null if the prisoner could not be resolved", example = "IN_ESTABLISHMENT", nullable = true)
+  val prisonerMovementStatus: PrisonerMovementStatus?,
 
   @Schema(description = "Whether the container is currently held in the prisoner's current prison. False flags property left behind at a prison the prisoner has moved on from", example = "true")
   val inPrisonersCurrentPrison: Boolean,
@@ -82,6 +86,7 @@ data class PrisonerPropertyContainerDto(
       prisonName: String?,
       prisonerCurrentPrisonId: String?,
       prisonerCurrentPrisonName: String?,
+      prisonerMovementStatus: PrisonerMovementStatus?,
       locationDescription: String?,
       inPrisonersCurrentPrison: Boolean,
     ) = PrisonerPropertyContainerDto(
@@ -92,6 +97,7 @@ data class PrisonerPropertyContainerDto(
       prisonName = prisonName,
       prisonerCurrentPrisonId = prisonerCurrentPrisonId,
       prisonerCurrentPrisonName = prisonerCurrentPrisonName,
+      prisonerMovementStatus = prisonerMovementStatus,
       inPrisonersCurrentPrison = inPrisonersCurrentPrison,
       containerType = container.containerType,
       currentSealNumber = container.currentSealNumber,
@@ -117,6 +123,7 @@ data class PrisonerPropertyContainerDto(
       prisonName: String?,
       prisonerCurrentPrisonId: String?,
       prisonerCurrentPrisonName: String?,
+      prisonerMovementStatus: PrisonerMovementStatus?,
       locationDescription: String?,
       inPrisonersCurrentPrison: Boolean,
     ) = PrisonerPropertyContainerDto(
@@ -127,6 +134,7 @@ data class PrisonerPropertyContainerDto(
       prisonName = prisonName,
       prisonerCurrentPrisonId = prisonerCurrentPrisonId,
       prisonerCurrentPrisonName = prisonerCurrentPrisonName,
+      prisonerMovementStatus = prisonerMovementStatus,
       inPrisonersCurrentPrison = inPrisonersCurrentPrison,
       containerType = container.containerType,
       currentSealNumber = container.currentSealNumber,

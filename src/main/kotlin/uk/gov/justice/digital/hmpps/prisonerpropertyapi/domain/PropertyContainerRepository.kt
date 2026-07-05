@@ -33,6 +33,18 @@ interface PropertyContainerRepository :
   )
   fun countContainersByLocation(@Param("prisonId") prisonId: String): List<LocationContainerCount>
 
+  /**
+   * How many active (not removed) containers a prison holds in each current status, read from the denormalised
+   * current_status column so no events are loaded - feeds the establishment summary counts.
+   */
+  @Query(
+    "select c.currentStatusValue as status, count(c) as count " +
+      "from PropertyContainer c " +
+      "where c.prisonId = :prisonId and c.archived = false and c.removalOutcome is null " +
+      "group by c.currentStatusValue",
+  )
+  fun countContainersByStatus(@Param("prisonId") prisonId: String): List<StatusContainerCount>
+
   /** Whether any active (not removed) container already holds this seal number - used to enforce staff seal uniqueness. */
   fun existsByCurrentSealNumberAndRemovalOutcomeIsNull(currentSealNumber: String): Boolean
 
@@ -43,5 +55,11 @@ interface PropertyContainerRepository :
 /** Projection for [PropertyContainerRepository.countContainersByLocation]: a location id and its container count. */
 interface LocationContainerCount {
   val locationId: UUID
+  val count: Long
+}
+
+/** Projection for [PropertyContainerRepository.countContainersByStatus]: a container status and its container count. */
+interface StatusContainerCount {
+  val status: ContainerStatus
   val count: Long
 }

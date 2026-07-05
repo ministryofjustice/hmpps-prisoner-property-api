@@ -75,4 +75,6 @@ data class Prisoner(
   val prisonId: String?,
   val prisonName: String?,
   val cellLocation: String?,
+  // The prisoner's last movement type. TRN when in transit (with prisonId TRN), REL when released (prisonId OUT).
+  val lastMovementTypeCode: String?,
 )

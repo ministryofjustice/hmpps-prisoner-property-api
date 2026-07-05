@@ -1,6 +1,7 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto
 
 import io.swagger.v3.oas.annotations.media.Schema
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerMovementStatus
 
 @Schema(
   description = "The property containers held in an establishment for a single prisoner, grouped together " +
@@ -19,6 +20,9 @@ data class PrisonerPropertyGroupDto(
 
   @Schema(description = "Name of the prisoner's current establishment, from prison-register. Null if it could not be resolved", example = "Leeds (HMP)", nullable = true)
   val prisonerCurrentPrisonName: String?,
+
+  @Schema(description = "The prisoner's movement status, from prisoner-search: whether they are held in an establishment, in transit between prisons, or released. Null if the prisoner could not be resolved", example = "IN_ESTABLISHMENT", nullable = true)
+  val prisonerMovementStatus: PrisonerMovementStatus?,
 
   @Schema(description = "The matching property containers held for this prisoner in the establishment")
   val containers: List<PrisonerPropertyContainerDto>,

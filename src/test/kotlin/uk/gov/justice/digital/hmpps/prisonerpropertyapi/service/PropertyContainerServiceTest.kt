@@ -24,11 +24,14 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchCli
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonPropertyFilter
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerMovementStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StatusContainerCount
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonPropertySummaryDto
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.Optional
@@ -63,6 +66,7 @@ class PropertyContainerServiceTest {
       assertThat(it.prisonName).isEqualTo("Leeds (HMP)")
       assertThat(it.prisonerCurrentPrisonId).isEqualTo("LEI")
       assertThat(it.prisonerCurrentPrisonName).isEqualTo("Leeds (HMP)")
+      assertThat(it.prisonerMovementStatus).isEqualTo(PrisonerMovementStatus.IN_ESTABLISHMENT)
       assertThat(it.inPrisonersCurrentPrison).isTrue()
       assertThat(it.currentSealNumber).isEqualTo("SEAL002")
       assertThat(it.currentStatus).isEqualTo(ContainerStatus.STORED)
@@ -132,8 +136,58 @@ class PropertyContainerServiceTest {
       assertThat(it.prisonerName).isNull()
       assertThat(it.prisonerCurrentPrisonId).isNull()
       assertThat(it.prisonerCurrentPrisonName).isNull()
+      assertThat(it.prisonerMovementStatus).isNull()
       assertThat(it.inPrisonersCurrentPrison).isFalse()
     })
+  }
+
+  @Test
+  fun `getByPrisonerNumber surfaces the prisoner's movement status - in transit and released`() {
+    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+
+    whenever(prisonerSearchClient.getPrisoner("A1234BC")).thenReturn(prisoner(prisonId = "TRN", lastMovementTypeCode = "TRN"))
+    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
+      assertThat(it.prisonerMovementStatus).isEqualTo(PrisonerMovementStatus.IN_TRANSIT)
+    })
+
+    whenever(prisonerSearchClient.getPrisoner("A1234BC")).thenReturn(prisoner(prisonId = "OUT", lastMovementTypeCode = "REL"))
+    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
+      assertThat(it.prisonerMovementStatus).isEqualTo(PrisonerMovementStatus.RELEASED)
+    })
+  }
+
+  @Test
+  fun `getPrisonPropertySummary maps status counts and box locations to the summary tiles`() {
+    whenever(repository.countContainersByStatus("LEI")).thenReturn(
+      listOf(
+        statusCount(ContainerStatus.STORED, 3000),
+        statusCount(ContainerStatus.DUE_FOR_TRANSFER_OUT, 80),
+        statusCount(ContainerStatus.DISPOSAL_REQUIRED, 40),
+        // A terminal status the tiles ignore.
+        statusCount(ContainerStatus.RETURNED, 5),
+      ),
+    )
+    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
+      (1..150).map { LocationDetail(id = UUID.randomUUID(), prisonId = "LEI", code = "PB$it", pathHierarchy = "PROP-PB$it", localName = "Box $it") },
+    )
+
+    val summary = service.getPrisonPropertySummary("LEI")
+
+    assertThat(summary.availableStorageLocations).isEqualTo(150)
+    assertThat(summary.storedOnSite).isEqualTo(3000)
+    assertThat(summary.dueToTransferOut).isEqualTo(80)
+    assertThat(summary.dueToBeDisposed).isEqualTo(40)
+    // No status yet backs a pending return, so this tile is always 0 for now.
+    assertThat(summary.dueToBeReturned).isZero()
+  }
+
+  @Test
+  fun `getPrisonPropertySummary returns zero counts for statuses and boxes a prison has none of`() {
+    whenever(repository.countContainersByStatus("LEI")).thenReturn(emptyList())
+    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(emptyList())
+
+    assertThat(service.getPrisonPropertySummary("LEI"))
+      .isEqualTo(PrisonPropertySummaryDto(availableStorageLocations = 0, storedOnSite = 0, dueToTransferOut = 0, dueToBeReturned = 0, dueToBeDisposed = 0))
   }
 
   @Test
@@ -141,7 +195,7 @@ class PropertyContainerServiceTest {
     whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(
       mapOf(
         "A1234BC" to prisoner(prisonId = "LEI"),
-        "B2345CD" to Prisoner("B2345CD", "Sam", "Jones", "MDI", "Moorland (HMP)", "B-2-002"),
+        "B2345CD" to Prisoner("B2345CD", "Sam", "Jones", "MDI", "Moorland (HMP)", "B-2-002", null),
       ),
     )
     whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any()))
@@ -279,13 +333,19 @@ class PropertyContainerServiceTest {
       .hasMessageContaining(id.toString())
   }
 
-  private fun prisoner(prisonId: String) = Prisoner(
+  private fun statusCount(status: ContainerStatus, count: Long): StatusContainerCount = object : StatusContainerCount {
+    override val status = status
+    override val count = count
+  }
+
+  private fun prisoner(prisonId: String, lastMovementTypeCode: String? = null) = Prisoner(
     prisonerNumber = "A1234BC",
     firstName = "John",
     lastName = "Smith",
     prisonId = prisonId,
     prisonName = "Leeds (HMP)",
     cellLocation = "A-1-001",
+    lastMovementTypeCode = lastMovementTypeCode,
   )
 
   private fun containerAt(prisonId: String, seal: String, eventTime: LocalDateTime = baseTime, prisonerNumber: String = "A1234BC"): PropertyContainer {
