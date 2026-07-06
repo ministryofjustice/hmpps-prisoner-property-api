@@ -34,6 +34,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersReq
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonPropertySummaryDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyGroupDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerTimelineItemDto
@@ -194,6 +195,27 @@ class PropertyContainerResource(
     @ParameterObject
     pageable: Pageable,
   ): Page<BoxLocationDto> = boxLocationService.getBoxLocations(prisonId, sort, query, pageable)
+
+  @GetMapping("/prison/{prisonId}/summary")
+  @Operation(
+    summary = "Get the whole-prison property summary counts for a prison",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns the establishment summary tiles for the prison " +
+      "as a whole, independent of any list paging or filtering: the number of BOX storage locations configured " +
+      "(from locations-inside-prison-api) and how many containers are stored on-site, due to transfer out and due " +
+      "to be disposed. 'Due to be returned' is always 0 for now - no status yet represents a pending return.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Prison property summary returned"),
+      ApiResponse(responseCode = "400", description = "Invalid prison id", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RO role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun getPrisonSummary(
+    @Parameter(description = "Id of the prison", example = "LEI", required = true)
+    @Pattern(regexp = "^[A-Z]{2}I|ZZGHI$", message = "Prison id must be 3 characters ending in an I, or ZZGHI")
+    @PathVariable
+    prisonId: String,
+  ): PrisonPropertySummaryDto = propertyContainerService.getPrisonPropertySummary(prisonId)
 
   @GetMapping("/{id}")
   @Operation(

@@ -48,41 +48,26 @@ class PrisonerSearchMockServer : WireMockServer(WIREMOCK_PORT) {
     )
   }
 
-  fun stubGetPrisoner(prisonerNumber: String) {
+  fun stubGetPrisoner(prisonerNumber: String, prisonId: String = "MDI", lastMovementTypeCode: String = "ADM") {
     stubFor(
       get(urlPathEqualTo("/prisoner/$prisonerNumber")).willReturn(
         aResponse()
           .withHeader("Content-Type", "application/json")
           .withStatus(200)
-          .withBody(
-            """
-              {
-                "prisonerNumber": "$prisonerNumber",
-                "firstName": "JOHN",
-                "lastName": "SMITH",
-                "prisonId": "MDI",
-                "prisonName": "Moorland (HMP & YOI)",
-                "cellLocation": "1-1-001"
-              }
-            """.trimIndent(),
-          ),
+          .withBody(prisonerJson(prisonerNumber, prisonId, lastMovementTypeCode)),
       ),
     )
   }
 
   /** Stub the bulk number lookup, returning one prisoner per supplied (prisonerNumber to prisonId) pair. */
-  fun stubFindByNumbers(vararg prisoners: Pair<String, String>) {
-    val body = prisoners.joinToString(prefix = "[", postfix = "]") { (number, prison) ->
-      """
-        {
-          "prisonerNumber": "$number",
-          "firstName": "JOHN",
-          "lastName": "SMITH",
-          "prisonId": "$prison",
-          "prisonName": "Moorland (HMP & YOI)",
-          "cellLocation": "1-1-001"
-        }
-      """.trimIndent()
+  fun stubFindByNumbers(vararg prisoners: Pair<String, String>) = stubFindByNumbersWithMovement(
+    *prisoners.map { (number, prison) -> Triple(number, prison, "ADM") }.toTypedArray(),
+  )
+
+  /** As [stubFindByNumbers] but each (prisonerNumber, prisonId, lastMovementTypeCode) triple controls the movement type. */
+  fun stubFindByNumbersWithMovement(vararg prisoners: Triple<String, String, String>) {
+    val body = prisoners.joinToString(prefix = "[", postfix = "]") { (number, prison, movement) ->
+      prisonerJson(number, prison, movement)
     }
     stubFor(
       post(urlPathEqualTo("/prisoner-search/prisoner-numbers")).willReturn(
@@ -93,6 +78,18 @@ class PrisonerSearchMockServer : WireMockServer(WIREMOCK_PORT) {
       ),
     )
   }
+
+  private fun prisonerJson(prisonerNumber: String, prisonId: String, lastMovementTypeCode: String) = """
+    {
+      "prisonerNumber": "$prisonerNumber",
+      "firstName": "JOHN",
+      "lastName": "SMITH",
+      "prisonId": "$prisonId",
+      "prisonName": "Moorland (HMP & YOI)",
+      "cellLocation": "1-1-001",
+      "lastMovementTypeCode": "$lastMovementTypeCode"
+    }
+  """.trimIndent()
 
   fun stubGetPrisonerNotFound(prisonerNumber: String) {
     stubFor(

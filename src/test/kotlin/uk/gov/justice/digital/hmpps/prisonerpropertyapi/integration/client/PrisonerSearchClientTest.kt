@@ -31,6 +31,7 @@ class PrisonerSearchClientTest : IntegrationTestBase() {
     assertThat(prisoner.lastName).isEqualTo("SMITH")
     assertThat(prisoner.prisonId).isEqualTo("MDI")
     assertThat(prisoner.cellLocation).isEqualTo("1-1-001")
+    assertThat(prisoner.lastMovementTypeCode).isEqualTo("ADM")
   }
 
   @Test

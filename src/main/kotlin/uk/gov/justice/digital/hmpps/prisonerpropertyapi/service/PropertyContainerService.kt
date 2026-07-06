@@ -13,9 +13,11 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchCli
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonPropertyFilter
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerMovementStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonPropertySummaryDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyGroupDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerTimelineItemDto
@@ -61,10 +63,29 @@ class PropertyContainerService(
         prisonName = prisonNames[container.prisonId],
         prisonerCurrentPrisonId = prisoner?.prisonId,
         prisonerCurrentPrisonName = prisoner?.prisonId?.let { prisonNames[it] },
+        prisonerMovementStatus = prisoner.movementStatus(),
         locationDescription = container.currentLocation()?.let { locations[it]?.displayName() },
         inPrisonersCurrentPrison = prisoner?.prisonId == container.prisonId,
       )
     }
+  }
+
+  /**
+   * Whole-prison property totals for the establishment summary tiles. Container counts come from one group-by-status
+   * aggregate over the denormalised current_status column (no events loaded); the storage-location count is the
+   * number of BOX locations configured for the prison. "Due to be returned" is always 0 - no status yet represents
+   * a pending return.
+   */
+  @Transactional(readOnly = true)
+  fun getPrisonPropertySummary(prisonId: String): PrisonPropertySummaryDto {
+    val counts = repository.countContainersByStatus(prisonId).associate { it.status to it.count }
+    return PrisonPropertySummaryDto(
+      availableStorageLocations = locationsClient.getLocationsByType(prisonId, BOX_LOCATION_TYPE).size,
+      storedOnSite = counts.count(ContainerStatus.STORED),
+      dueToTransferOut = counts.count(ContainerStatus.DUE_FOR_TRANSFER_OUT),
+      dueToBeReturned = 0,
+      dueToBeDisposed = counts.count(ContainerStatus.DISPOSAL_REQUIRED),
+    )
   }
 
   /**
@@ -113,6 +134,7 @@ class PropertyContainerService(
         prisonerName = prisoner.fullName(),
         prisonerCurrentPrisonId = prisoner?.prisonId,
         prisonerCurrentPrisonName = prisoner?.prisonId?.let { prisonNames[it] },
+        prisonerMovementStatus = prisoner.movementStatus(),
         containers = (containersByPrisoner[number] ?: emptyList()).map { container ->
           PrisonerPropertyContainerDto.fromColumns(
             container = container,
@@ -120,6 +142,7 @@ class PropertyContainerService(
             prisonName = prisonNames[container.prisonId],
             prisonerCurrentPrisonId = prisoner?.prisonId,
             prisonerCurrentPrisonName = prisoner?.prisonId?.let { prisonNames[it] },
+            prisonerMovementStatus = prisoner.movementStatus(),
             locationDescription = container.currentInternalLocationId?.let { locations[it]?.displayName() },
             inPrisonersCurrentPrison = prisoner?.prisonId == container.prisonId,
           )
@@ -203,11 +226,35 @@ class PropertyContainerService(
     listOfNotNull(firstName, lastName).joinToString(" ").ifBlank { null }
   }
 
+  /**
+   * The prisoner's movement status, or null if the prisoner could not be resolved: in transit between prisons
+   * (prisonId TRN, lastMovementTypeCode TRN), released (prisonId OUT, lastMovementTypeCode REL), else held in an
+   * establishment.
+   */
+  private fun Prisoner?.movementStatus(): PrisonerMovementStatus? = this?.let {
+    when {
+      prisonId == TRANSIT_PRISON_ID && lastMovementTypeCode == TRANSIT_MOVEMENT_TYPE -> PrisonerMovementStatus.IN_TRANSIT
+      prisonId == RELEASED_PRISON_ID && lastMovementTypeCode == RELEASED_MOVEMENT_TYPE -> PrisonerMovementStatus.RELEASED
+      else -> PrisonerMovementStatus.IN_ESTABLISHMENT
+    }
+  }
+
+  /** The count for a status from a [countContainersByStatus] map, as an Int (0 when absent). */
+  private fun Map<ContainerStatus, Long>.count(status: ContainerStatus): Int = this[status]?.toInt() ?: 0
+
   private companion object {
     /** The storage-location search term that means "held offsite at Branston" rather than an internal code. */
     const val BRANSTON_SEARCH_TERM = "BRANSTON"
 
     /** The locations-inside-prison location type property is stored in - the only type the search resolves against. */
     const val BOX_LOCATION_TYPE = "BOX"
+
+    /** prisoner-search prisonId + lastMovementTypeCode values that mean the prisoner is in transit between prisons. */
+    const val TRANSIT_PRISON_ID = "TRN"
+    const val TRANSIT_MOVEMENT_TYPE = "TRN"
+
+    /** prisoner-search prisonId + lastMovementTypeCode values that mean the prisoner has been released. */
+    const val RELEASED_PRISON_ID = "OUT"
+    const val RELEASED_MOVEMENT_TYPE = "REL"
   }
 }
