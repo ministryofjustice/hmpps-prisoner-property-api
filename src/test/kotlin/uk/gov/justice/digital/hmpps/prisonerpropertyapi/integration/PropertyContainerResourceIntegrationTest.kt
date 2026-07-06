@@ -354,6 +354,101 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .expectStatus().isBadRequest
   }
 
+  @Test
+  fun `describes the prisoner's movement status in the prison list - released`() {
+    hmppsAuth.stubGrantToken()
+    // the prisoner has been released (prisonId OUT, last movement REL) but their property remains at LEI
+    prisonerSearch.stubFindByNumbersWithMovement(Triple("A1234BC", "OUT", "REL"))
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+
+    webTestClient.get().uri("/property-containers/prison/LEI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].prisonerMovementStatus").isEqualTo("RELEASED")
+      .jsonPath("$.content[0].containers[0].prisonerMovementStatus").isEqualTo("RELEASED")
+  }
+
+  @Test
+  fun `describes the prisoner's movement status in the prison list - in transit`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbersWithMovement(Triple("A1234BC", "TRN", "TRN"))
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+
+    webTestClient.get().uri("/property-containers/prison/LEI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].prisonerMovementStatus").isEqualTo("IN_TRANSIT")
+  }
+
+  @Test
+  fun `returns the prison property summary counts`() {
+    hmppsAuth.stubGrantToken()
+    // setUp already seeded one STORED container at LEI; add one due for disposal and one due to transfer out
+    repository.save(containerWithStatus("SEALD") { proposedDisposalDate = baseTime.toLocalDate() })
+    repository.save(
+      containerWithStatus("SEALT") {
+        events.add(PropertyEvent(this, PropertyEventType.PRISONER_RECEIVED, baseTime.plusHours(1), "USER1"))
+      },
+    )
+    locations.stubGetBoxLocations(
+      "LEI",
+      listOf(
+        Triple(LOCATION_A.toString(), "PROP1", "Box One"),
+        Triple(LOCATION_B.toString(), "PROP2", "Box Two"),
+        Triple(EMPTY_BOX.toString(), "PROP3", "Box Three"),
+      ),
+    )
+
+    webTestClient.get().uri("/property-containers/prison/LEI/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.availableStorageLocations").isEqualTo(3)
+      .jsonPath("$.storedOnSite").isEqualTo(1)
+      .jsonPath("$.dueToTransferOut").isEqualTo(1)
+      .jsonPath("$.dueToBeDisposed").isEqualTo(1)
+      .jsonPath("$.dueToBeReturned").isEqualTo(0)
+  }
+
+  @Test
+  fun `summary returns forbidden without the read role`() {
+    webTestClient.get().uri("/property-containers/prison/LEI/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_WRONG")))
+      .exchange()
+      .expectStatus().isForbidden
+  }
+
+  @Test
+  fun `summary returns bad request for an invalid prison id`() {
+    webTestClient.get().uri("/property-containers/prison/ZZZ/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
+  private fun containerWithStatus(seal: String, configure: PropertyContainer.() -> Unit): PropertyContainer {
+    val container = PropertyContainer(
+      prisonerNumber = "A1234BC",
+      prisonId = "LEI",
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "USER1",
+      currentSealNumber = seal,
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, baseTime, "USER1", sealNumber = seal),
+    )
+    container.configure()
+    container.refreshDerivedState()
+    return container
+  }
+
   private fun seedContainer(): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
