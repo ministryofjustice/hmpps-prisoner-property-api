@@ -10,6 +10,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
@@ -230,6 +231,98 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   @Test
   fun `events returns unauthorized when no token is presented`() {
     webTestClient.get().uri("/property-containers/{id}/events", containerId)
+      .exchange()
+      .expectStatus().isUnauthorized
+  }
+
+  @Test
+  fun `returns a prisoner's whole-property timeline newest first with resolved names`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    // A second container for the same prisoner: created, the prisoner then moved to MDI (received),
+    // and it was finally transferred out. Its seal never changes, so every item shows SN880032.
+    repository.save(transferredContainer())
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // 3 seed events + 3 transferred-container events + 1 de-duplicated "arrived at" movement
+      .jsonPath("$.length()").isEqualTo(7)
+      // newest first: the transfer out, held at Leeds, moving to Moorland
+      .jsonPath("$[0].itemType").isEqualTo("CONTAINER_EVENT")
+      .jsonPath("$[0].eventType").isEqualTo("TRANSFERRED")
+      .jsonPath("$[0].eventStatus").isEqualTo("TRANSFER")
+      .jsonPath("$[0].actingEstablishmentName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[0].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
+      .jsonPath("$[0].sealNumber").isEqualTo("SN880032")
+      .jsonPath("$[0].systemGenerated").isEqualTo(false)
+      // the prisoner movement sits just above the received event it triggered
+      .jsonPath("$[1].itemType").isEqualTo("PRISONER_MOVEMENT")
+      .jsonPath("$[1].prisonerName").isEqualTo("JOHN SMITH")
+      .jsonPath("$[1].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
+      .jsonPath("$[1].systemGenerated").isEqualTo(true)
+      .jsonPath("$[2].itemType").isEqualTo("CONTAINER_EVENT")
+      .jsonPath("$[2].eventType").isEqualTo("PRISONER_RECEIVED")
+      .jsonPath("$[2].eventStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
+      .jsonPath("$[2].systemGenerated").isEqualTo(true)
+      // oldest item is the seed container's creation: seal-as-of-event is the original seal, while the
+      // container's *current* seal (in the expandable details) is the later one
+      .jsonPath("$[6].eventType").isEqualTo("CREATED_SEALED")
+      .jsonPath("$[6].sealNumber").isEqualTo("SEAL001")
+      .jsonPath("$[6].containerSealNumber").isEqualTo("SEAL002")
+      .jsonPath("$[6].containerLocationDescription").isEqualTo("Reception Property Store")
+  }
+
+  @Test
+  fun `timeline excludes archived containers`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    repository.save(seedContainer().apply { archived = true })
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // only the (non-archived) seed container's 3 events, not the archived container's
+      .jsonPath("$.length()").isEqualTo(3)
+  }
+
+  @Test
+  fun `timeline is empty for a prisoner with no property`() {
+    webTestClient.get().uri("/property-containers/prisoner/Z9999ZZ/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.length()").isEqualTo(0)
+  }
+
+  @Test
+  fun `timeline returns bad request when the prisoner number is invalid`() {
+    webTestClient.get().uri("/property-containers/prisoner/INVALID/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
+  @Test
+  fun `timeline returns forbidden without the read role`() {
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_WRONG")))
+      .exchange()
+      .expectStatus().isForbidden
+  }
+
+  @Test
+  fun `timeline returns unauthorized when no token is presented`() {
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
       .exchange()
       .expectStatus().isUnauthorized
   }
@@ -466,6 +559,34 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     container.events.add(
       PropertyEvent(container, PropertyEventType.MOVED, baseTime.plusHours(2), "USER1", toInternalLocationId = LOCATION_B),
     )
+    container.refreshDerivedState()
+    return container
+  }
+
+  /**
+   * A second container for A1234BC that has been transferred out: created and sealed at Leeds, flagged due for
+   * transfer out when the prisoner was received at Moorland, then transferred. Later-dated than [seedContainer]
+   * so its events sort to the top of the timeline.
+   */
+  private fun transferredContainer(): PropertyContainer {
+    val container = PropertyContainer(
+      prisonerNumber = "A1234BC",
+      prisonId = "LEI",
+      containerType = ContainerType.VALUABLES,
+      createdByUserId = "USER1",
+      currentSealNumber = "SN880032",
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, baseTime.plusDays(1), "USER1", sealNumber = "SN880032", toPrisonId = "LEI"),
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.PRISONER_RECEIVED, baseTime.plusDays(2), "PRISONER_PROPERTY_API", fromPrisonId = "LEI", toPrisonId = "MDI"),
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.TRANSFERRED, baseTime.plusDays(3), "USER2", eventDate = baseTime.plusDays(3).toLocalDate(), fromPrisonId = "LEI", toPrisonId = "MDI"),
+    )
+    container.removalOutcome = RemovalOutcome.TRANSFERRED
+    container.removalDate = baseTime.plusDays(3).toLocalDate()
     container.refreshDerivedState()
     return container
   }

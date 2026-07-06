@@ -37,6 +37,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonPropertySummaryDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyGroupDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerTimelineItemDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyEventDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
@@ -252,6 +253,28 @@ class PropertyContainerResource(
     @PathVariable
     id: UUID,
   ): List<PropertyEventDto> = propertyContainerService.getEvents(id)
+
+  @GetMapping("/prisoner/{prisonerNumber}/events")
+  @Operation(
+    summary = "Get a prisoner's whole-property history timeline, newest first",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns a single interleaved timeline of every event " +
+      "across all of the prisoner's (non-archived) containers, newest first, plus a de-duplicated \"arrived at ...\" " +
+      "item for each prison the prisoner moved into. Prison and location ids are resolved to names, and each " +
+      "container event carries the seal number and acting establishment as at that point in its history. Returns an " +
+      "empty list if the prisoner has no property.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Prisoner property timeline returned"),
+      ApiResponse(responseCode = "400", description = "Invalid prisoner number", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RO role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun getPrisonerEvents(
+    @Parameter(description = "Prisoner (NOMS) number", example = "A1234BC", required = true)
+    @Pattern(regexp = "([a-zA-Z][0-9]{4}[a-zA-Z]{2})", message = "Prisoner number must be in the format A1234BC")
+    @PathVariable
+    prisonerNumber: String,
+  ): List<PrisonerTimelineItemDto> = propertyContainerService.getPrisonerTimeline(prisonerNumber)
 
   @PostMapping
   @ResponseStatus(HttpStatus.CREATED)
