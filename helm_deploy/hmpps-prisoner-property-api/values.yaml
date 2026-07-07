@@ -23,8 +23,10 @@ generic-service:
     # and then add a path-scoped exclusion for the NOMIS sync/migrate endpoints.
     modsecurity_snippet: |
       SecRuleEngine On
-      # team tag grants OpenSearch access to investigate any future blockage
-      SecDefaultAction "phase:2,pass,log,tag:github_team=move-a-prisoner,tag:namespace={{ .Release.Namespace }}"
+      # github_team tag drives OpenSearch document-level security: only members of this GitHub team
+      # can read these modsec logs. Must be a team the on-call devs belong to (map-developers-devs),
+      # NOT the Cloud Platform namespace team-name.
+      SecDefaultAction "phase:2,pass,log,tag:github_team=map-developers-devs,tag:namespace={{ .Release.Namespace }}"
       # Standard method allowlist (chart default is only GET HEAD POST OPTIONS)
       SecAction "id:900200,phase:1,nolog,pass,t:none,setvar:tx.allowed_methods=GET HEAD POST OPTIONS PUT PATCH DELETE,setvar:tx.paranoia_level=3"
       # Make ModSecurity denials a 406 so blocks are distinguishable from app errors
@@ -33,7 +35,8 @@ generic-service:
       # NOMIS SEAL_MARK is free text and legitimately contains -- (SQL comment) and SH /sh
       # (shell) tokens that trip the CRS. These endpoints are authenticated (SYNC role), internal
       # NOMIS->DPS traffic, and the app uses only parameterised JPA queries, so disable the offending
-      # rules for the sync path ONLY. Rule IDs confirmed from the OpenSearch modsec audit log.
+      # rules for the sync path ONLY. 942440/932160 are the CRS defaults for these patterns; confirm
+      # and extend this list from the OpenSearch modsec audit log if other rules fire on seal text.
       # NB: nginx wraps this whole snippet in a single-quoted modsecurity_rules directive, so it
       # must contain no apostrophe characters anywhere (including in comments) or the config breaks.
       SecRule REQUEST_URI "@beginsWith /sync/property-containers" "id:900900,phase:1,pass,nolog,ctl:ruleRemoveById=942440,ctl:ruleRemoveById=932160"
