@@ -126,20 +126,73 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `filters by seal number, container type, location id and branston`() {
+  fun `filters by seal number, container types, location id and branston`() {
     val a = saveActive("A0001AA", "SEAL-X", location = LOCATION_A, type = ContainerType.VALUABLES)
-    saveActive("A0001AA", "SEAL-Y", location = LOCATION_B)
+    val b = saveActive("A0001AA", "SEAL-Y", location = LOCATION_B, type = ContainerType.CONFISCATED)
     saveActive("A0001AA", "SEAL-Z", branston = true)
 
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(sealNumber = "SEAL-X"), listOf("A0001AA")))
       .singleElement().extracting { it.id }.isEqualTo(a.id)
-    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(containerType = ContainerType.VALUABLES), listOf("A0001AA")))
+    // A single type matches only that type; multiple types match any of them.
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(containerTypes = listOf(ContainerType.VALUABLES)), listOf("A0001AA")))
       .singleElement().extracting { it.id }.isEqualTo(a.id)
+    assertThat(
+      containerRepository.findContainers(
+        "LEI",
+        PrisonPropertyFilter(containerTypes = listOf(ContainerType.VALUABLES, ContainerType.CONFISCATED)),
+        listOf("A0001AA"),
+      ),
+    ).extracting<UUID> { it.id }.containsExactlyInAnyOrder(a.id, b.id)
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(locationIds = listOf(LOCATION_A)), listOf("A0001AA")))
       .singleElement().extracting { it.id }.isEqualTo(a.id)
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(locationIds = emptyList()), listOf("A0001AA"))).isEmpty()
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(branstonOnly = true), listOf("A0001AA")))
       .singleElement().extracting { it.currentSealNumber }.isEqualTo("SEAL-Z")
+  }
+
+  @Test
+  fun `includeRemoved surfaces returned and disposed containers alongside active ones`() {
+    saveActive("A0001AA", "ACTIVE")
+    saveActive("A0001AA", "GONE-DISPOSED").apply {
+      removalOutcome = RemovalOutcome.DISPOSED
+      removalDate = LocalDate.parse("2026-02-01")
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+    saveActive("A0001AA", "GONE-RETURNED").apply {
+      removalOutcome = RemovalOutcome.RETURNED
+      removalDate = LocalDate.parse("2026-02-01")
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+    saveActive("A0001AA", "GONE-TRANSFERRED").apply {
+      removalOutcome = RemovalOutcome.TRANSFERRED
+      removalDate = LocalDate.parse("2026-02-01")
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+
+    // Default hides everything removed; includeRemoved brings back returned/disposed only (not transferred).
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(), listOf("A0001AA")))
+      .extracting<String> { it.currentSealNumber }.containsExactly("ACTIVE")
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(includeRemoved = true), listOf("A0001AA")))
+      .extracting<String> { it.currentSealNumber }.containsExactlyInAnyOrder("ACTIVE", "GONE-DISPOSED", "GONE-RETURNED")
+  }
+
+  @Test
+  fun `free-text search matches prisoner number, seal number or resolved storage location`() {
+    val bySeal = saveActive("A0001AA", "SN-FIND-ME", location = LOCATION_A)
+    val byLocation = saveActive("A0001AA", "SN-OTHER", location = LOCATION_B)
+    saveActive("A0001AA", "SN-NEITHER", branston = true)
+    val prisoners = listOf("A0001AA")
+
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(search = "SN-FIND-ME"), prisoners))
+      .singleElement().extracting { it.id }.isEqualTo(bySeal.id)
+    // prisoner-number match is case-insensitive (the term is upper-cased before comparison).
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(search = "a0001aa"), prisoners))
+      .extracting<UUID> { it.id }.contains(bySeal.id, byLocation.id)
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(search = "PB0200", searchLocationIds = listOf(LOCATION_B)), prisoners))
+      .singleElement().extracting { it.id }.isEqualTo(byLocation.id)
   }
 
   @Test

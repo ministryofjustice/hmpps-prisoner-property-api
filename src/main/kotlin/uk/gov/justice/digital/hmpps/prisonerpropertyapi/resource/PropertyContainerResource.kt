@@ -120,10 +120,11 @@ class PropertyContainerResource(
       "of prisoners (each with all their matching containers), so a prisoner's containers are never split across a " +
       "page boundary - the page total is the number of matching prisoners. Each container is enriched with the " +
       "prisoner name (prisoner-search), prison name (prison-register) and location description " +
-      "(locations-inside-prison-api). Optionally filtered by prisoner number, seal number, container type, status " +
-      "and storage location. With no status filter, containers that have left active storage (disposed, returned, " +
-      "transferred, combined) are hidden; pass a status filter to include them. Use the standard page, size and " +
-      "sort query parameters for pagination.",
+      "(locations-inside-prison-api). Optionally filtered by a free-text query (prisoner number, seal number or " +
+      "storage location), prisoner number, seal number, container type(s), status and storage location. With no " +
+      "status filter, containers that have left active storage (disposed, returned, transferred, combined) are " +
+      "hidden; pass a status filter, or includeRemoved=true to also surface returned/disposed containers. Use the " +
+      "standard page, size and sort query parameters for pagination.",
     responses = [
       ApiResponse(responseCode = "200", description = "Page of prisoners with their property containers returned"),
       ApiResponse(responseCode = "400", description = "Invalid prison id", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
@@ -136,30 +137,38 @@ class PropertyContainerResource(
     @Pattern(regexp = "^[A-Z]{2}I|ZZGHI$", message = "Prison id must be 3 characters ending in an I, or ZZGHI")
     @PathVariable
     prisonId: String,
+    @Parameter(description = "Free-text search matched against prisoner number, seal number or storage location", example = "A1234BC")
+    @RequestParam(required = false)
+    query: String?,
     @Parameter(description = "Filter to a single prisoner number", example = "A1234BC")
     @RequestParam(required = false)
     prisonerNumber: String?,
     @Parameter(description = "Filter to a single seal number", example = "SN8842K1")
     @RequestParam(required = false)
     sealNumber: String?,
-    @Parameter(description = "Filter to a single container type", example = "STANDARD")
+    @Parameter(description = "Filter to these container types (repeatable). Omit for all types.", example = "STANDARD")
     @RequestParam(required = false)
-    containerType: ContainerType?,
+    containerType: List<ContainerType>?,
     @Parameter(description = "Filter to these statuses (repeatable). Omit to hide containers that have left active storage.", example = "STORED")
     @RequestParam(required = false)
     status: List<ContainerStatus>?,
     @Parameter(description = "Filter to a storage location code (e.g. PB5638), or BRANSTON for offsite storage", example = "PB5638")
     @RequestParam(required = false)
     storageLocation: String?,
+    @Parameter(description = "Also include containers that have been returned or disposed of", example = "false")
+    @RequestParam(required = false, defaultValue = "false")
+    includeRemoved: Boolean,
     @ParameterObject
     pageable: Pageable,
   ): Page<PrisonerPropertyGroupDto> = propertyContainerService.getPrisonProperty(
     prisonId = prisonId,
     prisonerNumber = prisonerNumber,
     sealNumber = sealNumber,
-    containerType = containerType,
+    containerTypes = containerType ?: emptyList(),
     statuses = status ?: emptyList(),
     storageLocation = storageLocation,
+    includeRemoved = includeRemoved,
+    search = query,
     pageable = pageable,
   )
 
