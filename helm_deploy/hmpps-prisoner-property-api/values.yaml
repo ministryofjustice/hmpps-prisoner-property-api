@@ -30,10 +30,12 @@ generic-service:
       # Make ModSecurity denials a 406 so blocks are distinguishable from app errors
       SecRuleUpdateActionById 949110 "t:none,deny,status:406,logdata:%{SERVER_NAME}"
       SecRuleUpdateActionById 959100 "t:none,deny,status:406,logdata:%{SERVER_NAME}"
-      # NOMIS SEAL_MARK is free text and legitimately contains "--" (SQL comment) and "SH "/"sh "
-      # (shell) tokens that trip the CRS. These endpoints are auth'd (SYNC role), internal NOMIS->DPS
-      # traffic, and the app uses only parameterised JPA queries, so disable the offending rules for
-      # the sync path ONLY. Rule IDs confirmed from the OpenSearch modsec audit log.
+      # NOMIS SEAL_MARK is free text and legitimately contains -- (SQL comment) and SH /sh
+      # (shell) tokens that trip the CRS. These endpoints are authenticated (SYNC role), internal
+      # NOMIS->DPS traffic, and the app uses only parameterised JPA queries, so disable the offending
+      # rules for the sync path ONLY. Rule IDs confirmed from the OpenSearch modsec audit log.
+      # NB: nginx wraps this whole snippet in a single-quoted modsecurity_rules directive, so it
+      # must contain no apostrophe characters anywhere (including in comments) or the config breaks.
       SecRule REQUEST_URI "@beginsWith /sync/property-containers" "id:900900,phase:1,pass,nolog,ctl:ruleRemoveById=942440,ctl:ruleRemoveById=932160"
 
   # Environment variables to load into the deployment
