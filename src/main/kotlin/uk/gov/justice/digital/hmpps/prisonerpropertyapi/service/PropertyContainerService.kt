@@ -25,6 +25,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerTimelineItem
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyEventDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.TimelineItemType
+import java.time.LocalDate
 import java.util.UUID
 
 @Service
@@ -72,20 +73,23 @@ class PropertyContainerService(
   }
 
   /**
-   * Whole-prison property totals for the establishment summary tiles. Container counts come from one group-by-status
-   * aggregate over the denormalised current_status column (no events loaded); the storage-location count is the
-   * number of BOX locations configured for the prison. "Due to be returned" is always 0 - no status yet represents
-   * a pending return.
+   * Whole-prison property totals for the establishment summary tiles. "Stored on-site" is every container
+   * physically in an internal box here (summing the per-location counts); "available storage locations" is the
+   * prison's BOX locations minus that stored count; "due to transfer out" comes from the denormalised status;
+   * "due to be disposed" is queried on the proposed disposal date having arisen (disposal is time-based, not
+   * denormalised). "Due to be returned" is always 0 - no status yet represents a pending return.
    */
   @Transactional(readOnly = true)
   fun getPrisonPropertySummary(prisonId: String): PrisonPropertySummaryDto {
     val counts = repository.countContainersByStatus(prisonId).associate { it.status to it.count }
+    val storedOnSite = repository.countContainersByLocation(prisonId).sumOf { it.count }.toInt()
+    val totalBoxLocations = locationsClient.getLocationsByType(prisonId, BOX_LOCATION_TYPE).size
     return PrisonPropertySummaryDto(
-      availableStorageLocations = locationsClient.getLocationsByType(prisonId, BOX_LOCATION_TYPE).size,
-      storedOnSite = counts.count(ContainerStatus.STORED),
+      availableStorageLocations = (totalBoxLocations - storedOnSite).coerceAtLeast(0),
+      storedOnSite = storedOnSite,
       dueToTransferOut = counts.count(ContainerStatus.DUE_FOR_TRANSFER_OUT),
       dueToBeReturned = 0,
-      dueToBeDisposed = counts.count(ContainerStatus.DISPOSAL_REQUIRED),
+      dueToBeDisposed = repository.countDueForDisposal(prisonId, LocalDate.now()).toInt(),
     )
   }
 

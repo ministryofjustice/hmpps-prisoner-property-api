@@ -8,6 +8,7 @@ import jakarta.persistence.criteria.Root
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -66,11 +67,22 @@ class PropertyContainerRepositoryImpl(
 
     // No status filter hides containers that have left active storage; an explicit filter matches exactly.
     // includeRemoved additionally surfaces returned/disposed containers alongside either selection.
+    // DISPOSAL_REQUIRED is time-based (not held in the denormalised column), so it matches on the proposed
+    // disposal date having arisen rather than on currentStatusValue.
     val returnedOrDisposed = root.get<RemovalOutcome>("removalOutcome").`in`(RemovalOutcome.RETURNED, RemovalOutcome.DISPOSED)
     val statusPredicate = if (filter.statuses.isEmpty()) {
       cb.isNull(root.get<RemovalOutcome>("removalOutcome"))
     } else {
-      root.get<ContainerStatus>("currentStatusValue").`in`(filter.statuses)
+      val statusParts = mutableListOf<Predicate>()
+      val nonDisposal = filter.statuses.filter { it != ContainerStatus.DISPOSAL_REQUIRED }
+      if (nonDisposal.isNotEmpty()) statusParts += root.get<ContainerStatus>("currentStatusValue").`in`(nonDisposal)
+      if (filter.statuses.contains(ContainerStatus.DISPOSAL_REQUIRED)) {
+        statusParts += cb.and(
+          cb.isNull(root.get<RemovalOutcome>("removalOutcome")),
+          cb.lessThanOrEqualTo(root.get<LocalDate>("proposedDisposalDate"), LocalDate.now()),
+        )
+      }
+      cb.or(*statusParts.toTypedArray())
     }
     predicates += if (filter.includeRemoved) cb.or(statusPredicate, returnedOrDisposed) else statusPredicate
 

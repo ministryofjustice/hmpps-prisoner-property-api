@@ -110,13 +110,14 @@ class SyncPropertyContainerServiceTest {
   }
 
   @Test
-  fun `create with a proposed disposal date records disposal required`() {
+  fun `create with a proposed disposal date that has arisen records disposal required`() {
     stubSaveAssigningId()
 
-    service.sync(request(proposedDisposalDate = LocalDate.parse("2026-09-01")))
+    // A past date so the disposal is due now (disposal is time-based).
+    service.sync(request(proposedDisposalDate = LocalDate.parse("2026-01-01")))
 
     val saved = captureSaved()
-    assertThat(saved.proposedDisposalDate).isEqualTo(LocalDate.parse("2026-09-01"))
+    assertThat(saved.proposedDisposalDate).isEqualTo(LocalDate.parse("2026-01-01"))
     assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.DISPOSAL_REQUIRED)
     assertThat(saved.events.map { it.eventType }).contains(PropertyEventType.DISPOSAL_REQUIRED)
   }

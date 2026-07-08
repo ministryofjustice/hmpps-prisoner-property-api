@@ -87,17 +87,38 @@ class PropertyContainer(
   fun isRemoved(): Boolean = removalOutcome != null
 
   /**
+   * Whether the container has a proposed disposal date that has now arisen (today or earlier) and is
+   * still in active storage. Disposal is time-based, so this is derived from [proposedDisposalDate] vs
+   * today - never denormalised - and drives the DISPOSAL_REQUIRED overlay wherever status is shown.
+   */
+  fun isDisposalDue(): Boolean = removalOutcome == null && proposedDisposalDate?.let { !it.isAfter(LocalDate.now()) } == true
+
+  /**
    * The current status. A removal outcome takes precedence over the latest event so that a later
-   * correction (e.g. a seal fix) does not "un-remove" the container; otherwise a proposed disposal
-   * date shows DISPOSAL_REQUIRED, else it derives from the most recent event (defaulting to STORED
-   * before any event). A live (non-removed) container never shows TRANSFER: after a transfer-out
-   * reassigns its holding prison, it is active and STORED at the receiving prison.
+   * correction (e.g. a seal fix) does not "un-remove" the container; otherwise DISPOSAL_REQUIRED once
+   * the proposed disposal date has arisen (see [isDisposalDue]), else it derives from the most recent
+   * event (defaulting to STORED before any event). A live (non-removed) container never shows TRANSFER:
+   * after a transfer-out reassigns its holding prison, it is active and STORED at the receiving prison.
    */
   fun currentStatus(): ContainerStatus = when {
     removalOutcome != null -> removalOutcome!!.status
-    proposedDisposalDate != null -> ContainerStatus.DISPOSAL_REQUIRED
-    else -> latestEvent()?.eventType?.status?.takeUnless { it == ContainerStatus.TRANSFER } ?: ContainerStatus.STORED
+    isDisposalDue() -> ContainerStatus.DISPOSAL_REQUIRED
+    else -> baseEventStatus()
   }
+
+  /**
+   * The status excluding the time-based disposal overlay - the value denormalised into
+   * [currentStatusValue] so the establishment-list column stays time-stable (disposal is re-derived from
+   * [proposedDisposalDate] at read time). A removal outcome takes precedence; otherwise the latest
+   * non-disposal event's status.
+   */
+  fun baseStatus(): ContainerStatus = removalOutcome?.status ?: baseEventStatus()
+
+  /** The status from the most recent non-disposal event (disposal is derived from the date, not the event). */
+  private fun baseEventStatus(): ContainerStatus = events
+    .filter { it.eventType != PropertyEventType.DISPOSAL_REQUIRED }
+    .maxByOrNull { it.eventDateTime }
+    ?.eventType?.status?.takeUnless { it == ContainerStatus.TRANSFER } ?: ContainerStatus.STORED
 
   /**
    * The current internal location id, from the most recent location-affecting event. Null when the
@@ -128,12 +149,10 @@ class PropertyContainer(
    * events or changing the removal outcome, so the establishment-wide list query stays in step.
    */
   fun refreshDerivedState() {
-    currentStatusValue = currentStatus()
+    currentStatusValue = baseStatus()
     currentInternalLocationId = currentLocation()
     currentStorageLocationType = currentLocationType()
   }
-
-  private fun latestEvent(): PropertyEvent? = events.maxByOrNull { it.eventDateTime }
 
   private fun latestLocationEvent(): PropertyEvent? = events
     .filter { it.toInternalLocationId != null || it.toStorageLocationType != null || it.eventType == PropertyEventType.TRANSFERRED }

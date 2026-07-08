@@ -70,15 +70,27 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
-  fun `create with a proposed disposal date records disposal required`() {
+  fun `create with a future proposed disposal date stays stored and records the disposal event`() {
     stubSaveAssigningId()
+    val future = LocalDate.now().plusMonths(1)
 
-    service.create(createRequest(proposedDisposalDate = LocalDate.parse("2026-09-01")), "A_USER")
+    service.create(createRequest(proposedDisposalDate = future), "A_USER")
 
     val saved = captureSaved()
-    assertThat(saved.proposedDisposalDate).isEqualTo(LocalDate.parse("2026-09-01"))
-    assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.DISPOSAL_REQUIRED)
+    assertThat(saved.proposedDisposalDate).isEqualTo(future)
+    // Disposal is time-based: the date has not yet arisen, so the container is still STORED, though the
+    // disposal event is recorded for history.
+    assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.STORED)
     assertThat(saved.events.map { it.eventType }).contains(PropertyEventType.DISPOSAL_REQUIRED)
+  }
+
+  @Test
+  fun `create with a proposed disposal date that has already arisen is due for disposal`() {
+    stubSaveAssigningId()
+
+    service.create(createRequest(proposedDisposalDate = LocalDate.now().minusDays(1)), "A_USER")
+
+    assertThat(captureSaved().currentStatus()).isEqualTo(ContainerStatus.DISPOSAL_REQUIRED)
   }
 
   @Test

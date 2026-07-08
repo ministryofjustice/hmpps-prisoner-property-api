@@ -588,9 +588,11 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$.availableStorageLocations").isEqualTo(3)
+      // 3 boxes total minus the 1 container physically stored internally (the seeded container in LOCATION_B).
+      .jsonPath("$.availableStorageLocations").isEqualTo(2)
       .jsonPath("$.storedOnSite").isEqualTo(1)
       .jsonPath("$.dueToTransferOut").isEqualTo(1)
+      // SEALD's proposed disposal date (2026-01-01) has arisen.
       .jsonPath("$.dueToBeDisposed").isEqualTo(1)
       .jsonPath("$.dueToBeReturned").isEqualTo(0)
   }

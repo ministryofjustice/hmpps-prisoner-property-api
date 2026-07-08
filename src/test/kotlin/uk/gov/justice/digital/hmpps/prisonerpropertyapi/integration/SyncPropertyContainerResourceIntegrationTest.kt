@@ -109,14 +109,15 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `a proposed disposal date sets the disposal-required status`() {
+  fun `a proposed disposal date that has arisen sets the disposal-required status`() {
     val created = upsert(request())
 
-    upsert(request(dpsId = created.dpsId, proposedDisposalDate = LocalDate.parse("2026-09-01")))
+    // A past date so the disposal is due now (disposal is time-based).
+    upsert(request(dpsId = created.dpsId, proposedDisposalDate = LocalDate.parse("2026-01-01")))
 
     getById(created.dpsId)
       .jsonPath("$.currentStatus").isEqualTo("DISPOSAL_REQUIRED")
-      .jsonPath("$.proposedDisposalDate").isEqualTo("2026-09-01")
+      .jsonPath("$.proposedDisposalDate").isEqualTo("2026-01-01")
   }
 
   @Test

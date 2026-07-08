@@ -23,6 +23,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.Prisoner
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.LocationContainerCount
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonPropertyFilter
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerMovementStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
@@ -157,24 +158,25 @@ class PropertyContainerServiceTest {
   }
 
   @Test
-  fun `getPrisonPropertySummary maps status counts and box locations to the summary tiles`() {
+  fun `getPrisonPropertySummary maps location and status counts to the summary tiles`() {
+    // 12 containers physically stored across two internal boxes; 20 boxes total -> 8 available.
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(listOf(locationCount(8), locationCount(4)))
+    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
+      (1..20).map { LocationDetail(id = UUID.randomUUID(), prisonId = "LEI", code = "PB$it", pathHierarchy = "PROP-PB$it", localName = "Box $it") },
+    )
     whenever(repository.countContainersByStatus("LEI")).thenReturn(
       listOf(
-        statusCount(ContainerStatus.STORED, 3000),
         statusCount(ContainerStatus.DUE_FOR_TRANSFER_OUT, 80),
-        statusCount(ContainerStatus.DISPOSAL_REQUIRED, 40),
         // A terminal status the tiles ignore.
         statusCount(ContainerStatus.RETURNED, 5),
       ),
     )
-    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
-      (1..150).map { LocationDetail(id = UUID.randomUUID(), prisonId = "LEI", code = "PB$it", pathHierarchy = "PROP-PB$it", localName = "Box $it") },
-    )
+    whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(40)
 
     val summary = service.getPrisonPropertySummary("LEI")
 
-    assertThat(summary.availableStorageLocations).isEqualTo(150)
-    assertThat(summary.storedOnSite).isEqualTo(3000)
+    assertThat(summary.availableStorageLocations).isEqualTo(8)
+    assertThat(summary.storedOnSite).isEqualTo(12)
     assertThat(summary.dueToTransferOut).isEqualTo(80)
     assertThat(summary.dueToBeDisposed).isEqualTo(40)
     // No status yet backs a pending return, so this tile is always 0 for now.
@@ -182,8 +184,25 @@ class PropertyContainerServiceTest {
   }
 
   @Test
-  fun `getPrisonPropertySummary returns zero counts for statuses and boxes a prison has none of`() {
+  fun `getPrisonPropertySummary floors available locations at zero when more containers than boxes`() {
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(listOf(locationCount(30)))
+    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
+      (1..20).map { LocationDetail(id = UUID.randomUUID(), prisonId = "LEI", code = "PB$it", pathHierarchy = "PROP-PB$it", localName = "Box $it") },
+    )
     whenever(repository.countContainersByStatus("LEI")).thenReturn(emptyList())
+    whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
+
+    val summary = service.getPrisonPropertySummary("LEI")
+
+    assertThat(summary.availableStorageLocations).isZero()
+    assertThat(summary.storedOnSite).isEqualTo(30)
+  }
+
+  @Test
+  fun `getPrisonPropertySummary returns zero counts for a prison with no property or boxes`() {
+    whenever(repository.countContainersByStatus("LEI")).thenReturn(emptyList())
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
+    whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
     whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(emptyList())
 
     assertThat(service.getPrisonPropertySummary("LEI"))
@@ -396,6 +415,11 @@ class PropertyContainerServiceTest {
 
   private fun statusCount(status: ContainerStatus, count: Long): StatusContainerCount = object : StatusContainerCount {
     override val status = status
+    override val count = count
+  }
+
+  private fun locationCount(count: Long): LocationContainerCount = object : LocationContainerCount {
+    override val locationId = UUID.randomUUID()
     override val count = count
   }
 

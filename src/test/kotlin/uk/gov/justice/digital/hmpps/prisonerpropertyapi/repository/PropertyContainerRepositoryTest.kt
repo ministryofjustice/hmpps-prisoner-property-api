@@ -187,6 +187,42 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `countDueForDisposal counts only active containers whose disposal date has arisen`() {
+    saveActive("A0001AA", "NO-DATE")
+    saveWithDisposalDate("A0001AA", "PAST", LocalDate.now().minusDays(1))
+    saveWithDisposalDate("A0001AA", "TODAY", LocalDate.now())
+    saveWithDisposalDate("A0001AA", "FUTURE", LocalDate.now().plusDays(1))
+    // A disposed container with a past date must not count - it has left active storage.
+    saveWithDisposalDate("A0001AA", "GONE", LocalDate.now().minusDays(5)).apply {
+      removalOutcome = RemovalOutcome.DISPOSED
+      removalDate = LocalDate.now().minusDays(5)
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+
+    assertThat(containerRepository.countDueForDisposal("LEI", LocalDate.now())).isEqualTo(2)
+  }
+
+  @Test
+  fun `filtering by DISPOSAL_REQUIRED returns only containers whose disposal date has arisen`() {
+    saveWithDisposalDate("A0001AA", "PAST", LocalDate.now().minusDays(1))
+    saveWithDisposalDate("A0001AA", "FUTURE", LocalDate.now().plusDays(1))
+    saveActive("A0001AA", "STORED")
+
+    // A future-dated container is not yet due, so it is excluded and its denormalised status stays STORED.
+    assertThat(
+      containerRepository.findContainers(
+        "LEI",
+        PrisonPropertyFilter(statuses = listOf(ContainerStatus.DISPOSAL_REQUIRED)),
+        listOf("A0001AA"),
+      ),
+    ).extracting<String> { it.currentSealNumber }.containsExactly("PAST")
+
+    assertThat(containerRepository.findByPrisonerNumberAndArchivedFalse("A0001AA").first { it.currentSealNumber == "FUTURE" }.currentStatusValue)
+      .isEqualTo(ContainerStatus.STORED)
+  }
+
+  @Test
   fun `free-text search matches prisoner number, seal number or resolved storage location`() {
     val bySeal = saveActive("A0001AA", "SN-FIND-ME", location = LOCATION_A)
     val byLocation = saveActive("A0001AA", "SN-OTHER", location = LOCATION_B)
@@ -241,6 +277,22 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
     }
     container.events.add(
       PropertyEvent(container, PropertyEventType.CREATED_SEALED, baseTime, "USER1", sealNumber = seal, toInternalLocationId = location, toStorageLocationType = storageType),
+    )
+    container.refreshDerivedState()
+    return containerRepository.save(container)
+  }
+
+  private fun saveWithDisposalDate(prisonerNumber: String, seal: String, disposalDate: LocalDate): PropertyContainer {
+    val container = PropertyContainer(
+      prisonerNumber = prisonerNumber,
+      prisonId = "LEI",
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "USER1",
+      currentSealNumber = seal,
+      proposedDisposalDate = disposalDate,
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, baseTime, "USER1", sealNumber = seal, toInternalLocationId = LOCATION_A, toStorageLocationType = StorageLocationType.INTERNAL),
     )
     container.refreshDerivedState()
     return containerRepository.save(container)
