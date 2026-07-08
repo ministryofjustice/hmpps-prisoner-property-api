@@ -167,6 +167,7 @@ class PropertyContainerServiceTest {
     whenever(repository.countContainersByStatus("LEI")).thenReturn(
       listOf(
         statusCount(ContainerStatus.DUE_FOR_TRANSFER_OUT, 80),
+        statusCount(ContainerStatus.DUE_FOR_RETURN, 36),
         // A terminal status the tiles ignore.
         statusCount(ContainerStatus.RETURNED, 5),
       ),
@@ -178,9 +179,8 @@ class PropertyContainerServiceTest {
     assertThat(summary.availableStorageLocations).isEqualTo(8)
     assertThat(summary.storedOnSite).isEqualTo(12)
     assertThat(summary.dueToTransferOut).isEqualTo(80)
+    assertThat(summary.dueToBeReturned).isEqualTo(36)
     assertThat(summary.dueToBeDisposed).isEqualTo(40)
-    // No status yet backs a pending return, so this tile is always 0 for now.
-    assertThat(summary.dueToBeReturned).isZero()
   }
 
   @Test

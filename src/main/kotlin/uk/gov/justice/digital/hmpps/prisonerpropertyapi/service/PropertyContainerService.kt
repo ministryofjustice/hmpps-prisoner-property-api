@@ -77,7 +77,7 @@ class PropertyContainerService(
    * physically in an internal box here (summing the per-location counts); "available storage locations" is the
    * prison's BOX locations minus that stored count; "due to transfer out" comes from the denormalised status;
    * "due to be disposed" is queried on the proposed disposal date having arisen (disposal is time-based, not
-   * denormalised). "Due to be returned" is always 0 - no status yet represents a pending return.
+   * denormalised). "Due to be returned" counts containers flagged due for return after the prisoner's release.
    */
   @Transactional(readOnly = true)
   fun getPrisonPropertySummary(prisonId: String): PrisonPropertySummaryDto {
@@ -88,7 +88,7 @@ class PropertyContainerService(
       availableStorageLocations = (totalBoxLocations - storedOnSite).coerceAtLeast(0),
       storedOnSite = storedOnSite,
       dueToTransferOut = counts.count(ContainerStatus.DUE_FOR_TRANSFER_OUT),
-      dueToBeReturned = 0,
+      dueToBeReturned = counts.count(ContainerStatus.DUE_FOR_RETURN),
       dueToBeDisposed = repository.countDueForDisposal(prisonId, LocalDate.now()).toInt(),
     )
   }

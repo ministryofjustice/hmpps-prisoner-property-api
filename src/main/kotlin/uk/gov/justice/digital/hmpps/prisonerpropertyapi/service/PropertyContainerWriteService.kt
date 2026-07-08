@@ -351,6 +351,28 @@ class PropertyContainerWriteService(
   private fun PropertyContainer.isAlreadyDueForTransferOut(newPrisonId: String): Boolean = currentStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT &&
     events.maxByOrNull { it.eventDateTime }?.toPrisonId == newPrisonId
 
+  /**
+   * Handle a prisoner being released from custody (or dying in custody). Every active container the
+   * prisoner still has - at any prison - is flagged due for return by appending a
+   * [PropertyEventType.PRISONER_RELEASED] event; the container stays where it is, only its derived status
+   * and history change. Idempotent: containers already due for return are skipped, so the delayed and
+   * potentially duplicated release events are safe no-ops. Returns one
+   * [PropertyDomainEventType.CONTAINER_UPDATED] event per container changed, to publish after commit.
+   */
+  @Transactional
+  fun prisonerReleased(prisonerNumber: String): List<HmppsDomainEvent> {
+    val now = LocalDateTime.now()
+    return repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber)
+      .filter { !it.isRemoved() && it.baseStatus() != ContainerStatus.DUE_FOR_RETURN }
+      .map { container ->
+        container.events.add(
+          PropertyEvent(container, PropertyEventType.PRISONER_RELEASED, now, SYSTEM_USER, fromPrisonId = container.prisonId),
+        )
+        container.refreshDerivedState()
+        PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, listOf("currentStatus"))
+      }
+  }
+
   private fun loadActive(id: UUID): PropertyContainer {
     val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
     container.removalOutcome?.let { throw ContainerAlreadyRemovedException(id, it) }

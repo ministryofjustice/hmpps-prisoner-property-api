@@ -592,6 +592,36 @@ class PropertyContainerWriteServiceTest {
     verify(repository, never()).save(any())
   }
 
+  @Test
+  fun `prisonerReleased flags all active containers as due for return, wherever held`() {
+    val here = containerAt("LEI", "SEAL1")
+    // A container already due for transfer out flips to due for return on release.
+    val elsewhere = dueForTransferOut("MDI", "SEAL2", "LEI")
+    val removed = containerAt("LEI", "SEAL3").apply { removalOutcome = RemovalOutcome.RETURNED }
+    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(here, elsewhere, removed))
+
+    val events = service.prisonerReleased("A1234BC")
+
+    assertThat(here.currentStatus()).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+    assertThat(elsewhere.currentStatus()).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+    assertThat(here.events.last().eventType).isEqualTo(PropertyEventType.PRISONER_RELEASED)
+    // the removed container is untouched
+    assertThat(removed.events.map { it.eventType }).doesNotContain(PropertyEventType.PRISONER_RELEASED)
+    assertThat(events).hasSize(2).allSatisfy { assertThat(it.eventType).isEqualTo("prison-property.container.updated") }
+  }
+
+  @Test
+  fun `prisonerReleased is idempotent - a repeat does nothing`() {
+    val container = containerAt("LEI", "SEAL1")
+    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(container))
+
+    service.prisonerReleased("A1234BC")
+    val secondCallEvents = service.prisonerReleased("A1234BC")
+
+    assertThat(secondCallEvents).isEmpty()
+    assertThat(container.events.count { it.eventType == PropertyEventType.PRISONER_RELEASED }).isEqualTo(1)
+  }
+
   private fun containerAt(prisonId: String, seal: String): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
