@@ -7,18 +7,18 @@ import io.swagger.v3.oas.annotations.media.Schema
     "whole, independent of any list paging or filtering.",
 )
 data class PrisonPropertySummaryDto(
-  @Schema(description = "Number of BOX storage locations configured for the prison (from locations-inside-prison-api)", example = "150")
+  @Schema(description = "The prison's total internal BOX storage locations minus the containers currently stored on-site (floored at 0)", example = "150")
   val availableStorageLocations: Int,
 
-  @Schema(description = "Number of containers currently stored on-site (status STORED)", example = "3000")
+  @Schema(description = "Number of containers currently in internal storage at this establishment", example = "3000")
   val storedOnSite: Int,
 
-  @Schema(description = "Number of containers due to be transferred out (status DUE_FOR_TRANSFER_OUT)", example = "80")
+  @Schema(description = "Number of containers held here for people no longer at this establishment (status DUE_FOR_TRANSFER_OUT)", example = "80")
   val dueToTransferOut: Int,
 
   @Schema(description = "Number of containers due to be returned. Always 0 for now - no status yet represents a pending return", example = "0")
   val dueToBeReturned: Int,
 
-  @Schema(description = "Number of containers due to be disposed of (status DISPOSAL_REQUIRED)", example = "40")
+  @Schema(description = "Number of containers whose proposed disposal date has arisen (today or earlier)", example = "40")
   val dueToBeDisposed: Int,
 )

@@ -138,7 +138,9 @@ data class PrisonerPropertyContainerDto(
       inPrisonersCurrentPrison = inPrisonersCurrentPrison,
       containerType = container.containerType,
       currentSealNumber = container.currentSealNumber,
-      currentStatus = container.currentStatusValue,
+      // The denormalised column holds the time-stable base status; overlay DISPOSAL_REQUIRED once the
+      // proposed disposal date has arisen, so the list matches the person view without loading events.
+      currentStatus = if (container.isDisposalDue()) ContainerStatus.DISPOSAL_REQUIRED else container.currentStatusValue,
       currentLocation = container.currentInternalLocationId,
       currentLocationType = container.currentStorageLocationType,
       locationDescription = locationDescription,
