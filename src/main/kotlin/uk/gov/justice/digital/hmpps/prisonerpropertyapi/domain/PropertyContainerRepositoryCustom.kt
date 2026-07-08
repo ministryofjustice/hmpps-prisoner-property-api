@@ -13,6 +13,13 @@ interface PropertyContainerRepositoryCustom {
   /** A page of distinct prisoner numbers (ordered) that have at least one container matching [filter]. */
   fun findPrisonerNumbersPage(prisonId: String, filter: PrisonPropertyFilter, pageable: Pageable): Page<String>
 
+  /**
+   * All distinct prisoner numbers (ordered) that have at least one container matching [filter] - unpaged,
+   * for the person-location filter which must bucket every matching prisoner by their current establishment
+   * (from prisoner-search) before paginating in memory.
+   */
+  fun findPrisonerNumbers(prisonId: String, filter: PrisonPropertyFilter): List<String>
+
   /** The containers matching [filter] for the given prisoners, ordered by prisoner then creation time. */
   fun findContainers(prisonId: String, filter: PrisonPropertyFilter, prisonerNumbers: List<String>): List<PropertyContainer>
 }

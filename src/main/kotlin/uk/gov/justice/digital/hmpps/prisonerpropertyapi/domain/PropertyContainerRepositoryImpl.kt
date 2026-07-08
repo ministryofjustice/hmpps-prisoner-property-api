@@ -43,6 +43,17 @@ class PropertyContainerRepositoryImpl(
     return PageImpl(content, pageable, total)
   }
 
+  override fun findPrisonerNumbers(prisonId: String, filter: PrisonPropertyFilter): List<String> {
+    val cb = entityManager.criteriaBuilder
+    val query = cb.createQuery(String::class.java)
+    val root = query.from(PropertyContainer::class.java)
+    query.select(root.get("prisonerNumber"))
+      .distinct(true)
+      .where(*predicates(cb, root, prisonId, filter).toTypedArray())
+      .orderBy(cb.asc(root.get<String>("prisonerNumber")))
+    return entityManager.createQuery(query).resultList
+  }
+
   override fun findContainers(prisonId: String, filter: PrisonPropertyFilter, prisonerNumbers: List<String>): List<PropertyContainer> {
     if (prisonerNumbers.isEmpty()) return emptyList()
     val cb = entityManager.criteriaBuilder

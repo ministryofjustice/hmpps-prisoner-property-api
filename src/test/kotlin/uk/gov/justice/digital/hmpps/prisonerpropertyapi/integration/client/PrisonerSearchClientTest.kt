@@ -1,5 +1,8 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.client
 
+import com.github.tomakehurst.wiremock.client.WireMock.equalTo
+import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
+import com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -39,5 +42,28 @@ class PrisonerSearchClientTest : IntegrationTestBase() {
     prisonerSearch.stubGetPrisonerNotFound("A0000AA")
 
     assertThat(prisonerSearchClient.getPrisoner("A0000AA")).isNull()
+  }
+
+  @Test
+  fun `getPrisoners looks up in bulk requesting only the fields the list needs`() {
+    prisonerSearch.stubFindByNumbers("A1234BC" to "MDI", "A1111AA" to "LEI")
+
+    val prisoners = prisonerSearchClient.getPrisoners(listOf("A1234BC", "A1111AA"))
+
+    assertThat(prisoners.keys).containsExactlyInAnyOrder("A1234BC", "A1111AA")
+    assertThat(prisoners["A1234BC"]?.prisonId).isEqualTo("MDI")
+    prisonerSearch.verify(
+      postRequestedFor(urlPathEqualTo("/prisoner-search/prisoner-numbers"))
+        .withQueryParam("responseFields", equalTo("prisonerNumber,firstName,lastName,prisonId,lastMovementTypeCode")),
+    )
+  }
+
+  @Test
+  fun `getPrisoners chunks a large batch into multiple requests`() {
+    prisonerSearch.stubFindByNumbers("A1234BC" to "MDI")
+
+    prisonerSearchClient.getPrisoners((1..1001).map { "A%04dBC".format(it) })
+
+    prisonerSearch.verify(2, postRequestedFor(urlPathEqualTo("/prisoner-search/prisoner-numbers")))
   }
 }

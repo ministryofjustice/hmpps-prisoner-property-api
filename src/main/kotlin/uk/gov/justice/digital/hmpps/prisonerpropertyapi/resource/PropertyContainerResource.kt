@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PersonLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.BoxLocationDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.BoxLocationSort
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
@@ -158,6 +159,9 @@ class PropertyContainerResource(
     @Parameter(description = "Also include containers that have been returned or disposed of", example = "false")
     @RequestParam(required = false, defaultValue = "false")
     includeRemoved: Boolean,
+    @Parameter(description = "Filter by where the property's owner currently is: IN_ESTABLISHMENT (people held here) or LEFT_ESTABLISHMENT (people no longer here). Resolved from prisoner-search.", example = "IN_ESTABLISHMENT")
+    @RequestParam(required = false)
+    personLocation: PersonLocation?,
     @ParameterObject
     pageable: Pageable,
   ): Page<PrisonerPropertyGroupDto> = propertyContainerService.getPrisonProperty(
@@ -169,6 +173,7 @@ class PropertyContainerResource(
     storageLocation = storageLocation,
     includeRemoved = includeRemoved,
     search = query,
+    personLocation = personLocation,
     pageable = pageable,
   )
 
