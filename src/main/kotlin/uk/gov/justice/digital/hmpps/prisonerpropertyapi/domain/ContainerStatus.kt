@@ -7,6 +7,7 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain
 enum class ContainerStatus {
   STORED,
   DUE_FOR_TRANSFER_OUT,
+  DUE_FOR_RETURN,
   DISPOSAL_REQUIRED,
   DISPOSED,
   RETURNED,

@@ -68,6 +68,13 @@ class PropertyContainerTest {
   }
 
   @Test
+  fun `a released container is due for return`() {
+    val container = container(events = listOf(PropertyEventType.CREATED_SEALED, PropertyEventType.PRISONER_RELEASED))
+    assertThat(container.currentStatus()).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+    assertThat(container.baseStatus()).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+  }
+
+  @Test
   fun `a removed container is never disposal-due`() {
     val container = container(LocalDate.now().minusDays(1)).apply { removalOutcome = RemovalOutcome.RETURNED }
     assertThat(container.isDisposalDue()).isFalse()
