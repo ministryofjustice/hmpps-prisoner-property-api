@@ -330,17 +330,23 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
-  fun `remove transferring records a TRANSFERRED outcome with the from and to prisons`() {
+  fun `remove transferring reassigns the container to the receiving prison and keeps it active`() {
     val existing = existingContainer()
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
 
-    service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.TRANSFERRED, toPrisonId = "MDI"), "A_USER")
+    val result = service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.TRANSFERRED, toPrisonId = "MDI"), "A_USER")
 
-    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+    // reassigned to the receiving prison, still active, with its location cleared
+    assertThat(existing.prisonId).isEqualTo("MDI")
+    assertThat(existing.removalOutcome).isNull()
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.STORED)
+    assertThat(existing.currentLocation()).isNull()
     val event = existing.events.last()
     assertThat(event.eventType).isEqualTo(PropertyEventType.TRANSFERRED)
     assertThat(event.fromPrisonId).isEqualTo("LEI")
     assertThat(event.toPrisonId).isEqualTo("MDI")
+    assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("prisonId", "location"))
   }
 
   @Test
@@ -351,8 +357,34 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
-  fun `remove with a DISPOSED outcome is rejected`() {
-    assertThatThrownBy { service.remove(UUID.randomUUID(), RemoveContainerRequest(outcome = RemovalOutcome.DISPOSED), "A_USER") }
+  fun `remove with a DISPOSED outcome records a disposed removal and clears the location`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.DISPOSED), "A_USER")
+
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.DISPOSED)
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.DISPOSED)
+    assertThat(existing.currentLocation()).isNull()
+    assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.DISPOSED)
+  }
+
+  @Test
+  fun `remove recording the record was created in error takes the container out of active storage`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.CREATED_IN_ERROR), "A_USER")
+
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.CREATED_IN_ERROR)
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.CREATED_IN_ERROR)
+    assertThat(existing.currentLocation()).isNull()
+    assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.CREATED_IN_ERROR)
+  }
+
+  @Test
+  fun `remove with a COMBINED outcome is rejected`() {
+    assertThatThrownBy { service.remove(UUID.randomUUID(), RemoveContainerRequest(outcome = RemovalOutcome.COMBINED), "A_USER") }
       .isInstanceOf(ValidationException::class.java)
     verify(repository, never()).save(any())
   }

@@ -12,4 +12,5 @@ enum class ContainerStatus {
   RETURNED,
   TRANSFER,
   COMBINED,
+  CREATED_IN_ERROR,
 }

@@ -257,7 +257,7 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `removes a container by transferring it to another prison`() {
+  fun `transferring reassigns a container to the receiving prison and keeps it active`() {
     val id = repository.save(seedContainer()).id!!
 
     webTestClient.post().uri("/property-containers/{id}/remove", id)
@@ -266,7 +266,44 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$.removalOutcome").isEqualTo("TRANSFERRED")
+      .jsonPath("$.prisonId").isEqualTo("MDI")
+      .jsonPath("$.currentStatus").isEqualTo("STORED")
+      .jsonPath("$.removalOutcome").doesNotExist()
+      .jsonPath("$.currentLocation").doesNotExist()
+
+    // reassigned to the receiving prison, still active, location cleared
+    val transferred = repository.findById(id).get()
+    assertThat(transferred.prisonId).isEqualTo("MDI")
+    assertThat(transferred.removalOutcome).isNull()
+    assertThat(transferred.currentStatusValue).isEqualTo(ContainerStatus.STORED)
+    assertThat(transferred.currentInternalLocationId).isNull()
+    assertThat(transferred.events.last().eventType).isEqualTo(PropertyEventType.TRANSFERRED)
+  }
+
+  @Test
+  fun `removes a container as created in error, taking it out of active storage`() {
+    val id = repository.save(seedContainer()).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/remove", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(RemoveContainerRequest(outcome = RemovalOutcome.CREATED_IN_ERROR))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.currentStatus").isEqualTo("CREATED_IN_ERROR")
+      .jsonPath("$.removalOutcome").isEqualTo("CREATED_IN_ERROR")
+      .jsonPath("$.currentLocation").doesNotExist()
+  }
+
+  @Test
+  fun `rejects combining via the remove endpoint`() {
+    val id = repository.save(seedContainer()).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/remove", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(RemoveContainerRequest(outcome = RemovalOutcome.COMBINED))
+      .exchange()
+      .expectStatus().isBadRequest
   }
 
   @Test
