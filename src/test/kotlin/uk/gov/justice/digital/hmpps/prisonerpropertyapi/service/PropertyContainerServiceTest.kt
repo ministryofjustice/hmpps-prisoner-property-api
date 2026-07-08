@@ -284,6 +284,67 @@ class PropertyContainerServiceTest {
   }
 
   @Test
+  fun `getPrisonProperty passes multiple container types and includeRemoved through to the filter`() {
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    service.getPrisonProperty(
+      "LEI",
+      containerTypes = listOf(ContainerType.STANDARD, ContainerType.VALUABLES),
+      includeRemoved = true,
+      pageable = PAGE,
+    )
+
+    verify(repository).findPrisonerNumbersPage(
+      eq("LEI"),
+      check<PrisonPropertyFilter> {
+        assertThat(it.containerTypes).containsExactly(ContainerType.STANDARD, ContainerType.VALUABLES)
+        assertThat(it.includeRemoved).isTrue()
+      },
+      any(),
+    )
+  }
+
+  @Test
+  fun `getPrisonProperty resolves a free-text query to its storage-location ids for an OR search`() {
+    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
+      listOf(
+        LocationDetail(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638", localName = "Reception Box A"),
+        LocationDetail(id = LOCATION_B, prisonId = "LEI", code = "PB0200", pathHierarchy = "PROP-PB0200", localName = "Reception Box B"),
+      ),
+    )
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    service.getPrisonProperty("LEI", search = "pb5638", pageable = PAGE)
+
+    verify(repository).findPrisonerNumbersPage(
+      eq("LEI"),
+      check<PrisonPropertyFilter> {
+        assertThat(it.search).isEqualTo("pb5638")
+        assertThat(it.searchLocationIds).containsExactly(LOCATION_A)
+        assertThat(it.searchBranston).isFalse()
+      },
+      any(),
+    )
+  }
+
+  @Test
+  fun `getPrisonProperty treats a BRANSTON query as an offsite search without a locations lookup`() {
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    service.getPrisonProperty("LEI", search = "Branston", pageable = PAGE)
+
+    verify(repository).findPrisonerNumbersPage(
+      eq("LEI"),
+      check<PrisonPropertyFilter> {
+        assertThat(it.searchBranston).isTrue()
+        assertThat(it.searchLocationIds).isEmpty()
+      },
+      any(),
+    )
+    verify(locationsClient, never()).getLocationsByType(any(), any())
+  }
+
+  @Test
   fun `getById returns the container when present`() {
     val container = containerWithHistory()
     whenever(repository.findById(any())).thenReturn(Optional.of(container))

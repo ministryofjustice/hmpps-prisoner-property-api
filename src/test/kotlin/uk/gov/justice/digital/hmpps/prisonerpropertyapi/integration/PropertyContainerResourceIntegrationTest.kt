@@ -177,6 +177,91 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `filters the prison list by multiple container types`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    repository.save(
+      containerWithStatus("SEAL-VAL") { containerType = ContainerType.VALUABLES },
+    )
+
+    // both types for the same prisoner come back together
+    webTestClient.get().uri("/property-containers/prison/LEI?containerType=STANDARD&containerType=VALUABLES")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].containers.length()").isEqualTo(2)
+
+    // narrowing to one type returns only that container
+    webTestClient.get().uri("/property-containers/prison/LEI?containerType=VALUABLES")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].containers.length()").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].containerType").isEqualTo("VALUABLES")
+  }
+
+  @Test
+  fun `includeRemoved surfaces returned and disposed containers alongside active ones`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    repository.save(
+      containerWithStatus("SEAL-DISPOSED") {
+        removalOutcome = RemovalOutcome.DISPOSED
+        removalDate = baseTime.toLocalDate()
+      },
+    )
+
+    // default hides the disposed container
+    webTestClient.get().uri("/property-containers/prison/LEI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].containers.length()").isEqualTo(1)
+
+    // includeRemoved brings it back alongside the active one
+    webTestClient.get().uri("/property-containers/prison/LEI?includeRemoved=true")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].containers.length()").isEqualTo(2)
+  }
+
+  @Test
+  fun `free-text query matches a seal number across the prison list`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PB5638", "Reception Property Store")))
+
+    // the seed container's seal is SEAL002
+    webTestClient.get().uri("/property-containers/prison/LEI?query=SEAL002")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentSealNumber").isEqualTo("SEAL002")
+
+    // a term matching no prisoner number, seal or location returns nothing
+    webTestClient.get().uri("/property-containers/prison/LEI?query=NO-SUCH-TERM")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(0)
+  }
+
+  @Test
   fun `returns a property container by id`() {
     webTestClient.get().uri("/property-containers/{id}", containerId)
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))

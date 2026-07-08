@@ -6,6 +6,7 @@ import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationDetail
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonRegisterClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.Prisoner
@@ -100,24 +101,33 @@ class PropertyContainerService(
     prisonId: String,
     prisonerNumber: String? = null,
     sealNumber: String? = null,
-    containerType: ContainerType? = null,
+    containerTypes: List<ContainerType> = emptyList(),
     statuses: List<ContainerStatus> = emptyList(),
     storageLocation: String? = null,
+    includeRemoved: Boolean = false,
+    search: String? = null,
     pageable: Pageable,
   ): Page<PrisonerPropertyGroupDto> {
     val branstonOnly = storageLocation.equals(BRANSTON_SEARCH_TERM, ignoreCase = true)
-    val locationIds = if (storageLocation != null && !branstonOnly) {
-      locationsClient.getLocationsByType(prisonId, BOX_LOCATION_TYPE)
-        .filter {
-          it.code.equals(storageLocation, ignoreCase = true) ||
-            it.localName.equals(storageLocation, ignoreCase = true) ||
-            it.pathHierarchy.equals(storageLocation, ignoreCase = true)
-        }
-        .map { it.id }
-    } else {
-      null
-    }
-    val filter = PrisonPropertyFilter(prisonerNumber, sealNumber, containerType, statuses, locationIds, branstonOnly)
+    val searchBranston = search.equals(BRANSTON_SEARCH_TERM, ignoreCase = true)
+    // Resolve the storage-location parts of both the exact filter and the free-text search up front, so a
+    // single lookup of the prison's box locations covers whichever non-Branston terms are present.
+    val needStorageLookup = (storageLocation != null && !branstonOnly) || (search != null && !searchBranston)
+    val boxLocations = if (needStorageLookup) locationsClient.getLocationsByType(prisonId, BOX_LOCATION_TYPE) else emptyList()
+    val locationIds = if (storageLocation != null && !branstonOnly) resolveLocationIds(boxLocations, storageLocation) else null
+    val searchLocationIds = if (search != null && !searchBranston) resolveLocationIds(boxLocations, search) else emptyList()
+    val filter = PrisonPropertyFilter(
+      prisonerNumber = prisonerNumber,
+      sealNumber = sealNumber,
+      containerTypes = containerTypes,
+      statuses = statuses,
+      includeRemoved = includeRemoved,
+      locationIds = locationIds,
+      branstonOnly = branstonOnly,
+      search = search,
+      searchLocationIds = searchLocationIds,
+      searchBranston = searchBranston,
+    )
 
     val prisonerPage = repository.findPrisonerNumbersPage(prisonId, filter, pageable)
     if (prisonerPage.isEmpty) return PageImpl(emptyList(), pageable, prisonerPage.totalElements)
@@ -241,6 +251,15 @@ class PropertyContainerService(
 
   /** The count for a status from a [countContainersByStatus] map, as an Int (0 when absent). */
   private fun Map<ContainerStatus, Long>.count(status: ContainerStatus): Int = this[status]?.toInt() ?: 0
+
+  /** The ids of the given box locations whose code, local name or path hierarchy match [term] (case-insensitive). */
+  private fun resolveLocationIds(boxLocations: List<LocationDetail>, term: String): List<UUID> = boxLocations
+    .filter {
+      it.code.equals(term, ignoreCase = true) ||
+        it.localName.equals(term, ignoreCase = true) ||
+        it.pathHierarchy.equals(term, ignoreCase = true)
+    }
+    .map { it.id }
 
   private companion object {
     /** The storage-location search term that means "held offsite at Branston" rather than an internal code. */

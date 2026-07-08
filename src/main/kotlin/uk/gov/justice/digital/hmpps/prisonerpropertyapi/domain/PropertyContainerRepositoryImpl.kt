@@ -62,19 +62,33 @@ class PropertyContainerRepositoryImpl(
     )
     filter.prisonerNumber?.let { predicates += cb.equal(root.get<String>("prisonerNumber"), it) }
     filter.sealNumber?.let { predicates += cb.equal(root.get<String>("currentSealNumber"), it) }
-    filter.containerType?.let { predicates += cb.equal(root.get<ContainerType>("containerType"), it) }
+    if (filter.containerTypes.isNotEmpty()) predicates += root.get<ContainerType>("containerType").`in`(filter.containerTypes)
 
     // No status filter hides containers that have left active storage; an explicit filter matches exactly.
-    if (filter.statuses.isEmpty()) {
-      predicates += cb.isNull(root.get<RemovalOutcome>("removalOutcome"))
+    // includeRemoved additionally surfaces returned/disposed containers alongside either selection.
+    val returnedOrDisposed = root.get<RemovalOutcome>("removalOutcome").`in`(RemovalOutcome.RETURNED, RemovalOutcome.DISPOSED)
+    val statusPredicate = if (filter.statuses.isEmpty()) {
+      cb.isNull(root.get<RemovalOutcome>("removalOutcome"))
     } else {
-      predicates += root.get<ContainerStatus>("currentStatusValue").`in`(filter.statuses)
+      root.get<ContainerStatus>("currentStatusValue").`in`(filter.statuses)
     }
+    predicates += if (filter.includeRemoved) cb.or(statusPredicate, returnedOrDisposed) else statusPredicate
 
     when {
       filter.branstonOnly -> predicates += cb.equal(root.get<StorageLocationType>("currentStorageLocationType"), StorageLocationType.BRANSTON)
       filter.locationIds != null ->
         predicates += if (filter.locationIds.isEmpty()) cb.disjunction() else root.get<UUID>("currentInternalLocationId").`in`(filter.locationIds)
+    }
+
+    // Free-text search matches (OR) prisoner number, seal number, or the term's resolved storage location.
+    filter.search?.let { term ->
+      val matches = mutableListOf(
+        cb.equal(root.get<String>("prisonerNumber"), term.uppercase()),
+        cb.equal(root.get<String>("currentSealNumber"), term),
+      )
+      if (filter.searchBranston) matches += cb.equal(root.get<StorageLocationType>("currentStorageLocationType"), StorageLocationType.BRANSTON)
+      if (filter.searchLocationIds.isNotEmpty()) matches += root.get<UUID>("currentInternalLocationId").`in`(filter.searchLocationIds)
+      predicates += cb.or(*matches.toTypedArray())
     }
     return predicates
   }
