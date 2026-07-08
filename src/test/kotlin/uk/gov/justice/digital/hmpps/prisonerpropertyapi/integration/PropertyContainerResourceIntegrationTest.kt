@@ -282,6 +282,8 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   @Test
   fun `returns a container's events newest first`() {
+    prisonRegister.stubGetPrisons()
+
     webTestClient.get().uri("/property-containers/{id}/events", containerId)
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
@@ -290,6 +292,9 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.length()").isEqualTo(3)
       .jsonPath("$[0].eventType").isEqualTo("MOVED")
       .jsonPath("$[0].toInternalLocationId").isEqualTo(LOCATION_B.toString())
+      // the container type is snapshotted on every event
+      .jsonPath("$[0].containerType").isEqualTo("STANDARD")
+      .jsonPath("$[2].containerType").isEqualTo("STANDARD")
       .jsonPath("$[1].eventType").isEqualTo("SEAL_CHANGED")
       .jsonPath("$[1].sealNumber").isEqualTo("SEAL002")
       .jsonPath("$[2].eventType").isEqualTo("CREATED_SEALED")
