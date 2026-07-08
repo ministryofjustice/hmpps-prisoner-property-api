@@ -1,6 +1,7 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto
 
 import io.swagger.v3.oas.annotations.media.Schema
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
@@ -37,8 +38,17 @@ data class PropertyEventDto(
   @Schema(description = "Prison the container moved from, for transfer events", example = "LEI", nullable = true)
   val fromPrisonId: String?,
 
+  @Schema(description = "Name of the prison the container moved from, for transfer events", example = "Leeds (HMP)", nullable = true)
+  val fromPrisonName: String?,
+
   @Schema(description = "Prison the container moved to, for transfer events", example = "MDI", nullable = true)
   val toPrisonId: String?,
+
+  @Schema(description = "Name of the prison the container moved to, for transfer events", example = "Moorland (HMP & YOI)", nullable = true)
+  val toPrisonName: String?,
+
+  @Schema(description = "The container's type as at the time of this event (snapshotted for the durable history)", example = "STANDARD")
+  val containerType: ContainerType,
 
   @Schema(description = "Business date the event relates to (e.g. proposed disposal or removal date), if any", example = "2026-09-15", nullable = true)
   val eventDate: LocalDate?,
@@ -47,7 +57,8 @@ data class PropertyEventDto(
   val relatedContainerId: UUID?,
 ) {
   companion object {
-    fun from(event: PropertyEvent) = PropertyEventDto(
+    /** [prisonNames] resolves prison ids to names (from prison-register); pass an empty map to skip resolution. */
+    fun from(event: PropertyEvent, prisonNames: Map<String, String> = emptyMap()) = PropertyEventDto(
       id = event.id!!,
       eventType = event.eventType,
       eventDateTime = event.eventDateTime,
@@ -57,7 +68,10 @@ data class PropertyEventDto(
       toInternalLocationId = event.toInternalLocationId,
       toStorageLocationType = event.toStorageLocationType,
       fromPrisonId = event.fromPrisonId,
+      fromPrisonName = event.fromPrisonId?.let { prisonNames[it] },
       toPrisonId = event.toPrisonId,
+      toPrisonName = event.toPrisonId?.let { prisonNames[it] },
+      containerType = event.containerType,
       eventDate = event.eventDate,
       relatedContainerId = event.relatedContainerId,
     )

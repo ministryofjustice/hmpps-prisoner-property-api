@@ -446,7 +446,25 @@ class PropertyContainerServiceTest {
     assertThat(result.first().toInternalLocationId).isEqualTo(LOCATION_B)
     assertThat(result.last().sealNumber).isEqualTo("SEAL001")
     assertThat(result.last().fromInternalLocationId).isNull()
+    // every event snapshots the container's type
+    assertThat(result).allMatch { it.containerType == ContainerType.STANDARD }
     verify(repository).findById(container.id!!)
+  }
+
+  @Test
+  fun `getEvents resolves the transfer destination prison to a name`() {
+    val container = containerAt("LEI", "SEAL001")
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.TRANSFERRED, baseTime.plusHours(1), "USER1", fromPrisonId = "LEI", toPrisonId = "MDI"),
+    )
+    container.events.forEach { it.id = UUID.randomUUID() }
+    whenever(repository.findById(any())).thenReturn(Optional.of(container))
+
+    val transfer = service.getEvents(container.id!!).first { it.eventType == PropertyEventType.TRANSFERRED }
+
+    assertThat(transfer.toPrisonId).isEqualTo("MDI")
+    assertThat(transfer.toPrisonName).isEqualTo("Moorland (HMP)")
+    assertThat(transfer.fromPrisonName).isEqualTo("Leeds (HMP)")
   }
 
   @Test

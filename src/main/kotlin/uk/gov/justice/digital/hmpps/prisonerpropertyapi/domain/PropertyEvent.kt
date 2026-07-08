@@ -57,6 +57,14 @@ class PropertyEvent(
   @Column(name = "related_container_id")
   val relatedContainerId: UUID? = null,
 
+  // Snapshot of the container's type at the moment of the event, so the history stays a self-contained,
+  // audit-durable record. Defaulted from the container (Kotlin allows a default to reference an earlier
+  // param), so every call site captures the type automatically; for a type change the container's type is
+  // already updated before the event is appended, so the event records the new type.
+  @Enumerated(EnumType.STRING)
+  @Column(name = "container_type", nullable = false)
+  val containerType: ContainerType = container.containerType,
+
   @Id
   @GeneratedUuidV7
   @Column(name = "id", updatable = false, nullable = false)

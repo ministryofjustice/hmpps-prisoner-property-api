@@ -203,11 +203,13 @@ class PropertyContainerService(
 
   /** A container's full history, newest event first. Throws [PropertyContainerNotFoundException] if the container does not exist. */
   @Transactional(readOnly = true)
-  fun getEvents(id: UUID): List<PropertyEventDto> = repository.findById(id)
-    .orElseThrow { PropertyContainerNotFoundException(id) }
-    .events
-    .sortedByDescending { it.eventDateTime }
-    .map(PropertyEventDto::from)
+  fun getEvents(id: UUID): List<PropertyEventDto> {
+    val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
+    val prisonNames = prisonRegisterClient.getPrisonNames()
+    return container.events
+      .sortedByDescending { it.eventDateTime }
+      .map { PropertyEventDto.from(it, prisonNames) }
+  }
 
   /**
    * A prisoner's whole-property history: every event across all of their (non-archived) containers, interleaved
