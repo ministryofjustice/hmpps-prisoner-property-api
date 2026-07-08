@@ -191,19 +191,28 @@ class PropertyContainerWriteService(
     return container.removeWith(RemovalOutcome.DISPOSED, date)
   }
 
-  /** Remove a container from active storage by returning it to the prisoner or transferring it to another prison. */
+  /**
+   * Remove a container from active storage for a given [RemovalOutcome.RETURNED], [RemovalOutcome.DISPOSED],
+   * [RemovalOutcome.CREATED_IN_ERROR], or [RemovalOutcome.TRANSFERRED]. Returned/disposed/created-in-error are
+   * terminal (the container leaves active storage and its location and seal are freed). Transferred is a
+   * hand-off: the container stays active but its holding prison is reassigned to the receiving prison
+   * (see [transferTo]) so responsibility moves with the property. COMBINED is not accepted here - use combine.
+   */
   @Transactional
   fun remove(id: UUID, request: RemoveContainerRequest, username: String): WriteResult {
-    if (request.outcome != RemovalOutcome.RETURNED && request.outcome != RemovalOutcome.TRANSFERRED) {
-      throw ValidationException("Removal outcome must be RETURNED or TRANSFERRED, was ${request.outcome}")
+    if (request.outcome == RemovalOutcome.COMBINED) {
+      throw ValidationException("Use the combine endpoint to combine containers")
     }
     if (request.outcome == RemovalOutcome.TRANSFERRED && request.toPrisonId.isNullOrBlank()) {
       throw ValidationException("toPrisonId is required when transferring a container")
     }
     val container = loadActive(id)
     val date = request.date ?: LocalDate.now()
+    if (request.outcome == RemovalOutcome.TRANSFERRED) {
+      return container.transferTo(request.toPrisonId!!, username, date)
+    }
     container.events.add(
-      PropertyEvent(container, request.outcome.eventType, LocalDateTime.now(), username, eventDate = date, fromPrisonId = container.prisonId, toPrisonId = request.toPrisonId),
+      PropertyEvent(container, request.outcome.eventType, LocalDateTime.now(), username, eventDate = date, fromPrisonId = container.prisonId),
     )
     return container.removeWith(request.outcome, date)
   }
@@ -346,6 +355,22 @@ class PropertyContainerWriteService(
     val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
     container.removalOutcome?.let { throw ContainerAlreadyRemovedException(id, it) }
     return container
+  }
+
+  /**
+   * Transfer a container to the prisoner's new establishment. The container stays active (not removed):
+   * its holding prison is reassigned to [toPrisonId] and its storage location is cleared (the receiving
+   * prison assigns its own), recorded by a [PropertyEventType.TRANSFERRED] event. It then leaves the
+   * sending prison's list and appears - active and editable - in the receiving prison's list.
+   */
+  private fun PropertyContainer.transferTo(toPrisonId: String, username: String, date: LocalDate): WriteResult {
+    events.add(
+      PropertyEvent(this, PropertyEventType.TRANSFERRED, LocalDateTime.now(), username, eventDate = date, fromPrisonId = prisonId, toPrisonId = toPrisonId),
+    )
+    prisonId = toPrisonId
+    refreshDerivedState()
+    val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, listOf("prisonId", "location"))
+    return WriteResult(PropertyContainerDto.from(this), event)
   }
 
   private fun PropertyContainer.removeWith(outcome: RemovalOutcome, date: LocalDate): WriteResult {

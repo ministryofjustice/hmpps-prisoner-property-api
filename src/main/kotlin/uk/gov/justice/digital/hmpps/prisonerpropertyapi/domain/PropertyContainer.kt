@@ -27,7 +27,7 @@ class PropertyContainer(
   val prisonerNumber: String,
 
   @Column(name = "prison_id", nullable = false)
-  val prisonId: String,
+  var prisonId: String,
 
   @Enumerated(EnumType.STRING)
   @Column(name = "container_type", nullable = false)
@@ -90,31 +90,34 @@ class PropertyContainer(
    * The current status. A removal outcome takes precedence over the latest event so that a later
    * correction (e.g. a seal fix) does not "un-remove" the container; otherwise a proposed disposal
    * date shows DISPOSAL_REQUIRED, else it derives from the most recent event (defaulting to STORED
-   * before any event).
+   * before any event). A live (non-removed) container never shows TRANSFER: after a transfer-out
+   * reassigns its holding prison, it is active and STORED at the receiving prison.
    */
   fun currentStatus(): ContainerStatus = when {
     removalOutcome != null -> removalOutcome!!.status
     proposedDisposalDate != null -> ContainerStatus.DISPOSAL_REQUIRED
-    else -> latestEvent()?.eventType?.status ?: ContainerStatus.STORED
+    else -> latestEvent()?.eventType?.status?.takeUnless { it == ContainerStatus.TRANSFER } ?: ContainerStatus.STORED
   }
 
   /**
-   * The current internal location id, from the most recent location-bearing event. Null when the
-   * container is offsite at Branston (no internal id), has no recorded location, or has been removed
-   * (its location history is retained on the events).
+   * The current internal location id, from the most recent location-affecting event. Null when the
+   * container is offsite at Branston (no internal id), has no recorded location, has been removed, or
+   * has just been transferred to another prison (a [PropertyEventType.TRANSFERRED] clears the location
+   * so the receiving prison assigns its own). Location history is retained on the events.
    */
-  fun currentLocation(): UUID? = if (isRemoved()) null else latestLocationEvent()?.toInternalLocationId
+  fun currentLocation(): UUID? = if (isRemoved()) null else latestLocationEvent()?.takeUnless { it.eventType == PropertyEventType.TRANSFERRED }?.toInternalLocationId
 
   /**
    * The current storage location type (internal prison location vs the offsite Branston warehouse),
-   * from the most recent location-bearing event. Null when there is no recorded location or the
-   * container has been removed. Falls back to [StorageLocationType.INTERNAL] for older events that
-   * recorded an internal location id without an explicit type.
+   * from the most recent location-affecting event. Null when there is no recorded location, the
+   * container has been removed, or it has just been transferred to another prison. Falls back to
+   * [StorageLocationType.INTERNAL] for older events that recorded an internal location id without an
+   * explicit type.
    */
   fun currentLocationType(): StorageLocationType? = if (isRemoved()) {
     null
   } else {
-    latestLocationEvent()?.let {
+    latestLocationEvent()?.takeUnless { it.eventType == PropertyEventType.TRANSFERRED }?.let {
       it.toStorageLocationType ?: it.toInternalLocationId?.let { StorageLocationType.INTERNAL }
     }
   }
@@ -133,6 +136,6 @@ class PropertyContainer(
   private fun latestEvent(): PropertyEvent? = events.maxByOrNull { it.eventDateTime }
 
   private fun latestLocationEvent(): PropertyEvent? = events
-    .filter { it.toInternalLocationId != null || it.toStorageLocationType != null }
+    .filter { it.toInternalLocationId != null || it.toStorageLocationType != null || it.eventType == PropertyEventType.TRANSFERRED }
     .maxByOrNull { it.eventDateTime }
 }

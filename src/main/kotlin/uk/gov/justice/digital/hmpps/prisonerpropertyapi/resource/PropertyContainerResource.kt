@@ -348,7 +348,7 @@ class PropertyContainerResource(
   @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
   @Operation(
     summary = "Remove a property container from active storage",
-    description = "Records the container as returned to the prisoner or transferred to another prison, taking it out of active storage and clearing its location. Requires role ROLE_PRISONER_PROPERTY__RW.",
+    description = "Records why the container is leaving the sending prison's active storage: RETURNED to the prisoner, DISPOSED of, or CREATED_IN_ERROR (all terminal, clearing its location and freeing its seal), or TRANSFERRED - which instead reassigns the container to the receiving prison (toPrisonId), keeping it active there. Requires role ROLE_PRISONER_PROPERTY__RW.",
     responses = [
       ApiResponse(responseCode = "200", description = "Property container removed"),
       ApiResponse(responseCode = "400", description = "Invalid request", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),

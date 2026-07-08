@@ -171,8 +171,15 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
       refreshDerivedState()
       containerRepository.save(this)
     }
+    saveActive("A0001AA", "GONE-IN-ERROR").apply {
+      removalOutcome = RemovalOutcome.CREATED_IN_ERROR
+      removalDate = LocalDate.parse("2026-02-01")
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
 
-    // Default hides everything removed; includeRemoved brings back returned/disposed only (not transferred).
+    // Default hides everything removed; includeRemoved brings back returned/disposed only
+    // (not transferred, and never created-in-error which lives only in the person-view history).
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(), listOf("A0001AA")))
       .extracting<String> { it.currentSealNumber }.containsExactly("ACTIVE")
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(includeRemoved = true), listOf("A0001AA")))

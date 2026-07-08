@@ -15,4 +15,5 @@ enum class PropertyEventType(val status: ContainerStatus, val carriesSeal: Boole
   DISPOSAL_REQUIRED(ContainerStatus.DISPOSAL_REQUIRED),
   DISPOSED(ContainerStatus.DISPOSED),
   COMBINED(ContainerStatus.COMBINED),
+  CREATED_IN_ERROR(ContainerStatus.CREATED_IN_ERROR),
 }
