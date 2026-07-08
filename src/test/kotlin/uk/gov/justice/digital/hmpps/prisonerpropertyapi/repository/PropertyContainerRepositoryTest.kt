@@ -223,6 +223,23 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `findPrisonerNumbers returns all distinct matching prisoner numbers, ordered and unpaged`() {
+    saveActive("B0002BB", "SEAL-B")
+    saveActive("A0001AA", "SEAL-A1")
+    saveActive("A0001AA", "SEAL-A2") // same prisoner, two containers - listed once
+    saveActive("C0003CC", "SEAL-C").apply {
+      removalOutcome = RemovalOutcome.DISPOSED
+      removalDate = LocalDate.parse("2026-02-01")
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+
+    // default filter hides removed (C excluded); ordered by prisoner number; A appears once
+    assertThat(containerRepository.findPrisonerNumbers("LEI", PrisonPropertyFilter()))
+      .containsExactly("A0001AA", "B0002BB")
+  }
+
+  @Test
   fun `free-text search matches prisoner number, seal number or resolved storage location`() {
     val bySeal = saveActive("A0001AA", "SN-FIND-ME", location = LOCATION_A)
     val byLocation = saveActive("A0001AA", "SN-OTHER", location = LOCATION_B)

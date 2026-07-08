@@ -19,6 +19,12 @@ class PrisonerSearchClient(
 
   companion object {
     val log: Logger = LoggerFactory.getLogger(this::class.java)
+
+    /** The batch endpoint accepts at most this many prisoner numbers per request. */
+    private const val BATCH_SIZE = 1000
+
+    /** Only the fields the establishment list needs - name, current establishment and movement. */
+    private val LIST_RESPONSE_FIELDS = listOf("prisonerNumber", "firstName", "lastName", "prisonId", "lastMovementTypeCode").joinToString(",")
   }
 
   /**
@@ -42,27 +48,30 @@ class PrisonerSearchClient(
   }
 
   /**
-   * Look up several prisoners at once by prisoner number, keyed by prisoner number, in a single call.
-   * Numbers are de-duplicated; numbers that do not resolve are simply absent from the result. Degrades
-   * gracefully: if the call fails the caller gets an empty map (and so null names) rather than a failed read.
+   * Look up several prisoners at once by prisoner number, keyed by prisoner number. Numbers are
+   * de-duplicated and looked up in chunks (the batch endpoint caps the request size, and the caller may
+   * pass a whole prison's worth for the person-location filter); numbers that do not resolve are simply
+   * absent from the result. Only the fields the list needs are requested (responseFields) to keep the
+   * payload small. Degrades gracefully per chunk: a failed chunk contributes no prisoners rather than
+   * failing the whole read.
    */
-  fun getPrisoners(prisonerNumbers: Collection<String>): Map<String, Prisoner> {
-    val distinct = prisonerNumbers.distinct()
-    if (distinct.isEmpty()) return emptyMap()
-    return try {
-      prisonerSearchWebClient
-        .post()
-        .uri("/prisoner-search/prisoner-numbers")
-        .bodyValue(PrisonerNumbers(distinct))
-        .retrieve()
-        .bodyToMono<List<Prisoner>>()
-        .block()
-        ?.associateBy { it.prisonerNumber }
-        ?: emptyMap()
-    } catch (ex: WebClientResponseException) {
-      log.warn("Bulk prisoner lookup failed ({}), returning no prisoner details", ex.statusCode)
-      emptyMap()
-    }
+  fun getPrisoners(prisonerNumbers: Collection<String>): Map<String, Prisoner> = prisonerNumbers.distinct()
+    .chunked(BATCH_SIZE)
+    .flatMap { chunk -> fetchChunk(chunk) }
+    .associateBy { it.prisonerNumber }
+
+  private fun fetchChunk(chunk: List<String>): List<Prisoner> = try {
+    prisonerSearchWebClient
+      .post()
+      .uri { builder -> builder.path("/prisoner-search/prisoner-numbers").queryParam("responseFields", LIST_RESPONSE_FIELDS).build() }
+      .bodyValue(PrisonerNumbers(chunk))
+      .retrieve()
+      .bodyToMono<List<Prisoner>>()
+      .block()
+      ?: emptyList()
+  } catch (ex: WebClientResponseException) {
+    log.warn("Bulk prisoner lookup failed ({}), returning no prisoner details for the chunk", ex.statusCode)
+    emptyList()
   }
 }
 

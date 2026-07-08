@@ -24,6 +24,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchCli
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.LocationContainerCount
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PersonLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonPropertyFilter
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerMovementStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
@@ -248,6 +249,51 @@ class PropertyContainerServiceTest {
   }
 
   @Test
+  fun `getPrisonProperty personLocation IN_ESTABLISHMENT returns only prisoners currently at the prison, paged in memory`() {
+    whenever(repository.findPrisonerNumbers(eq("LEI"), any())).thenReturn(listOf("A1111AA", "B2222BB", "C3333CC"))
+    whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(
+      mapOf(
+        "A1111AA" to prisonerAt("A1111AA", "LEI"),
+        "B2222BB" to prisonerAt("B2222BB", "MDI"),
+        "C3333CC" to prisonerAt("C3333CC", "OUT"),
+      ),
+    )
+    whenever(repository.findContainers(eq("LEI"), any(), eq(listOf("A1111AA")))).thenReturn(
+      listOf(containerAt("LEI", "SEALA", prisonerNumber = "A1111AA")),
+    )
+
+    val page = service.getPrisonProperty("LEI", personLocation = PersonLocation.IN_ESTABLISHMENT, pageable = PAGE)
+
+    assertThat(page.totalElements).isEqualTo(1)
+    assertThat(page.content).singleElement().satisfies({ assertThat(it.prisonerNumber).isEqualTo("A1111AA") })
+    // the person-location path does not use the DB pagination query
+    verify(repository, never()).findPrisonerNumbersPage(any(), any(), any())
+  }
+
+  @Test
+  fun `getPrisonProperty personLocation LEFT_ESTABLISHMENT returns only prisoners no longer at the prison`() {
+    whenever(repository.findPrisonerNumbers(eq("LEI"), any())).thenReturn(listOf("A1111AA", "B2222BB", "C3333CC"))
+    whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(
+      mapOf(
+        "A1111AA" to prisonerAt("A1111AA", "LEI"),
+        "B2222BB" to prisonerAt("B2222BB", "MDI"),
+        "C3333CC" to prisonerAt("C3333CC", "OUT"),
+      ),
+    )
+    whenever(repository.findContainers(eq("LEI"), any(), eq(listOf("B2222BB", "C3333CC")))).thenReturn(
+      listOf(
+        containerAt("LEI", "SEALB", prisonerNumber = "B2222BB"),
+        containerAt("LEI", "SEALC", prisonerNumber = "C3333CC"),
+      ),
+    )
+
+    val page = service.getPrisonProperty("LEI", personLocation = PersonLocation.LEFT_ESTABLISHMENT, pageable = PAGE)
+
+    assertThat(page.totalElements).isEqualTo(2)
+    assertThat(page.content.map { it.prisonerNumber }).containsExactly("B2222BB", "C3333CC")
+  }
+
+  @Test
   fun `getPrisonProperty resolves a storage-location term to box location ids by code, local name or path hierarchy`() {
     whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
       listOf(
@@ -431,6 +477,16 @@ class PropertyContainerServiceTest {
     prisonName = "Leeds (HMP)",
     cellLocation = "A-1-001",
     lastMovementTypeCode = lastMovementTypeCode,
+  )
+
+  private fun prisonerAt(number: String, prisonId: String) = Prisoner(
+    prisonerNumber = number,
+    firstName = "John",
+    lastName = "Smith",
+    prisonId = prisonId,
+    prisonName = null,
+    cellLocation = null,
+    lastMovementTypeCode = null,
   )
 
   private fun containerAt(prisonId: String, seal: String, eventTime: LocalDateTime = baseTime, prisonerNumber: String = "A1234BC"): PropertyContainer {

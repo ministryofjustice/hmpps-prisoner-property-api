@@ -565,6 +565,32 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `filters the prison list by person location, resolved from prisoner-search`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    // the seeded A1234BC container is held at LEI, but the prisoner has moved on to MDI
+    prisonerSearch.stubFindByNumbers("A1234BC" to "MDI")
+
+    // "in this establishment" (LEI): the prisoner is now at MDI, so nothing matches
+    webTestClient.get().uri("/property-containers/prison/LEI?personLocation=IN_ESTABLISHMENT")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(0)
+
+    // "no longer in this establishment": the property is still here but the person has left
+    webTestClient.get().uri("/property-containers/prison/LEI?personLocation=LEFT_ESTABLISHMENT")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].prisonerNumber").isEqualTo("A1234BC")
+  }
+
+  @Test
   fun `returns the prison property summary counts`() {
     hmppsAuth.stubGrantToken()
     // setUp already seeded one STORED container at LEI; add one due for disposal and one due to transfer out

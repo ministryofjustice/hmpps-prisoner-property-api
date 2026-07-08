@@ -13,6 +13,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.Prisoner
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PersonLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonPropertyFilter
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerMovementStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
@@ -110,6 +111,7 @@ class PropertyContainerService(
     storageLocation: String? = null,
     includeRemoved: Boolean = false,
     search: String? = null,
+    personLocation: PersonLocation? = null,
     pageable: Pageable,
   ): Page<PrisonerPropertyGroupDto> {
     val branstonOnly = storageLocation.equals(BRANSTON_SEARCH_TERM, ignoreCase = true)
@@ -133,15 +135,43 @@ class PropertyContainerService(
       searchBranston = searchBranston,
     )
 
-    val prisonerPage = repository.findPrisonerNumbersPage(prisonId, filter, pageable)
-    if (prisonerPage.isEmpty) return PageImpl(emptyList(), pageable, prisonerPage.totalElements)
+    if (personLocation == null) {
+      // Common path: the property DB paginates by prisoner, and prisoner-search is only called for the page.
+      val prisonerPage = repository.findPrisonerNumbersPage(prisonId, filter, pageable)
+      if (prisonerPage.isEmpty) return PageImpl(emptyList(), pageable, prisonerPage.totalElements)
+      val prisoners = prisonerSearchClient.getPrisoners(prisonerPage.content)
+      return buildGroupsPage(prisonId, filter, prisonerPage.content, prisonerPage.totalElements, pageable, prisoners)
+    }
 
-    val containersByPrisoner = repository.findContainers(prisonId, filter, prisonerPage.content).groupBy { it.prisonerNumber }
-    val prisoners = prisonerSearchClient.getPrisoners(prisonerPage.content)
+    // Person-location filter: a prisoner's current establishment comes from prisoner-search, not the DB, so
+    // load every matching prisoner, bucket by current establishment, then paginate in memory.
+    val allNumbers = repository.findPrisonerNumbers(prisonId, filter)
+    if (allNumbers.isEmpty()) return PageImpl(emptyList(), pageable, 0)
+    val prisoners = prisonerSearchClient.getPrisoners(allNumbers)
+    val matching = allNumbers.filter { personLocation.matches(prisoners[it]?.prisonId, prisonId) }
+    val pageNumbers = matching.drop(pageable.offset.toInt()).take(pageable.pageSize)
+    return buildGroupsPage(prisonId, filter, pageNumbers, matching.size.toLong(), pageable, prisoners)
+  }
+
+  /**
+   * Build a page of [PrisonerPropertyGroupDto] for [pageNumbers] (the prisoners on this page), enriching each
+   * container with the supplied [prisoners] map plus prison and location names. [total] is the number of
+   * matching prisoners across all pages.
+   */
+  private fun buildGroupsPage(
+    prisonId: String,
+    filter: PrisonPropertyFilter,
+    pageNumbers: List<String>,
+    total: Long,
+    pageable: Pageable,
+    prisoners: Map<String, Prisoner>,
+  ): Page<PrisonerPropertyGroupDto> {
+    if (pageNumbers.isEmpty()) return PageImpl(emptyList(), pageable, total)
+    val containersByPrisoner = repository.findContainers(prisonId, filter, pageNumbers).groupBy { it.prisonerNumber }
     val prisonNames = prisonRegisterClient.getPrisonNames()
     val locations = locationsClient.getLocations(containersByPrisoner.values.flatten().mapNotNull { it.currentInternalLocationId })
 
-    val groups = prisonerPage.content.map { number ->
+    val groups = pageNumbers.map { number ->
       val prisoner = prisoners[number]
       PrisonerPropertyGroupDto(
         prisonerNumber = number,
@@ -163,7 +193,7 @@ class PropertyContainerService(
         },
       )
     }
-    return PageImpl(groups, pageable, prisonerPage.totalElements)
+    return PageImpl(groups, pageable, total)
   }
 
   @Transactional(readOnly = true)
