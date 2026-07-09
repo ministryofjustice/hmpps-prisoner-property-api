@@ -4,9 +4,11 @@ import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonRegisterClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.config.CacheConfiguration.Companion.ACTIVE_AGENCIES_CACHE_NAME
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ActiveAgency
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ActiveAgencyRepository
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.AgencyStatusDto
 import java.time.LocalDateTime
 import kotlin.jvm.optionals.getOrNull
 
@@ -18,10 +20,19 @@ import kotlin.jvm.optionals.getOrNull
 @Service
 class ActiveAgenciesService(
   private val repository: ActiveAgencyRepository,
+  private val prisonRegisterClient: PrisonRegisterClient,
 ) {
 
   @Cacheable(ACTIVE_AGENCIES_CACHE_NAME)
   fun getActiveAgencies(): List<String> = repository.findAllByActiveTrue().map { it.agencyId }.sorted()
+
+  /** Every prison (from prison-register) with whether the property service is active for it - for the admin console. */
+  fun getAllAgencies(): List<AgencyStatusDto> {
+    val active = getActiveAgencies().toSet()
+    return prisonRegisterClient.getPrisonNames()
+      .map { (id, name) -> AgencyStatusDto(agencyId = id, name = name, active = id in active) }
+      .sortedBy { it.name }
+  }
 
   fun isActive(agencyId: String): Boolean = repository.findById(agencyId).getOrNull()?.active == true
 

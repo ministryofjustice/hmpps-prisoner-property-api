@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.ActiveAgencyDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.AgencyStatusDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.SetActiveAgencyRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.ActiveAgenciesService
 import uk.gov.justice.hmpps.kotlin.auth.HmppsAuthenticationHolder
@@ -48,6 +49,19 @@ class ActiveAgenciesResource(
     ],
   )
   fun getActiveAgencies(): List<String> = activeAgenciesService.getActiveAgencies()
+
+  @GetMapping("/all")
+  @Operation(
+    summary = "List all prisons with whether the property service is switched on for each",
+    description = "Returns every prison (from prison-register) with an `active` flag, for the rollout admin console. " +
+      "Requires role ROLE_PRISONER_PROPERTY__ADMIN.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Prisons with their active state returned"),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__ADMIN role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun getAllAgencies(): List<AgencyStatusDto> = activeAgenciesService.getAllAgencies()
 
   @PutMapping("/{agencyId}")
   @Operation(

@@ -7,6 +7,7 @@ import org.mockito.kotlin.check
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonRegisterClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ActiveAgency
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ActiveAgencyRepository
 import java.time.LocalDateTime
@@ -14,7 +15,8 @@ import java.util.Optional
 
 class ActiveAgenciesServiceTest {
   private val repository: ActiveAgencyRepository = mock()
-  private val service = ActiveAgenciesService(repository)
+  private val prisonRegisterClient: PrisonRegisterClient = mock()
+  private val service = ActiveAgenciesService(repository, prisonRegisterClient)
 
   @Test
   fun `getActiveAgencies returns the active agency ids sorted`() {
@@ -26,6 +28,24 @@ class ActiveAgenciesServiceTest {
     )
 
     assertThat(service.getActiveAgencies()).containsExactly("LEI", "MDI")
+  }
+
+  @Test
+  fun `getAllAgencies merges every prison with its active flag, sorted by name`() {
+    whenever(prisonRegisterClient.getPrisonNames()).thenReturn(
+      mapOf("MDI" to "Moorland (HMP & YOI)", "LEI" to "Leeds (HMP)", "WWI" to "Wandsworth (HMP)"),
+    )
+    whenever(repository.findAllByActiveTrue()).thenReturn(
+      listOf(ActiveAgency("MDI", true, LocalDateTime.now(), "ADMIN")),
+    )
+
+    val result = service.getAllAgencies()
+
+    assertThat(result.map { it.agencyId }).containsExactly("LEI", "MDI", "WWI")
+    assertThat(result.map { it.name }).containsExactly("Leeds (HMP)", "Moorland (HMP & YOI)", "Wandsworth (HMP)")
+    assertThat(result.single { it.agencyId == "MDI" }.active).isTrue()
+    assertThat(result.single { it.agencyId == "LEI" }.active).isFalse()
+    assertThat(result.single { it.agencyId == "WWI" }.active).isFalse()
   }
 
   @Test

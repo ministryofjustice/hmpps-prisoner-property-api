@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.cache.CacheManager
 import org.springframework.http.MediaType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ActiveAgencyRepository
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
 
 class ActiveAgenciesResourceIntegrationTest : IntegrationTestBase() {
 
@@ -46,6 +47,27 @@ class ActiveAgenciesResourceIntegrationTest : IntegrationTestBase() {
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
       .contentType(MediaType.APPLICATION_JSON).bodyValue(mapOf("active" to true))
       .exchange().expectStatus().isForbidden
+
+    webTestClient.get().uri("/active-agencies/all")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange().expectStatus().isForbidden
+  }
+
+  @Test
+  fun `lists every prison with its active flag, sorted by name`() {
+    prisonRegister.stubGetPrisons()
+    setActive("MDI", true).expectStatus().isOk
+
+    webTestClient.get().uri("/active-agencies/all")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__ADMIN")))
+      .exchange().expectStatus().isOk
+      .expectBody()
+      .jsonPath("$[0].agencyId").isEqualTo("LEI")
+      .jsonPath("$[0].name").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[0].active").isEqualTo(false)
+      .jsonPath("$[1].agencyId").isEqualTo("MDI")
+      .jsonPath("$[1].name").isEqualTo("Moorland (HMP & YOI)")
+      .jsonPath("$[1].active").isEqualTo(true)
   }
 
   @Test
