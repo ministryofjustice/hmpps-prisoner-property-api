@@ -60,12 +60,16 @@ class ActiveAgenciesServiceTest {
   }
 
   @Test
-  fun `setActive creates a new row when the agency is not yet configured`() {
+  fun `setActive creates a new row when the agency is not yet configured and returns the resolved status`() {
     whenever(repository.findById("MDI")).thenReturn(Optional.empty())
     whenever(repository.save(any())).thenAnswer { it.arguments[0] }
+    whenever(prisonRegisterClient.getPrisonNames()).thenReturn(mapOf("MDI" to "Moorland (HMP & YOI)"))
 
-    service.setActive("MDI", true, "ADMIN_USER")
+    val result = service.setActive("MDI", true, "ADMIN_USER")
 
+    assertThat(result.agencyId).isEqualTo("MDI")
+    assertThat(result.name).isEqualTo("Moorland (HMP & YOI)")
+    assertThat(result.active).isTrue()
     verify(repository).save(
       check {
         assertThat(it.agencyId).isEqualTo("MDI")
@@ -73,6 +77,15 @@ class ActiveAgenciesServiceTest {
         assertThat(it.updatedBy).isEqualTo("ADMIN_USER")
       },
     )
+  }
+
+  @Test
+  fun `setActive falls back to the agency id when prison-register has no name`() {
+    whenever(repository.findById("ZZI")).thenReturn(Optional.empty())
+    whenever(repository.save(any())).thenAnswer { it.arguments[0] }
+    whenever(prisonRegisterClient.getPrisonNames()).thenReturn(emptyMap())
+
+    assertThat(service.setActive("ZZI", true, "ADMIN_USER").name).isEqualTo("ZZI")
   }
 
   @Test

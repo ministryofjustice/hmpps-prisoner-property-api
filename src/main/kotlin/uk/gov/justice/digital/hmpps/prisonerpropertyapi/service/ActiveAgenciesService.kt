@@ -38,7 +38,7 @@ class ActiveAgenciesService(
 
   @Transactional
   @CacheEvict(value = [ACTIVE_AGENCIES_CACHE_NAME], allEntries = true)
-  fun setActive(agencyId: String, active: Boolean, username: String): ActiveAgency {
+  fun setActive(agencyId: String, active: Boolean, username: String): AgencyStatusDto {
     val agency = repository.findById(agencyId).getOrNull()
       ?.apply {
         this.active = active
@@ -46,6 +46,8 @@ class ActiveAgenciesService(
         this.updatedBy = username
       }
       ?: ActiveAgency(agencyId = agencyId, active = active, updatedAt = LocalDateTime.now(), updatedBy = username)
-    return repository.save(agency)
+    val saved = repository.save(agency)
+    val name = prisonRegisterClient.getPrisonNames()[saved.agencyId] ?: saved.agencyId
+    return AgencyStatusDto(agencyId = saved.agencyId, name = name, active = saved.active)
   }
 }

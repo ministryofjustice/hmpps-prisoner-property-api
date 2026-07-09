@@ -20,6 +20,8 @@ class ActiveAgenciesResourceIntegrationTest : IntegrationTestBase() {
   fun setUp() {
     repository.deleteAll()
     cacheManager.cacheNames.forEach { cacheManager.getCache(it)?.clear() }
+    // The toggle (PUT) and the /all list both resolve prison names from prison-register.
+    prisonRegister.stubGetPrisons()
   }
 
   private fun setActive(agencyId: String, active: Boolean) = webTestClient.put()
@@ -55,7 +57,6 @@ class ActiveAgenciesResourceIntegrationTest : IntegrationTestBase() {
 
   @Test
   fun `lists every prison with its active flag, sorted by name`() {
-    prisonRegister.stubGetPrisons()
     setActive("MDI", true).expectStatus().isOk
 
     webTestClient.get().uri("/active-agencies/all")
@@ -76,6 +77,7 @@ class ActiveAgenciesResourceIntegrationTest : IntegrationTestBase() {
       .expectStatus().isOk
       .expectBody()
       .jsonPath("$.agencyId").isEqualTo("MDI")
+      .jsonPath("$.name").isEqualTo("Moorland (HMP & YOI)")
       .jsonPath("$.active").isEqualTo(true)
 
     webTestClient.get().uri("/active-agencies")

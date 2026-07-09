@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.ActiveAgencyDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.AgencyStatusDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.SetActiveAgencyRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.ActiveAgenciesService
@@ -80,5 +79,5 @@ class ActiveAgenciesResource(
     @PathVariable
     agencyId: String,
     @Valid @RequestBody request: SetActiveAgencyRequest,
-  ): ActiveAgencyDto = ActiveAgencyDto.from(activeAgenciesService.setActive(agencyId, request.active, currentUsername()))
+  ): AgencyStatusDto = activeAgenciesService.setActive(agencyId, request.active, currentUsername())
 }
