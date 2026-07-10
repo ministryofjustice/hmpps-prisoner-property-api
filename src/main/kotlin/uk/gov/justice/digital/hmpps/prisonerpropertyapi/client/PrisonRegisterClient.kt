@@ -24,19 +24,31 @@ class PrisonRegisterClient(
   }
 
   /**
-   * All prisons as a map of prison id -> prison name. Cached for 24 hours.
+   * All prisons as a map of prison id -> prison name (including closed/inactive establishments, so
+   * names always resolve for e.g. a transfer to a now-closed prison). Cached for 24 hours.
    */
   @Cacheable(CacheConfiguration.PRISON_NAMES_CACHE_NAME)
   fun getPrisonNames(): Map<String, String> {
     log.debug("Looking up all prison names")
-    val prisons = prisonRegisterWebClient
-      .get()
-      .uri("/prisons")
-      .retrieve()
-      .bodyToMono(object : ParameterizedTypeReference<List<PrisonDto>>() {})
-      .block() ?: emptyList()
-    return prisons.associate { it.prisonId to it.prisonName }
+    return fetchPrisons().associate { it.prisonId to it.prisonName }
   }
+
+  /**
+   * The ids of the active (operational) prisons, used to keep closed/non-operational agencies out of
+   * the rollout admin list. Cached alongside [getPrisonNames] (distinct key), 24 hours.
+   */
+  @Cacheable(CacheConfiguration.PRISON_NAMES_CACHE_NAME, key = "'activeIds'")
+  fun getActivePrisonIds(): Set<String> {
+    log.debug("Looking up active prison ids")
+    return fetchPrisons().filter { it.active }.map { it.prisonId }.toSet()
+  }
+
+  private fun fetchPrisons(): List<PrisonDto> = prisonRegisterWebClient
+    .get()
+    .uri("/prisons")
+    .retrieve()
+    .bodyToMono(object : ParameterizedTypeReference<List<PrisonDto>>() {})
+    .block() ?: emptyList()
 }
 
 data class PrisonDto(

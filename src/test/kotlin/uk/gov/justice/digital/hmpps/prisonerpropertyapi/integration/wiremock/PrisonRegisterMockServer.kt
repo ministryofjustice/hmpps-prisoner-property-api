@@ -57,7 +57,8 @@ class PrisonRegisterMockServer : WireMockServer(WIREMOCK_PORT) {
             """
               [
                 { "prisonId": "MDI", "prisonName": "Moorland (HMP & YOI)", "active": true },
-                { "prisonId": "LEI", "prisonName": "Leeds (HMP)", "active": true }
+                { "prisonId": "LEI", "prisonName": "Leeds (HMP)", "active": true },
+                { "prisonId": "XXI", "prisonName": "Closed (HMP) - not operational", "active": false }
               ]
             """.trimIndent(),
           ),

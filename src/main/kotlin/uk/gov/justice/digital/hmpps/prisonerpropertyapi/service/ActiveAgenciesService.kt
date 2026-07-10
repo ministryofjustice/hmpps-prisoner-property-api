@@ -26,11 +26,17 @@ class ActiveAgenciesService(
   @Cacheable(ACTIVE_AGENCIES_CACHE_NAME)
   fun getActiveAgencies(): List<String> = repository.findAllByActiveTrue().map { it.agencyId }.sorted()
 
-  /** Every prison (from prison-register) with whether the property service is active for it - for the admin console. */
+  /**
+   * The operational prisons (from prison-register) with whether the property service is active for
+   * each - for the rollout admin console. Closed/non-operational agencies are filtered out, but any
+   * prison already switched on stays listed even if it later drops out of the active set, so it can
+   * still be switched off.
+   */
   fun getAllAgencies(): List<AgencyStatusDto> {
     val active = getActiveAgencies().toSet()
-    return prisonRegisterClient.getPrisonNames()
-      .map { (id, name) -> AgencyStatusDto(agencyId = id, name = name, active = id in active) }
+    val names = prisonRegisterClient.getPrisonNames()
+    return (prisonRegisterClient.getActivePrisonIds() + active)
+      .map { id -> AgencyStatusDto(agencyId = id, name = names[id] ?: id, active = id in active) }
       .sortedBy { it.name }
   }
 
