@@ -56,13 +56,15 @@ class ActiveAgenciesResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `lists every prison with its active flag, sorted by name`() {
+  fun `lists only operational prisons with their active flag, sorted by name`() {
     setActive("MDI", true).expectStatus().isOk
 
     webTestClient.get().uri("/active-agencies/all")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__ADMIN")))
       .exchange().expectStatus().isOk
       .expectBody()
+      // XXI is inactive in prison-register, so it is excluded - only the two operational prisons show.
+      .jsonPath("$.length()").isEqualTo(2)
       .jsonPath("$[0].agencyId").isEqualTo("LEI")
       .jsonPath("$[0].name").isEqualTo("Leeds (HMP)")
       .jsonPath("$[0].active").isEqualTo(false)

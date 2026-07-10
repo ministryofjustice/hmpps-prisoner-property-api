@@ -36,6 +36,16 @@ class PrisonRegisterClientTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `returns only the ids of active prisons`() {
+    prisonRegister.stubGetPrisons()
+
+    val activeIds = prisonRegisterClient.getActivePrisonIds()
+
+    assertThat(activeIds).containsExactlyInAnyOrder("MDI", "LEI")
+    assertThat(activeIds).doesNotContain("XXI")
+  }
+
+  @Test
   fun `caches the prison list so a second call does not hit the API again`() {
     prisonRegister.stubGetPrisons()
 

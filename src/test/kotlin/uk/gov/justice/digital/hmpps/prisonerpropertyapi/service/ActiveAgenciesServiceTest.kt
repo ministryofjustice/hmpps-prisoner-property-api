@@ -31,9 +31,16 @@ class ActiveAgenciesServiceTest {
   }
 
   @Test
-  fun `getAllAgencies merges every prison with its active flag, sorted by name`() {
+  fun `getAllAgencies lists only operational prisons with their active flag, sorted by name`() {
+    // CDI is closed/non-operational (not in the active-ids set) so it must be filtered out.
+    whenever(prisonRegisterClient.getActivePrisonIds()).thenReturn(setOf("MDI", "LEI", "WWI"))
     whenever(prisonRegisterClient.getPrisonNames()).thenReturn(
-      mapOf("MDI" to "Moorland (HMP & YOI)", "LEI" to "Leeds (HMP)", "WWI" to "Wandsworth (HMP)"),
+      mapOf(
+        "MDI" to "Moorland (HMP & YOI)",
+        "LEI" to "Leeds (HMP)",
+        "WWI" to "Wandsworth (HMP)",
+        "CDI" to "Chelmsford (HMP) closed",
+      ),
     )
     whenever(repository.findAllByActiveTrue()).thenReturn(
       listOf(ActiveAgency("MDI", true, LocalDateTime.now(), "ADMIN")),
@@ -46,6 +53,23 @@ class ActiveAgenciesServiceTest {
     assertThat(result.single { it.agencyId == "MDI" }.active).isTrue()
     assertThat(result.single { it.agencyId == "LEI" }.active).isFalse()
     assertThat(result.single { it.agencyId == "WWI" }.active).isFalse()
+  }
+
+  @Test
+  fun `getAllAgencies keeps an already-enabled prison listed even if it is no longer operational`() {
+    // ZZI has been switched on but has dropped out of the operational list - it must stay so it can be switched off.
+    whenever(prisonRegisterClient.getActivePrisonIds()).thenReturn(setOf("MDI"))
+    whenever(prisonRegisterClient.getPrisonNames()).thenReturn(
+      mapOf("MDI" to "Moorland (HMP & YOI)", "ZZI" to "Closed prison"),
+    )
+    whenever(repository.findAllByActiveTrue()).thenReturn(
+      listOf(ActiveAgency("ZZI", true, LocalDateTime.now(), "ADMIN")),
+    )
+
+    val result = service.getAllAgencies()
+
+    assertThat(result.map { it.agencyId }).containsExactlyInAnyOrder("MDI", "ZZI")
+    assertThat(result.single { it.agencyId == "ZZI" }.active).isTrue()
   }
 
   @Test
