@@ -48,7 +48,13 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
     )
   }
 
-  fun stubGetLocation(id: String, locationType: String = "BOX") {
+  /**
+   * Stub the single non-residential lookup. By default the location has a PROPERTY usage (so it can hold
+   * property) with [propertyCapacity]; pass canStoreProperty = false to return a location with no PROPERTY
+   * usage, to exercise the "cannot store property" rejection.
+   */
+  fun stubGetLocation(id: String, locationType: String = "BOX", canStoreProperty: Boolean = true, propertyCapacity: Int = 100) {
+    val usage = if (canStoreProperty) """[{"usageType": "PROPERTY", "capacity": $propertyCapacity}]""" else "[]"
     stubFor(
       get(urlPathEqualTo("/locations/non-residential/$id")).willReturn(
         aResponse()
@@ -62,7 +68,8 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
                 "code": "PROP",
                 "pathHierarchy": "RECP-PROP",
                 "localName": "Reception Property Store",
-                "locationType": "$locationType"
+                "locationType": "$locationType",
+                "usage": $usage
               }
             """.trimIndent(),
           ),
@@ -119,10 +126,10 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
   }
 
   /**
-   * Stub the by-type lookup for a prison. Each box is a Triple of (id, code, localName); pathHierarchy
-   * is set to the code for simplicity.
+   * Stub the property-locations lookup for a prison. Each location is a Triple of (id, code, localName);
+   * pathHierarchy is set to the code for simplicity, and every location is given the same [capacity].
    */
-  fun stubGetBoxLocations(prisonId: String, boxes: List<Triple<String, String, String>>) {
+  fun stubGetBoxLocations(prisonId: String, boxes: List<Triple<String, String, String>>, capacity: Int = 10) {
     val body = boxes.joinToString(prefix = "[", postfix = "]") { (id, code, localName) ->
       """
         {
@@ -132,12 +139,12 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
           "pathHierarchy": "$code",
           "localName": "$localName",
           "locationType": "BOX",
-          "status": "ACTIVE"
+          "capacity": $capacity
         }
       """.trimIndent()
     }
     stubFor(
-      get(urlPathEqualTo("/locations/prison/$prisonId/location-type/BOX")).willReturn(
+      get(urlPathEqualTo("/locations/prison/$prisonId/property")).willReturn(
         aResponse()
           .withHeader("Content-Type", "application/json")
           .withStatus(200)

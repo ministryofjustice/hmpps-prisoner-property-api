@@ -72,20 +72,21 @@ class LocationsClient(
   }
 
   /**
-   * All locations of the given type in a prison (e.g. the BOX locations property is stored in) - used both
-   * to list a prison's boxes and to resolve a searched storage-location term (code, local name or path
-   * hierarchy) to its location id(s). Cached per (prison, type) - the set rarely changes. Returns an empty
-   * list if the prison has none or is unknown.
+   * The leaf locations in a prison that can hold property, each with the capacity of its PROPERTY usage.
+   * A location can hold property iff it has a non-residential usage of type PROPERTY (any location type),
+   * not only BOX-typed locations. Used both to list a prison's storage locations and to resolve a searched
+   * storage-location term (code, local name or path hierarchy) to its location id(s). Cached per prison -
+   * the set rarely changes. Returns an empty list if the prison has none or is unknown.
    */
-  @Cacheable(CacheConfiguration.LOCATIONS_BY_TYPE_CACHE_NAME)
-  fun getLocationsByType(prisonId: String, locationType: String): List<LocationDetail> {
-    log.debug("Looking up {} locations for prison {}", locationType, prisonId)
+  @Cacheable(CacheConfiguration.PROPERTY_LOCATIONS_CACHE_NAME)
+  fun getPropertyLocations(prisonId: String): List<PropertyLocation> {
+    log.debug("Looking up property locations for prison {}", prisonId)
     try {
       return locationsWebClient
         .get()
-        .uri("/locations/prison/{prisonId}/location-type/{locationType}", prisonId, locationType)
+        .uri("/locations/prison/{prisonId}/property", prisonId)
         .retrieve()
-        .bodyToMono<List<LocationDetail>>()
+        .bodyToMono<List<PropertyLocation>>()
         .block()
         ?: emptyList()
     } catch (ex: WebClientResponseException) {
@@ -97,6 +98,27 @@ class LocationsClient(
   }
 }
 
+/**
+ * A location that can hold property, from the locations-inside-prison property endpoint, with the
+ * capacity of its PROPERTY usage flattened out.
+ */
+data class PropertyLocation(
+  val id: UUID,
+  val prisonId: String,
+  val code: String,
+  val pathHierarchy: String,
+  val localName: String? = null,
+  val locationType: String? = null,
+  val capacity: Int? = null,
+) {
+  /** A human-friendly location name, preferring the local name and falling back to the path hierarchy. */
+  fun displayName(): String = localName ?: pathHierarchy
+}
+
+/**
+ * A single non-residential location from the locations-inside-prison lookup. Carries its non-residential
+ * usages so we can tell whether it can hold property (a PROPERTY usage) and, if so, its capacity.
+ */
 data class LocationDetail(
   val id: UUID,
   val prisonId: String,
@@ -104,10 +126,26 @@ data class LocationDetail(
   val pathHierarchy: String,
   val localName: String? = null,
   val locationType: String? = null,
+  val usage: List<NonResidentialUsage>? = null,
 ) {
   /** A human-friendly location name, preferring the local name and falling back to the path hierarchy. */
   fun displayName(): String = localName ?: pathHierarchy
 
-  /** Whether this location is a property box - the only location type property may be stored in. */
-  fun isBox(): Boolean = locationType == "BOX"
+  private fun propertyUsage(): NonResidentialUsage? = usage?.firstOrNull { it.usageType == PROPERTY_USAGE }
+
+  /** Whether this location can hold property, i.e. it has a PROPERTY non-residential usage. */
+  fun canStoreProperty(): Boolean = propertyUsage() != null
+
+  /** The capacity of this location's PROPERTY usage (how many containers it can hold), or 0 if not set. */
+  fun propertyCapacity(): Int = propertyUsage()?.capacity ?: 0
+
+  private companion object {
+    const val PROPERTY_USAGE = "PROPERTY"
+  }
 }
+
+/** A non-residential usage of a location, as returned by the locations-inside-prison single lookup. */
+data class NonResidentialUsage(
+  val usageType: String,
+  val capacity: Int? = null,
+)

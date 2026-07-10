@@ -30,7 +30,7 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   @BeforeEach
   fun setUp() {
-    // getLocationsByType is @Cacheable and several tests here stub it with different boxes for the same
+    // getPropertyLocations is @Cacheable and several tests here stub it with different locations for the same
     // prison - clear so each resolves against its own stub rather than a prior test's cached result.
     cacheManager.cacheNames.forEach { cacheManager.getCache(it)?.clear() }
     containerId = repository.save(seedContainer()).id!!
@@ -500,7 +500,7 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `returns the prison's box locations emptiest first when sorted by container count`() {
+  fun `returns the prison's box locations with most available spaces first when sorted`() {
     hmppsAuth.stubGrantToken()
     locations.stubGetBoxLocations(
       "LEI",
@@ -510,15 +510,39 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       ),
     )
 
-    webTestClient.get().uri("/property-containers/prison/LEI/box-locations?sort=FEWEST_CONTAINERS")
+    webTestClient.get().uri("/property-containers/prison/LEI/box-locations?sort=MOST_AVAILABLE")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
       .expectBody()
+      // both have capacity 10; Box Three is empty (10 spaces), Box Two holds the seeded container (9 spaces)
       .jsonPath("$.content[0].name").isEqualTo("Box Three")
-      .jsonPath("$.content[0].containerCount").isEqualTo(0)
+      .jsonPath("$.content[0].availableSpaces").isEqualTo(10)
       .jsonPath("$.content[1].name").isEqualTo("Box Two")
-      .jsonPath("$.content[1].containerCount").isEqualTo(1)
+      .jsonPath("$.content[1].availableSpaces").isEqualTo(9)
+  }
+
+  @Test
+  fun `excludes storage locations that are full from the box locations`() {
+    hmppsAuth.stubGrantToken()
+    // Every location has capacity 1; LOCATION_B already holds the seeded container, so it is full and dropped.
+    locations.stubGetBoxLocations(
+      "LEI",
+      listOf(
+        Triple(LOCATION_B.toString(), "PROP2", "Full Box"),
+        Triple(EMPTY_BOX.toString(), "PROP3", "Empty Box"),
+      ),
+      capacity = 1,
+    )
+
+    webTestClient.get().uri("/property-containers/prison/LEI/box-locations")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].name").isEqualTo("Empty Box")
+      .jsonPath("$.content[0].availableSpaces").isEqualTo(1)
   }
 
   @Test
@@ -612,6 +636,7 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
         Triple(LOCATION_B.toString(), "PROP2", "Box Two"),
         Triple(EMPTY_BOX.toString(), "PROP3", "Box Three"),
       ),
+      capacity = 1,
     )
 
     webTestClient.get().uri("/property-containers/prison/LEI/summary")
@@ -619,8 +644,9 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      // 3 boxes total minus the 1 container physically stored internally (the seeded container in LOCATION_B).
-      .jsonPath("$.availableStorageLocations").isEqualTo(2)
+      // Each of the 3 boxes has capacity 1; LOCATION_B holds the one seeded container (0 spaces), the other
+      // two are empty (1 space each), so 2 spaces remain across the prison.
+      .jsonPath("$.availableStorageSpaces").isEqualTo(2)
       .jsonPath("$.storedOnSite").isEqualTo(1)
       .jsonPath("$.dueToTransferOut").isEqualTo(1)
       // SEALD's proposed disposal date (2026-01-01) has arisen.

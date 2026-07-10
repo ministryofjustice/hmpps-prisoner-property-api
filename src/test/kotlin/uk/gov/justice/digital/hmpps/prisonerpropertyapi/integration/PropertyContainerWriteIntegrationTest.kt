@@ -172,17 +172,35 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `rejects creating a container in a location that is not a property box`() {
-    val nonBoxLocation = UUID.fromString("88888888-8888-8888-8888-888888888888")
-    locations.stubGetLocation(nonBoxLocation.toString(), locationType = "STORE")
+  fun `rejects creating a container in a location that cannot store property`() {
+    val nonPropertyLocation = UUID.fromString("88888888-8888-8888-8888-888888888888")
+    locations.stubGetLocation(nonPropertyLocation.toString(), locationType = "STORE", canStoreProperty = false)
 
     webTestClient.post().uri("/property-containers")
       .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
-      .bodyValue(createRequest().copy(internalLocationId = nonBoxLocation))
+      .bodyValue(createRequest().copy(internalLocationId = nonPropertyLocation))
       .exchange()
       .expectStatus().isBadRequest
       .expectBody()
-      .jsonPath("$.userMessage").isEqualTo("Internal location is not a property box: $nonBoxLocation")
+      .jsonPath("$.userMessage").isEqualTo("Internal location cannot store property: $nonPropertyLocation")
+  }
+
+  @Test
+  fun `rejects creating a container in a location that is full`() {
+    val fullLocation = UUID.fromString("99999999-9999-9999-9999-999999999999")
+    // The location has capacity 1 and already holds a container, so there is no room for another.
+    locations.stubGetLocation(fullLocation.toString(), propertyCapacity = 1)
+    val occupant = seedContainer(seal = "SEALFULL")
+    occupant.currentInternalLocationId = fullLocation
+    repository.save(occupant)
+
+    webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(createRequest().copy(internalLocationId = fullLocation))
+      .exchange()
+      .expectStatus().isBadRequest
+      .expectBody()
+      .jsonPath("$.userMessage").isEqualTo("Internal location is full: $fullLocation")
   }
 
   @Test

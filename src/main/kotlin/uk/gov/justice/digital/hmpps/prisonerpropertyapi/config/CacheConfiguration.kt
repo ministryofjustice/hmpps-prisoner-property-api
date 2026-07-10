@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 class CacheConfiguration {
 
   @Bean
-  fun cacheManager(): CacheManager = ConcurrentMapCacheManager(PRISON_NAMES_CACHE_NAME, LOCATIONS_BY_TYPE_CACHE_NAME, ACTIVE_AGENCIES_CACHE_NAME)
+  fun cacheManager(): CacheManager = ConcurrentMapCacheManager(PRISON_NAMES_CACHE_NAME, PROPERTY_LOCATIONS_CACHE_NAME, ACTIVE_AGENCIES_CACHE_NAME)
 
   @CacheEvict(value = [PRISON_NAMES_CACHE_NAME], allEntries = true)
   @Scheduled(fixedDelay = TTL_PRISON_NAMES, timeUnit = TimeUnit.HOURS)
@@ -26,10 +26,10 @@ class CacheConfiguration {
     log.info("Evicting cache: {} after {} hours", PRISON_NAMES_CACHE_NAME, TTL_PRISON_NAMES)
   }
 
-  @CacheEvict(value = [LOCATIONS_BY_TYPE_CACHE_NAME], allEntries = true)
-  @Scheduled(fixedDelay = TTL_LOCATIONS_BY_TYPE, timeUnit = TimeUnit.HOURS)
-  fun cacheEvictLocationsByType() {
-    log.info("Evicting cache: {} after {} hours", LOCATIONS_BY_TYPE_CACHE_NAME, TTL_LOCATIONS_BY_TYPE)
+  @CacheEvict(value = [PROPERTY_LOCATIONS_CACHE_NAME], allEntries = true)
+  @Scheduled(fixedDelay = TTL_PROPERTY_LOCATIONS, timeUnit = TimeUnit.HOURS)
+  fun cacheEvictPropertyLocations() {
+    log.info("Evicting cache: {} after {} hours", PROPERTY_LOCATIONS_CACHE_NAME, TTL_PROPERTY_LOCATIONS)
   }
 
   // Active agencies are evicted on write (see ActiveAgenciesService), but that only clears the writing
@@ -45,8 +45,8 @@ class CacheConfiguration {
     val log: Logger = LoggerFactory.getLogger(this::class.java)
     const val PRISON_NAMES_CACHE_NAME: String = "prisonNames"
     const val TTL_PRISON_NAMES: Long = 24
-    const val LOCATIONS_BY_TYPE_CACHE_NAME: String = "locationsByType"
-    const val TTL_LOCATIONS_BY_TYPE: Long = 6
+    const val PROPERTY_LOCATIONS_CACHE_NAME: String = "propertyLocations"
+    const val TTL_PROPERTY_LOCATIONS: Long = 6
     const val ACTIVE_AGENCIES_CACHE_NAME: String = "activeAgencies"
     const val TTL_ACTIVE_AGENCIES: Long = 10
   }

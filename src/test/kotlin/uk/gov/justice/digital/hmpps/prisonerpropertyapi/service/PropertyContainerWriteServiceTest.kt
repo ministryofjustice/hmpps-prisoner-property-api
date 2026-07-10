@@ -14,6 +14,7 @@ import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationDetail
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.NonResidentialUsage
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
@@ -43,7 +44,15 @@ class PropertyContainerWriteServiceTest {
   fun stubLocationsResolveByDefault() {
     whenever(locationsClient.getLocation(any())).thenAnswer { invocation ->
       val id = invocation.arguments[0] as UUID
-      LocationDetail(id = id, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Reception Property Store", locationType = "BOX")
+      LocationDetail(
+        id = id,
+        prisonId = "LEI",
+        code = "PROP",
+        pathHierarchy = "RECP-PROP",
+        localName = "Reception Property Store",
+        locationType = "BOX",
+        usage = listOf(NonResidentialUsage(usageType = "PROPERTY", capacity = 100)),
+      )
     }
   }
 
@@ -159,14 +168,29 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
-  fun `create rejects an internal location that is not a property box`() {
+  fun `create rejects an internal location that cannot store property`() {
     whenever(locationsClient.getLocation(LOCATION)).thenReturn(
-      LocationDetail(id = LOCATION, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Reception Store", locationType = "STORE"),
+      // A non-residential location with no PROPERTY usage cannot hold property.
+      LocationDetail(id = LOCATION, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Appointment Room", locationType = "ROOM", usage = emptyList()),
     )
 
     assertThatThrownBy { service.create(createRequest(), "A_USER") }
       .isInstanceOf(InvalidLocationException::class.java)
-      .hasMessageContaining("is not a property box")
+      .hasMessageContaining("cannot store property")
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `create rejects an internal location that is full`() {
+    // The location has capacity 2 and already holds 2 containers, so there is no room for another.
+    whenever(locationsClient.getLocation(LOCATION)).thenReturn(
+      LocationDetail(id = LOCATION, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Reception Store", locationType = "BOX", usage = listOf(NonResidentialUsage(usageType = "PROPERTY", capacity = 2))),
+    )
+    whenever(repository.countContainersInLocation(LOCATION, null)).thenReturn(2)
+
+    assertThatThrownBy { service.create(createRequest(), "A_USER") }
+      .isInstanceOf(InvalidLocationException::class.java)
+      .hasMessageContaining("is full")
     verify(repository, never()).save(any())
   }
 

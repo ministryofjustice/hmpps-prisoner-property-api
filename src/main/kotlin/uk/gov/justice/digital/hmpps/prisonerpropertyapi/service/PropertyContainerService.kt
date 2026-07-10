@@ -6,11 +6,11 @@ import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationDetail
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonRegisterClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.Prisoner
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchClient
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PropertyLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PersonLocation
@@ -75,18 +75,23 @@ class PropertyContainerService(
 
   /**
    * Whole-prison property totals for the establishment summary tiles. "Stored on-site" is every container
-   * physically in an internal box here (summing the per-location counts); "available storage locations" is the
-   * prison's BOX locations minus that stored count; "due to transfer out" comes from the denormalised status;
-   * "due to be disposed" is queried on the proposed disposal date having arisen (disposal is time-based, not
-   * denormalised). "Due to be returned" counts containers flagged due for return after the prisoner's release.
+   * physically in an internal location here (summing the per-location counts); "available storage spaces" is
+   * the remaining capacity across the prison's property locations - the sum over each location of its capacity
+   * minus the containers it currently holds (never negative), so a location with capacity 10 holding 8 leaves
+   * 2 spaces. "Due to transfer out" comes from the denormalised status; "due to be disposed" is queried on the
+   * proposed disposal date having arisen (disposal is time-based, not denormalised). "Due to be returned"
+   * counts containers flagged due for return after the prisoner's release.
    */
   @Transactional(readOnly = true)
   fun getPrisonPropertySummary(prisonId: String): PrisonPropertySummaryDto {
     val counts = repository.countContainersByStatus(prisonId).associate { it.status to it.count }
-    val storedOnSite = repository.countContainersByLocation(prisonId).sumOf { it.count }.toInt()
-    val totalBoxLocations = locationsClient.getLocationsByType(prisonId, BOX_LOCATION_TYPE).size
+    val countsByLocation = repository.countContainersByLocation(prisonId).associate { it.locationId to it.count.toInt() }
+    val storedOnSite = countsByLocation.values.sum()
+    val availableStorageSpaces = locationsClient.getPropertyLocations(prisonId).sumOf { location ->
+      ((location.capacity ?: 0) - (countsByLocation[location.id] ?: 0)).coerceAtLeast(0)
+    }
     return PrisonPropertySummaryDto(
-      availableStorageLocations = (totalBoxLocations - storedOnSite).coerceAtLeast(0),
+      availableStorageSpaces = availableStorageSpaces,
       storedOnSite = storedOnSite,
       dueToTransferOut = counts.count(ContainerStatus.DUE_FOR_TRANSFER_OUT),
       dueToBeReturned = counts.count(ContainerStatus.DUE_FOR_RETURN),
@@ -119,9 +124,9 @@ class PropertyContainerService(
     // Resolve the storage-location parts of both the exact filter and the free-text search up front, so a
     // single lookup of the prison's box locations covers whichever non-Branston terms are present.
     val needStorageLookup = (storageLocation != null && !branstonOnly) || (search != null && !searchBranston)
-    val boxLocations = if (needStorageLookup) locationsClient.getLocationsByType(prisonId, BOX_LOCATION_TYPE) else emptyList()
-    val locationIds = if (storageLocation != null && !branstonOnly) resolveLocationIds(boxLocations, storageLocation) else null
-    val searchLocationIds = if (search != null && !searchBranston) resolveLocationIds(boxLocations, search) else emptyList()
+    val propertyLocations = if (needStorageLookup) locationsClient.getPropertyLocations(prisonId) else emptyList()
+    val locationIds = if (storageLocation != null && !branstonOnly) resolveLocationIds(propertyLocations, storageLocation) else null
+    val searchLocationIds = if (search != null && !searchBranston) resolveLocationIds(propertyLocations, search) else emptyList()
     val filter = PrisonPropertyFilter(
       prisonerNumber = prisonerNumber,
       sealNumber = sealNumber,
@@ -288,8 +293,8 @@ class PropertyContainerService(
   /** The count for a status from a [countContainersByStatus] map, as an Int (0 when absent). */
   private fun Map<ContainerStatus, Long>.count(status: ContainerStatus): Int = this[status]?.toInt() ?: 0
 
-  /** The ids of the given box locations whose code, local name or path hierarchy match [term] (case-insensitive). */
-  private fun resolveLocationIds(boxLocations: List<LocationDetail>, term: String): List<UUID> = boxLocations
+  /** The ids of the given property locations whose code, local name or path hierarchy match [term] (case-insensitive). */
+  private fun resolveLocationIds(propertyLocations: List<PropertyLocation>, term: String): List<UUID> = propertyLocations
     .filter {
       it.code.equals(term, ignoreCase = true) ||
         it.localName.equals(term, ignoreCase = true) ||
@@ -300,9 +305,6 @@ class PropertyContainerService(
   private companion object {
     /** The storage-location search term that means "held offsite at Branston" rather than an internal code. */
     const val BRANSTON_SEARCH_TERM = "BRANSTON"
-
-    /** The locations-inside-prison location type property is stored in - the only type the search resolves against. */
-    const val BOX_LOCATION_TYPE = "BOX"
 
     /** prisoner-search prisonId + lastMovementTypeCode values that mean the prisoner is in transit between prisons. */
     const val TRANSIT_PRISON_ID = "TRN"

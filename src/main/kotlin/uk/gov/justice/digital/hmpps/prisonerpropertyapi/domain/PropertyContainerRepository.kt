@@ -35,6 +35,21 @@ interface PropertyContainerRepository :
   fun countContainersByLocation(@Param("prisonId") prisonId: String): List<LocationContainerCount>
 
   /**
+   * How many containers are currently held in one internal location, optionally excluding some by id (the
+   * container(s) being written, so a write does not count itself against the location's capacity). Reads the
+   * denormalised current_internal_location_id, so only containers physically present there are counted.
+   */
+  @Query(
+    "select count(c) from PropertyContainer c " +
+      "where c.currentInternalLocationId = :locationId and c.archived = false " +
+      "and (:excludedIds is null or c.id not in :excludedIds)",
+  )
+  fun countContainersInLocation(
+    @Param("locationId") locationId: UUID,
+    @Param("excludedIds") excludedIds: Collection<UUID>?,
+  ): Long
+
+  /**
    * How many active (not removed) containers a prison holds in each current status, read from the denormalised
    * current_status column so no events are loaded - feeds the establishment summary counts.
    */

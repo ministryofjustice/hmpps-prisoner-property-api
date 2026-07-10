@@ -6,8 +6,8 @@ import org.junit.jupiter.api.Test
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 import org.springframework.data.domain.PageRequest
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationDetail
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PropertyLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.LocationContainerCount
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.BoxLocationSort
@@ -21,7 +21,7 @@ class BoxLocationServiceTest {
 
   @BeforeEach
   fun stubBoxes() {
-    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
       listOf(box(BOX_A, "Box A"), box(BOX_B, "Box B"), box(BOX_C, "Box C")),
     )
   }
@@ -50,15 +50,34 @@ class BoxLocationServiceTest {
   }
 
   @Test
-  fun `sorts emptiest first with a name tiebreak when requested`() {
+  fun `sorts most available first with a name tiebreak when requested`() {
     whenever(repository.countContainersByLocation("LEI")).thenReturn(
       listOf(count(BOX_A, 2), count(BOX_B, 1)),
     )
 
-    val result = service.getBoxLocations("LEI", BoxLocationSort.FEWEST_CONTAINERS).content
+    val result = service.getBoxLocations("LEI", BoxLocationSort.MOST_AVAILABLE).content
 
+    // all capacity 10: Box C empty (10 spaces), Box B holds 1 (9), Box A holds 2 (8)
     assertThat(result.map { it.name }).containsExactly("Box C", "Box B", "Box A")
-    assertThat(result.map { it.containerCount }).containsExactly(0, 1, 2)
+    assertThat(result.map { it.availableSpaces }).containsExactly(10, 9, 8)
+  }
+
+  @Test
+  fun `excludes locations that are full and reports capacity and available spaces`() {
+    // Box A has capacity 2 and holds 2 containers, so it is full and must not be offered.
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
+      listOf(box(BOX_A, "Box A", capacity = 2), box(BOX_B, "Box B", capacity = 5)),
+    )
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(
+      listOf(count(BOX_A, 2), count(BOX_B, 3)),
+    )
+
+    val result = service.getBoxLocations("LEI", BoxLocationSort.NAME).content
+
+    assertThat(result.map { it.name }).containsExactly("Box B")
+    assertThat(result[0].capacity).isEqualTo(5)
+    assertThat(result[0].containerCount).isEqualTo(3)
+    assertThat(result[0].availableSpaces).isEqualTo(2)
   }
 
   @Test
@@ -104,13 +123,14 @@ class BoxLocationServiceTest {
     assertThat(secondPage.totalElements).isEqualTo(3)
   }
 
-  private fun box(id: UUID, localName: String) = LocationDetail(
+  private fun box(id: UUID, localName: String, capacity: Int = 10) = PropertyLocation(
     id = id,
     prisonId = "LEI",
     code = localName.replace(" ", ""),
     pathHierarchy = "RECP-${localName.replace(" ", "")}",
     localName = localName,
     locationType = "BOX",
+    capacity = capacity,
   )
 
   private fun count(id: UUID, count: Long) = object : LocationContainerCount {
