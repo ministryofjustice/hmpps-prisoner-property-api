@@ -10,6 +10,10 @@ import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.WebClientResponseException
 import org.springframework.web.reactive.function.client.bodyToMono
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.config.CacheConfiguration
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyLocationRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyLocationRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicatePropertyLocationNameException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationNotFoundException
 import java.util.UUID
 
 /**
@@ -93,6 +97,66 @@ class LocationsClient(
       if (ex.statusCode == HttpStatus.NOT_FOUND) {
         return emptyList()
       }
+      throw ex
+    }
+  }
+
+  /**
+   * Create a new property storage location in a prison (a top-level BOX location with a generated code and
+   * a PROPERTY usage carrying the capacity). Translates a downstream conflict into a domain
+   * [DuplicatePropertyLocationNameException] so the name clash surfaces cleanly to the caller.
+   */
+  fun createPropertyLocation(prisonId: String, request: CreatePropertyLocationRequest): PropertyLocation {
+    try {
+      return locationsWebClient
+        .post()
+        .uri("/locations/prison/{prisonId}/property", prisonId)
+        .bodyValue(request)
+        .retrieve()
+        .bodyToMono<PropertyLocation>()
+        .block()!!
+    } catch (ex: WebClientResponseException) {
+      if (ex.statusCode == HttpStatus.CONFLICT) throw DuplicatePropertyLocationNameException(request.localName)
+      throw ex
+    }
+  }
+
+  /**
+   * Update a property storage location's name and/or capacity. Translates a downstream 404 into
+   * [PropertyLocationNotFoundException] and a name clash (409) into [DuplicatePropertyLocationNameException].
+   */
+  fun updatePropertyLocation(id: UUID, request: UpdatePropertyLocationRequest): PropertyLocation {
+    try {
+      return locationsWebClient
+        .put()
+        .uri("/locations/property/{id}", id)
+        .bodyValue(request)
+        .retrieve()
+        .bodyToMono<PropertyLocation>()
+        .block()!!
+    } catch (ex: WebClientResponseException) {
+      when (ex.statusCode) {
+        HttpStatus.NOT_FOUND -> throw PropertyLocationNotFoundException(id)
+        HttpStatus.CONFLICT -> throw DuplicatePropertyLocationNameException(request.localName ?: "")
+        else -> throw ex
+      }
+    }
+  }
+
+  /**
+   * Remove the property designation from a location (drops its PROPERTY usage). Translates a downstream 404
+   * into [PropertyLocationNotFoundException].
+   */
+  fun removePropertyLocation(id: UUID): PropertyLocation {
+    try {
+      return locationsWebClient
+        .delete()
+        .uri("/locations/property/{id}", id)
+        .retrieve()
+        .bodyToMono<PropertyLocation>()
+        .block()!!
+    } catch (ex: WebClientResponseException) {
+      if (ex.statusCode == HttpStatus.NOT_FOUND) throw PropertyLocationNotFoundException(id)
       throw ex
     }
   }
