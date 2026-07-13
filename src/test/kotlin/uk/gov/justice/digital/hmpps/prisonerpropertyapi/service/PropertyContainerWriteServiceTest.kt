@@ -129,6 +129,36 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
+  fun `update to a field other than location does not re-validate the container's current location`() {
+    // The container's current location no longer resolves as a property store (e.g. migrated data or a
+    // designation removed after placement). Editing its seal must still work - the location is unchanged,
+    // so it is never looked up (the default stub would resolve it, but it should not be called at all).
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    val result = service.update(existing.id!!, updateRequest(sealNumber = "SEAL2", internalLocationId = LOCATION), "A_USER")
+
+    assertThat(existing.currentSealNumber).isEqualTo("SEAL2")
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("sealNumber"))
+    // the unchanged location must not be validated on this edit
+    verify(locationsClient, never()).getLocation(any())
+  }
+
+  @Test
+  fun `update moving to an invalid location is still rejected`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    val newLocation = UUID.fromString("44444444-4444-4444-4444-444444444444")
+    whenever(locationsClient.getLocation(newLocation)).thenReturn(
+      LocationDetail(id = newLocation, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Appointment Room", locationType = "ROOM", usage = emptyList()),
+    )
+
+    assertThatThrownBy { service.update(existing.id!!, updateRequest(internalLocationId = newLocation), "A_USER") }
+      .isInstanceOf(InvalidLocationException::class.java)
+      .hasMessageContaining("cannot store property")
+  }
+
+  @Test
   fun `update with no changes does not save and returns no event`() {
     val existing = existingContainer()
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
