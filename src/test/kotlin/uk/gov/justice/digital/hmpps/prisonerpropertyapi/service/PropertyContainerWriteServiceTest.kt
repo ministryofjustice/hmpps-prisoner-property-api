@@ -650,6 +650,33 @@ class PropertyContainerWriteServiceTest {
     assertThat(container.events.count { it.eventType == PropertyEventType.PRISONER_RELEASED }).isEqualTo(1)
   }
 
+  @Test
+  fun `prisonerDied flags all active containers as due for return with a distinct DIED_IN_CUSTODY event`() {
+    val here = containerAt("LEI", "SEAL1")
+    val removed = containerAt("LEI", "SEAL2").apply { removalOutcome = RemovalOutcome.RETURNED }
+    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(here, removed))
+
+    val events = service.prisonerDied("A1234BC")
+
+    assertThat(here.currentStatus()).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+    assertThat(here.events.last().eventType).isEqualTo(PropertyEventType.DIED_IN_CUSTODY)
+    // the removed container is untouched
+    assertThat(removed.events.map { it.eventType }).doesNotContain(PropertyEventType.DIED_IN_CUSTODY)
+    assertThat(events).hasSize(1).allSatisfy { assertThat(it.eventType).isEqualTo("prison-property.container.updated") }
+  }
+
+  @Test
+  fun `prisonerDied is idempotent - a repeat does nothing`() {
+    val container = containerAt("LEI", "SEAL1")
+    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(container))
+
+    service.prisonerDied("A1234BC")
+    val secondCallEvents = service.prisonerDied("A1234BC")
+
+    assertThat(secondCallEvents).isEmpty()
+    assertThat(container.events.count { it.eventType == PropertyEventType.DIED_IN_CUSTODY }).isEqualTo(1)
+  }
+
   private fun containerAt(prisonId: String, seal: String): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",

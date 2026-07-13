@@ -48,7 +48,9 @@ class PrisonerEventListener(
 
   /**
    * The release event also fires for temporary movements (court, TAP, hospital) and transfers, so only a
-   * permanent release (reason RELEASED, which also covers death in custody) flags property due for return.
+   * permanent release (reason RELEASED) flags property due for return. A death in custody arrives as a
+   * RELEASED event too, distinguished only by the NOMIS movement reason code DEC; it is handled like a
+   * release but recorded with a distinct DIED_IN_CUSTODY event so the history reads correctly.
    */
   private fun handlePrisonerReleased(event: HmppsDomainEvent) {
     val reason = event.additionalInformation?.get("reason") as? String
@@ -61,14 +63,22 @@ class PrisonerEventListener(
       log.warn("Ignoring {} with missing prisoner number", event.eventType)
       return
     }
-    propertyContainerWriteService.prisonerReleased(prisonerNumber)
-      .forEach(domainEventPublisher::publish)
+    val movementReasonCode = event.additionalInformation?.get("nomisMovementReasonCode") as? String
+    val results = if (movementReasonCode == DIED_REASON_CODE) {
+      propertyContainerWriteService.prisonerDied(prisonerNumber)
+    } else {
+      propertyContainerWriteService.prisonerReleased(prisonerNumber)
+    }
+    results.forEach(domainEventPublisher::publish)
   }
 
   private companion object {
     private const val PRISONER_RECEIVED_EVENT_TYPE = "prison-offender-events.prisoner.received"
     private const val PRISONER_RELEASED_EVENT_TYPE = "prison-offender-events.prisoner.released"
     private const val RELEASED_REASON = "RELEASED"
+
+    /** NOMIS movement reason code for a death in custody, carried on the released event's additionalInformation. */
+    private const val DIED_REASON_CODE = "DEC"
     private val log = LoggerFactory.getLogger(this::class.java)
   }
 }
