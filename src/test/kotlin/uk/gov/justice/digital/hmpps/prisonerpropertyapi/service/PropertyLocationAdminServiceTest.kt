@@ -15,6 +15,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PropertyLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.LocationContainerCount
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyLocationRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyLocationRequest
 import java.util.UUID
 
 class PropertyLocationAdminServiceTest {
@@ -54,6 +55,39 @@ class PropertyLocationAdminServiceTest {
     assertThat(result.capacity).isEqualTo(10)
     assertThat(result.containersHeld).isEqualTo(0)
     assertThat(result.availableSpaces).isEqualTo(10)
+  }
+
+  @Test
+  fun `update is rejected and does not call downstream when capacity is below the containers held`() {
+    whenever(repository.countContainersInLocation(eq(LOCATION), anyOrNull())).thenReturn(3L)
+
+    assertThatThrownBy { service.updatePropertyLocation(LOCATION, UpdatePropertyLocationRequest(capacity = 2)) }
+      .isInstanceOf(PropertyLocationCapacityBelowUsageException::class.java)
+
+    verify(locationsClient, never()).updatePropertyLocation(any(), any())
+  }
+
+  @Test
+  fun `update allows capacity equal to the containers held`() {
+    whenever(repository.countContainersInLocation(eq(LOCATION), anyOrNull())).thenReturn(3L)
+    whenever(locationsClient.updatePropertyLocation(eq(LOCATION), any())).thenReturn(location(LOCATION, capacity = 3))
+
+    val result = service.updatePropertyLocation(LOCATION, UpdatePropertyLocationRequest(capacity = 3))
+
+    assertThat(result.capacity).isEqualTo(3)
+    assertThat(result.containersHeld).isEqualTo(3)
+    assertThat(result.availableSpaces).isEqualTo(0)
+    verify(locationsClient).updatePropertyLocation(eq(LOCATION), any())
+  }
+
+  @Test
+  fun `update with no capacity change is allowed regardless of containers held`() {
+    whenever(repository.countContainersInLocation(eq(LOCATION), anyOrNull())).thenReturn(5L)
+    whenever(locationsClient.updatePropertyLocation(eq(LOCATION), any())).thenReturn(location(LOCATION, capacity = 10))
+
+    service.updatePropertyLocation(LOCATION, UpdatePropertyLocationRequest(localName = "Renamed Store"))
+
+    verify(locationsClient).updatePropertyLocation(eq(LOCATION), any())
   }
 
   @Test
