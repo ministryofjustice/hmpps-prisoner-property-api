@@ -21,6 +21,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonRegisterClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.Prisoner
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchClient
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PropertyLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.LocationContainerCount
@@ -159,11 +160,15 @@ class PropertyContainerServiceTest {
   }
 
   @Test
-  fun `getPrisonPropertySummary maps location and status counts to the summary tiles`() {
-    // 12 containers physically stored across two internal boxes; 20 boxes total -> 8 available.
-    whenever(repository.countContainersByLocation("LEI")).thenReturn(listOf(locationCount(8), locationCount(4)))
-    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
-      (1..20).map { LocationDetail(id = UUID.randomUUID(), prisonId = "LEI", code = "PB$it", pathHierarchy = "PROP-PB$it", localName = "Box $it") },
+  fun `getPrisonPropertySummary sums remaining capacity across locations for available spaces`() {
+    // Box 1 (capacity 10) holds 8 -> 2 spaces; Box 2 (capacity 20) holds 4 -> 16 spaces; Box 3 empty
+    // (capacity 5) -> 5 spaces. 12 containers stored on-site; 23 spaces remain.
+    val box1 = UUID.randomUUID()
+    val box2 = UUID.randomUUID()
+    val box3 = UUID.randomUUID()
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(listOf(locationCount(box1, 8), locationCount(box2, 4)))
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
+      listOf(propertyLocation(box1, 10), propertyLocation(box2, 20), propertyLocation(box3, 5)),
     )
     whenever(repository.countContainersByStatus("LEI")).thenReturn(
       listOf(
@@ -177,7 +182,7 @@ class PropertyContainerServiceTest {
 
     val summary = service.getPrisonPropertySummary("LEI")
 
-    assertThat(summary.availableStorageLocations).isEqualTo(8)
+    assertThat(summary.availableStorageSpaces).isEqualTo(23)
     assertThat(summary.storedOnSite).isEqualTo(12)
     assertThat(summary.dueToTransferOut).isEqualTo(80)
     assertThat(summary.dueToBeReturned).isEqualTo(36)
@@ -185,29 +190,33 @@ class PropertyContainerServiceTest {
   }
 
   @Test
-  fun `getPrisonPropertySummary floors available locations at zero when more containers than boxes`() {
-    whenever(repository.countContainersByLocation("LEI")).thenReturn(listOf(locationCount(30)))
-    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
-      (1..20).map { LocationDetail(id = UUID.randomUUID(), prisonId = "LEI", code = "PB$it", pathHierarchy = "PROP-PB$it", localName = "Box $it") },
+  fun `getPrisonPropertySummary floors a location's spaces at zero when it is over capacity`() {
+    // Box 1 (capacity 10) is over capacity holding 30 -> contributes 0, not negative; Box 2 (capacity 5)
+    // empty -> 5 spaces. So 5 spaces remain overall despite 30 stored.
+    val box1 = UUID.randomUUID()
+    val box2 = UUID.randomUUID()
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(listOf(locationCount(box1, 30)))
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
+      listOf(propertyLocation(box1, 10), propertyLocation(box2, 5)),
     )
     whenever(repository.countContainersByStatus("LEI")).thenReturn(emptyList())
     whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
 
     val summary = service.getPrisonPropertySummary("LEI")
 
-    assertThat(summary.availableStorageLocations).isZero()
+    assertThat(summary.availableStorageSpaces).isEqualTo(5)
     assertThat(summary.storedOnSite).isEqualTo(30)
   }
 
   @Test
-  fun `getPrisonPropertySummary returns zero counts for a prison with no property or boxes`() {
+  fun `getPrisonPropertySummary returns zero counts for a prison with no property or locations`() {
     whenever(repository.countContainersByStatus("LEI")).thenReturn(emptyList())
     whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
     whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
-    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(emptyList())
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(emptyList())
 
     assertThat(service.getPrisonPropertySummary("LEI"))
-      .isEqualTo(PrisonPropertySummaryDto(availableStorageLocations = 0, storedOnSite = 0, dueToTransferOut = 0, dueToBeReturned = 0, dueToBeDisposed = 0))
+      .isEqualTo(PrisonPropertySummaryDto(availableStorageSpaces = 0, storedOnSite = 0, dueToTransferOut = 0, dueToBeReturned = 0, dueToBeDisposed = 0))
   }
 
   @Test
@@ -295,10 +304,10 @@ class PropertyContainerServiceTest {
 
   @Test
   fun `getPrisonProperty resolves a storage-location term to box location ids by code, local name or path hierarchy`() {
-    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
       listOf(
-        LocationDetail(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638", localName = "Reception Box A"),
-        LocationDetail(id = LOCATION_B, prisonId = "LEI", code = "PB0200", pathHierarchy = "PROP-PB0200", localName = "Reception Box B"),
+        PropertyLocation(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638", localName = "Reception Box A", locationType = "BOX", capacity = 10),
+        PropertyLocation(id = LOCATION_B, prisonId = "LEI", code = "PB0200", pathHierarchy = "PROP-PB0200", localName = "Reception Box B", locationType = "BOX", capacity = 10),
       ),
     )
     whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
@@ -334,7 +343,7 @@ class PropertyContainerServiceTest {
       },
       any(),
     )
-    verify(locationsClient, never()).getLocationsByType(any(), any())
+    verify(locationsClient, never()).getPropertyLocations(any())
   }
 
   @Test
@@ -371,10 +380,10 @@ class PropertyContainerServiceTest {
 
   @Test
   fun `getPrisonProperty resolves a free-text query to its storage-location ids for an OR search`() {
-    whenever(locationsClient.getLocationsByType("LEI", "BOX")).thenReturn(
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
       listOf(
-        LocationDetail(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638", localName = "Reception Box A"),
-        LocationDetail(id = LOCATION_B, prisonId = "LEI", code = "PB0200", pathHierarchy = "PROP-PB0200", localName = "Reception Box B"),
+        PropertyLocation(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638", localName = "Reception Box A", locationType = "BOX", capacity = 10),
+        PropertyLocation(id = LOCATION_B, prisonId = "LEI", code = "PB0200", pathHierarchy = "PROP-PB0200", localName = "Reception Box B", locationType = "BOX", capacity = 10),
       ),
     )
     whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
@@ -406,7 +415,7 @@ class PropertyContainerServiceTest {
       },
       any(),
     )
-    verify(locationsClient, never()).getLocationsByType(any(), any())
+    verify(locationsClient, never()).getPropertyLocations(any())
   }
 
   @Test
@@ -482,10 +491,22 @@ class PropertyContainerServiceTest {
     override val count = count
   }
 
-  private fun locationCount(count: Long): LocationContainerCount = object : LocationContainerCount {
-    override val locationId = UUID.randomUUID()
+  private fun locationCount(count: Long): LocationContainerCount = locationCount(UUID.randomUUID(), count)
+
+  private fun locationCount(id: UUID, count: Long): LocationContainerCount = object : LocationContainerCount {
+    override val locationId = id
     override val count = count
   }
+
+  private fun propertyLocation(id: UUID, capacity: Int?) = PropertyLocation(
+    id = id,
+    prisonId = "LEI",
+    code = "PB",
+    pathHierarchy = "PROP-PB",
+    localName = "Box",
+    locationType = "BOX",
+    capacity = capacity,
+  )
 
   private fun prisoner(prisonId: String, lastMovementTypeCode: String? = null) = Prisoner(
     prisonerNumber = "A1234BC",

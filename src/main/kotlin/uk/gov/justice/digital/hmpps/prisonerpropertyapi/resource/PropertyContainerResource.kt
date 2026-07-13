@@ -179,15 +179,16 @@ class PropertyContainerResource(
 
   @GetMapping("/prison/{prisonId}/box-locations")
   @Operation(
-    summary = "Get the property box locations in a prison with their current container counts",
-    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns a page of the BOX locations in the prison " +
-      "(from locations-inside-prison-api) annotated with how many property containers are currently held " +
-      "there, so a user can pick a suitable place to store property. Empty boxes are included with a count " +
-      "of 0. Optionally filtered by a search query matched (case-insensitively) against the box code, local " +
-      "name and path hierarchy - the query supports * (any run of characters) and ? (a single character) " +
-      "wildcards, and a query with no wildcards is a substring match. Ordered alphabetically by name by " +
-      "default, or emptiest-first with sort=FEWEST_CONTAINERS. Use the standard page and size query " +
-      "parameters for pagination.",
+    summary = "Get the property storage locations in a prison that have space, with capacity and container counts",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns a page of the prison's property storage " +
+      "locations (from locations-inside-prison-api - any location with a PROPERTY usage, not only BOX-typed " +
+      "ones) that still have room, annotated with their capacity, how many property containers are currently " +
+      "held there and the remaining available spaces, so a user can pick somewhere to store property. " +
+      "Locations with no remaining space are excluded. Optionally filtered by a search query matched " +
+      "(case-insensitively) against the location code, local name and path hierarchy - the query supports * " +
+      "(any run of characters) and ? (a single character) wildcards, and a query with no wildcards is a " +
+      "substring match. Ordered alphabetically by name by default, or most-available-first with " +
+      "sort=MOST_AVAILABLE. Use the standard page and size query parameters for pagination.",
     responses = [
       ApiResponse(responseCode = "200", description = "Page of box locations returned"),
       ApiResponse(responseCode = "400", description = "Invalid prison id", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),

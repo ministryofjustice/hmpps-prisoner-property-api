@@ -37,15 +37,26 @@ class PropertyContainerWriteService(
 ) {
 
   /**
-   * Reject an internal location that is not a known non-residential location, or that is not a property
-   * box - property may only be stored in a BOX location (raises a 400).
+   * Reject an internal location that cannot hold the container being placed there (raises a 400):
+   * - it is not a known non-residential location, or
+   * - it cannot store property (it has no PROPERTY usage - any location type may, not only BOX), or
+   * - it is full (the containers already there, excluding [excludingContainerIds], reach its capacity).
+   *
+   * [excludingContainerIds] are the container(s) being written, so a container is not counted against the
+   * capacity of a location it is being moved into or updated within, and combine sources do not block the
+   * combined container. The capacity check is a best-effort backstop - the picker only offers locations with
+   * space, but concurrent writes could still race, so the final guard is here.
    */
-  private fun requireValidLocation(internalLocationId: UUID?) {
+  private fun requireValidLocation(internalLocationId: UUID?, excludingContainerIds: Set<UUID> = emptySet()) {
     if (internalLocationId == null) return
     val location = locationsClient.getLocation(internalLocationId)
       ?: throw InvalidLocationException(internalLocationId, "not found")
-    if (!location.isBox()) {
-      throw InvalidLocationException(internalLocationId, "is not a property box")
+    if (!location.canStoreProperty()) {
+      throw InvalidLocationException(internalLocationId, "cannot store property")
+    }
+    val used = repository.countContainersInLocation(internalLocationId, excludingContainerIds.takeIf { it.isNotEmpty() })
+    if (used >= location.propertyCapacity()) {
+      throw InvalidLocationException(internalLocationId, "is full")
     }
   }
 
@@ -126,7 +137,7 @@ class PropertyContainerWriteService(
 
   @Transactional
   fun update(id: UUID, request: UpdatePropertyContainerRequest, username: String): WriteResult {
-    requireValidLocation(request.internalLocationId)
+    requireValidLocation(request.internalLocationId, excludingContainerIds = setOf(id))
 
     val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
     val now = LocalDateTime.now()
@@ -243,7 +254,8 @@ class PropertyContainerWriteService(
     val today = LocalDate.now()
     val locationType = request.locationType ?: request.internalLocationId?.let { StorageLocationType.INTERNAL }
     val internalLocationId = if (locationType == StorageLocationType.INTERNAL) request.internalLocationId else null
-    requireValidLocation(internalLocationId)
+    // The source containers are being combined away, so they must not count against the target's capacity.
+    requireValidLocation(internalLocationId, excludingContainerIds = sources.mapNotNull { it.id }.toSet())
 
     val combined = PropertyContainer(
       prisonerNumber = prisonerNumber,
@@ -294,7 +306,7 @@ class PropertyContainerWriteService(
       throw ValidationException("internalLocationId must not be set for a Branston move")
     }
     val targetId = if (request.locationType == StorageLocationType.INTERNAL) request.internalLocationId else null
-    requireValidLocation(targetId)
+    requireValidLocation(targetId, excludingContainerIds = setOf(id))
 
     val container = loadActive(id)
 

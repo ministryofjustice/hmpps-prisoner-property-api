@@ -22,7 +22,7 @@ class LocationsClientTest : IntegrationTestBase() {
   @BeforeEach
   fun stubToken() {
     hmppsAuth.stubGrantToken()
-    // getLocationsByType is @Cacheable - clear so each case resolves against its own stub, not a prior one's.
+    // getPropertyLocations is @Cacheable - clear so each case resolves against its own stub, not a prior one's.
     cacheManager.cacheNames.forEach { cacheManager.getCache(it)?.clear() }
   }
 
@@ -72,22 +72,24 @@ class LocationsClientTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `getLocationsByType returns the boxes for a prison`() {
+  fun `getPropertyLocations returns the property locations for a prison with their capacity`() {
     val box1 = "11111111-1111-1111-1111-111111111111"
     val box2 = "22222222-2222-2222-2222-222222222222"
     locations.stubGetBoxLocations(
       "LEI",
       listOf(Triple(box1, "PROP1", "Property Box 1"), Triple(box2, "PROP2", "Property Box 2")),
+      capacity = 25,
     )
 
-    val result = locationsClient.getLocationsByType("LEI", "BOX")
+    val result = locationsClient.getPropertyLocations("LEI")
 
     assertThat(result.map { it.id.toString() }).containsExactly(box1, box2)
     assertThat(result[0].displayName()).isEqualTo("Property Box 1")
+    assertThat(result[0].capacity).isEqualTo(25)
   }
 
   @Test
-  fun `getLocationsByType returns an empty list when the prison has no such locations`() {
-    assertThat(locationsClient.getLocationsByType("LEI", "BOX")).isEmpty()
+  fun `getPropertyLocations returns an empty list when the prison has no such locations`() {
+    assertThat(locationsClient.getPropertyLocations("LEI")).isEmpty()
   }
 }

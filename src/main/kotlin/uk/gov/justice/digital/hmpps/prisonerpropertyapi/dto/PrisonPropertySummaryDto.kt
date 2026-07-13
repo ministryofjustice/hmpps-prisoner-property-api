@@ -7,8 +7,8 @@ import io.swagger.v3.oas.annotations.media.Schema
     "whole, independent of any list paging or filtering.",
 )
 data class PrisonPropertySummaryDto(
-  @Schema(description = "The prison's total internal BOX storage locations minus the containers currently stored on-site (floored at 0)", example = "150")
-  val availableStorageLocations: Int,
+  @Schema(description = "Remaining spaces for property across the prison's storage locations - the sum over each location of its capacity minus the containers it holds (floored at 0)", example = "150")
+  val availableStorageSpaces: Int,
 
   @Schema(description = "Number of containers currently in internal storage at this establishment", example = "3000")
   val storedOnSite: Int,

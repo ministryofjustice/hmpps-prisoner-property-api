@@ -17,16 +17,18 @@ class BoxLocationService(
 ) {
 
   /**
-   * A page of the BOX locations available in a prison, each annotated with how many containers are currently
-   * held there, so a user can pick a suitable place to store property. Empty boxes are included (count 0).
+   * A page of the property storage locations in a prison that still have room, each annotated with its
+   * capacity and how many containers it currently holds, so a user can pick somewhere to store property.
+   * A location can hold property if it has a PROPERTY usage (any location type, not only BOX); locations
+   * with no remaining space (containers held >= capacity) are excluded, since you cannot store there.
    *
-   * Optionally filtered by [query] - a case-insensitive match against the box code, local name and path
+   * Optionally filtered by [query] - a case-insensitive match against the location code, local name and path
    * hierarchy. The query supports simple wildcards: `*` matches any run of characters and `?` matches a
    * single character; any other regex metacharacters are treated literally. A query with no wildcards is a
    * substring (contains) match.
    *
-   * Sorted alphabetically by name, or - with [BoxLocationSort.FEWEST_CONTAINERS] - emptiest first. The box
-   * set per prison is small and cached, so filtering, sorting and paging are done in memory.
+   * Sorted alphabetically by name, or - with [BoxLocationSort.MOST_AVAILABLE] - most spaces first. The
+   * location set per prison is small and cached, so filtering, sorting and paging are done in memory.
    */
   @Transactional(readOnly = true)
   fun getBoxLocations(
@@ -35,22 +37,23 @@ class BoxLocationService(
     query: String? = null,
     pageable: Pageable = Pageable.unpaged(),
   ): Page<BoxLocationDto> {
-    val boxes = locationsClient.getLocationsByType(prisonId, BOX)
-    // The denormalised current_internal_location_id is the box id while a container is physically present,
-    // and null once removed or held offsite - so this counts the containers actually in each box without
-    // loading any events.
+    val locations = locationsClient.getPropertyLocations(prisonId)
+    // The denormalised current_internal_location_id is the location id while a container is physically
+    // present, and null once removed or held offsite - so this counts the containers actually in each
+    // location without loading any events.
     val countsByLocation = repository.countContainersByLocation(prisonId)
       .associate { it.locationId to it.count.toInt() }
 
     val matcher = query?.trim()?.takeIf { it.isNotEmpty() }?.let { toWildcardRegex(it) }
-    val rows = boxes.asSequence()
+    val rows = locations.asSequence()
       .map { BoxLocationDto.from(it, countsByLocation[it.id] ?: 0) }
+      .filter { it.availableSpaces > 0 }
       .filter { matcher == null || it.matches(matcher) }
       .toList()
 
     val sorted = when (sort) {
       BoxLocationSort.NAME -> rows.sortedBy { it.name.lowercase() }
-      BoxLocationSort.FEWEST_CONTAINERS -> rows.sortedWith(compareBy({ it.containerCount }, { it.name.lowercase() }))
+      BoxLocationSort.MOST_AVAILABLE -> rows.sortedWith(compareByDescending<BoxLocationDto> { it.availableSpaces }.thenBy { it.name.lowercase() })
     }
 
     if (pageable.isUnpaged) return PageImpl(sorted)
@@ -76,9 +79,5 @@ class BoxLocationService(
       }
     }
     return Regex(pattern, RegexOption.IGNORE_CASE)
-  }
-
-  private companion object {
-    private const val BOX = "BOX"
   }
 }
