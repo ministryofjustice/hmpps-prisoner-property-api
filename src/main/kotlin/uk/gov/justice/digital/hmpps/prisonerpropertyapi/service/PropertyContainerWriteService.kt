@@ -137,11 +137,19 @@ class PropertyContainerWriteService(
 
   @Transactional
   fun update(id: UUID, request: UpdatePropertyContainerRequest, username: String): WriteResult {
-    requireValidLocation(request.internalLocationId, excludingContainerIds = setOf(id))
-
     val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
     val now = LocalDateTime.now()
     val changed = mutableListOf<String>()
+
+    // Only a genuine move needs the target location validated. Re-checking a location the container is
+    // already in would block edits to its seal/type/disposal date when that location is no longer a valid
+    // property store - e.g. migrated data, or a designation removed or changed after the container was
+    // placed there - trapping the container so it could not even be edited to move it out.
+    val movingLocation = request.internalLocationId != null &&
+      (container.currentLocationType() != StorageLocationType.INTERNAL || request.internalLocationId != container.currentLocation())
+    if (movingLocation) {
+      requireValidLocation(request.internalLocationId, excludingContainerIds = setOf(id))
+    }
 
     if (request.sealNumber != container.currentSealNumber) {
       if (repository.existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot(request.sealNumber, id)) {
@@ -158,9 +166,7 @@ class PropertyContainerWriteService(
       changed += "containerType"
     }
 
-    if (request.internalLocationId != null &&
-      (container.currentLocationType() != StorageLocationType.INTERNAL || request.internalLocationId != container.currentLocation())
-    ) {
+    if (movingLocation) {
       container.events.add(
         PropertyEvent(
           container,
