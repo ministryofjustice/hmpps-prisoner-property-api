@@ -30,12 +30,16 @@ class PropertyLocationAdminService(
     val log: Logger = LoggerFactory.getLogger(this::class.java)
   }
 
-  /** Every property storage location in a prison (including full ones), with capacity and how full it is. */
+  /**
+   * Every property storage location in a prison (including full ones), with capacity and how full it is.
+   * Reads live (bypassing the per-pod property-locations cache) so an admin's own add/rename/re-capacity/
+   * remove is reflected on the follow-up list read even when a different pod serves it.
+   */
   @Transactional(readOnly = true)
   fun listPropertyLocations(prisonId: String): List<PropertyLocationAdminDto> {
     val countsByLocation = repository.countContainersByLocation(prisonId)
       .associate { it.locationId to it.count.toInt() }
-    return locationsClient.getPropertyLocations(prisonId)
+    return locationsClient.getPropertyLocationsLive(prisonId)
       .map { PropertyLocationAdminDto.from(it, countsByLocation[it.id] ?: 0) }
       .sortedBy { it.name.lowercase() }
   }

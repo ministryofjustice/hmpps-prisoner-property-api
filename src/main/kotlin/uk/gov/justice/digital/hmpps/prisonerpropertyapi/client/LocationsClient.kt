@@ -81,9 +81,24 @@ class LocationsClient(
    * not only BOX-typed locations. Used both to list a prison's storage locations and to resolve a searched
    * storage-location term (code, local name or path hierarchy) to its location id(s). Cached per prison -
    * the set rarely changes. Returns an empty list if the prison has none or is unknown.
+   *
+   * The cache is a per-pod in-memory map, so a write only evicts the writing pod (see
+   * [CacheConfiguration]); other pods converge via the scheduled evict. That lag is fine for these
+   * high-traffic read paths but not for the admin management screens, which must reflect a write
+   * immediately - those read live via [getPropertyLocationsLive].
    */
   @Cacheable(CacheConfiguration.PROPERTY_LOCATIONS_CACHE_NAME)
-  fun getPropertyLocations(prisonId: String): List<PropertyLocation> {
+  fun getPropertyLocations(prisonId: String): List<PropertyLocation> = fetchPropertyLocations(prisonId)
+
+  /**
+   * The same property-location read as [getPropertyLocations] but bypassing the cache, so the caller
+   * always sees the live state in locations-inside-prison. Used by the property-location management
+   * screens, where an admin must see their own add/rename/re-capacity/remove take effect straight away
+   * regardless of which pod serves the follow-up read.
+   */
+  fun getPropertyLocationsLive(prisonId: String): List<PropertyLocation> = fetchPropertyLocations(prisonId)
+
+  private fun fetchPropertyLocations(prisonId: String): List<PropertyLocation> {
     log.debug("Looking up property locations for prison {}", prisonId)
     try {
       return locationsWebClient
