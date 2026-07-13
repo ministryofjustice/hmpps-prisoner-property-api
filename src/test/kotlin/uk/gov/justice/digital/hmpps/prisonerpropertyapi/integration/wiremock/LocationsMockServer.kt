@@ -51,14 +51,13 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
   }
 
   /**
-   * Stub the single non-residential lookup. By default the location has a PROPERTY usage (so it can hold
-   * property) with [propertyCapacity]; pass canStoreProperty = false to return a location with no PROPERTY
-   * usage, to exercise the "cannot store property" rejection.
+   * Stub the single property-location lookup, returning a property location with [propertyCapacity]. Use
+   * [stubGetPropertyLocationNotFound] for the case where the location is unknown or cannot store property
+   * (locations-inside-prison returns 404 for both).
    */
-  fun stubGetLocation(id: String, locationType: String = "BOX", canStoreProperty: Boolean = true, propertyCapacity: Int = 100) {
-    val usage = if (canStoreProperty) """[{"usageType": "PROPERTY", "capacity": $propertyCapacity}]""" else "[]"
+  fun stubGetPropertyLocation(id: String, locationType: String = "BOX", propertyCapacity: Int = 100) {
     stubFor(
-      get(urlPathEqualTo("/locations/non-residential/$id")).willReturn(
+      get(urlPathEqualTo("/locations/property/$id")).willReturn(
         aResponse()
           .withHeader("Content-Type", "application/json")
           .withStatus(200)
@@ -71,7 +70,7 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
                 "pathHierarchy": "RECP-PROP",
                 "localName": "Reception Property Store",
                 "locationType": "$locationType",
-                "usage": $usage
+                "capacity": $propertyCapacity
               }
             """.trimIndent(),
           ),
@@ -79,9 +78,9 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
     )
   }
 
-  fun stubGetLocationNotFound(id: String) {
+  fun stubGetPropertyLocationNotFound(id: String) {
     stubFor(
-      get(urlPathEqualTo("/locations/non-residential/$id")).willReturn(
+      get(urlPathEqualTo("/locations/property/$id")).willReturn(
         aResponse()
           .withHeader("Content-Type", "application/json")
           .withStatus(404)

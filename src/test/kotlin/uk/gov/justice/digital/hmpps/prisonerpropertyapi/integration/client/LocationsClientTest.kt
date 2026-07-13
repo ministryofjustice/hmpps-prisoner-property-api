@@ -29,24 +29,25 @@ class LocationsClientTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `returns location detail with a display name`() {
+  fun `returns the property location with its capacity`() {
     val id = UUID.fromString("11111111-1111-1111-1111-111111111111")
-    locations.stubGetLocation(id.toString())
+    locations.stubGetPropertyLocation(id.toString(), propertyCapacity = 40)
 
-    val location = locationsClient.getLocation(id)
+    val location = locationsClient.getPropertyLocation(id)
 
     assertThat(location).isNotNull
     assertThat(location!!.id).isEqualTo(id)
     assertThat(location.prisonId).isEqualTo("MDI")
+    assertThat(location.capacity).isEqualTo(40)
     assertThat(location.displayName()).isEqualTo("Reception Property Store")
   }
 
   @Test
-  fun `returns null when the location is not found`() {
+  fun `returns null when the location is not found or cannot store property`() {
     val id = UUID.fromString("22222222-2222-2222-2222-222222222222")
-    locations.stubGetLocationNotFound(id.toString())
+    locations.stubGetPropertyLocationNotFound(id.toString())
 
-    assertThat(locationsClient.getLocation(id)).isNull()
+    assertThat(locationsClient.getPropertyLocation(id)).isNull()
   }
 
   @Test

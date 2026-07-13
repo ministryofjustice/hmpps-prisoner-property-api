@@ -12,9 +12,8 @@ import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationDetail
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.NonResidentialUsage
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PropertyLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
@@ -42,16 +41,16 @@ class PropertyContainerWriteServiceTest {
 
   @BeforeEach
   fun stubLocationsResolveByDefault() {
-    whenever(locationsClient.getLocation(any())).thenAnswer { invocation ->
+    whenever(locationsClient.getPropertyLocation(any())).thenAnswer { invocation ->
       val id = invocation.arguments[0] as UUID
-      LocationDetail(
+      PropertyLocation(
         id = id,
         prisonId = "LEI",
         code = "PROP",
         pathHierarchy = "RECP-PROP",
         localName = "Reception Property Store",
         locationType = "BOX",
-        usage = listOf(NonResidentialUsage(usageType = "PROPERTY", capacity = 100)),
+        capacity = 100,
       )
     }
   }
@@ -141,21 +140,7 @@ class PropertyContainerWriteServiceTest {
     assertThat(existing.currentSealNumber).isEqualTo("SEAL2")
     assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("sealNumber"))
     // the unchanged location must not be validated on this edit
-    verify(locationsClient, never()).getLocation(any())
-  }
-
-  @Test
-  fun `update moving to an invalid location is still rejected`() {
-    val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
-    val newLocation = UUID.fromString("44444444-4444-4444-4444-444444444444")
-    whenever(locationsClient.getLocation(newLocation)).thenReturn(
-      LocationDetail(id = newLocation, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Appointment Room", locationType = "ROOM", usage = emptyList()),
-    )
-
-    assertThatThrownBy { service.update(existing.id!!, updateRequest(internalLocationId = newLocation), "A_USER") }
-      .isInstanceOf(InvalidLocationException::class.java)
-      .hasMessageContaining("cannot store property")
+    verify(locationsClient, never()).getPropertyLocation(any())
   }
 
   @Test
@@ -189,32 +174,21 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
-  fun `create rejects an internal location that does not exist`() {
-    whenever(locationsClient.getLocation(LOCATION)).thenReturn(null)
+  fun `create rejects an internal location that is not a property store`() {
+    // locations-inside-prison returns null for both an unknown id and a location with no PROPERTY usage.
+    whenever(locationsClient.getPropertyLocation(LOCATION)).thenReturn(null)
 
     assertThatThrownBy { service.create(createRequest(), "A_USER") }
       .isInstanceOf(InvalidLocationException::class.java)
-    verify(repository, never()).save(any())
-  }
-
-  @Test
-  fun `create rejects an internal location that cannot store property`() {
-    whenever(locationsClient.getLocation(LOCATION)).thenReturn(
-      // A non-residential location with no PROPERTY usage cannot hold property.
-      LocationDetail(id = LOCATION, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Appointment Room", locationType = "ROOM", usage = emptyList()),
-    )
-
-    assertThatThrownBy { service.create(createRequest(), "A_USER") }
-      .isInstanceOf(InvalidLocationException::class.java)
-      .hasMessageContaining("cannot store property")
+      .hasMessageContaining("is not a property storage location")
     verify(repository, never()).save(any())
   }
 
   @Test
   fun `create rejects an internal location that is full`() {
     // The location has capacity 2 and already holds 2 containers, so there is no room for another.
-    whenever(locationsClient.getLocation(LOCATION)).thenReturn(
-      LocationDetail(id = LOCATION, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Reception Store", locationType = "BOX", usage = listOf(NonResidentialUsage(usageType = "PROPERTY", capacity = 2))),
+    whenever(locationsClient.getPropertyLocation(LOCATION)).thenReturn(
+      PropertyLocation(id = LOCATION, prisonId = "LEI", code = "PROP", pathHierarchy = "RECP-PROP", localName = "Reception Store", locationType = "BOX", capacity = 2),
     )
     whenever(repository.countContainersInLocation(LOCATION, null)).thenReturn(2)
 
@@ -229,7 +203,7 @@ class PropertyContainerWriteServiceTest {
     val existing = existingContainer()
     val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
-    whenever(locationsClient.getLocation(newLocation)).thenReturn(null)
+    whenever(locationsClient.getPropertyLocation(newLocation)).thenReturn(null)
 
     assertThatThrownBy { service.update(existing.id!!, updateRequest(internalLocationId = newLocation), "A_USER") }
       .isInstanceOf(InvalidLocationException::class.java)
@@ -238,7 +212,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `move rejects an internal location that does not exist`() {
     val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
-    whenever(locationsClient.getLocation(newLocation)).thenReturn(null)
+    whenever(locationsClient.getPropertyLocation(newLocation)).thenReturn(null)
 
     assertThatThrownBy { service.move(UUID.randomUUID(), MoveContainerRequest(StorageLocationType.INTERNAL, internalLocationId = newLocation), "A_USER") }
       .isInstanceOf(InvalidLocationException::class.java)
@@ -251,7 +225,7 @@ class PropertyContainerWriteServiceTest {
     val b = sourceContainer("A1234BC", "SEALB")
     whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
     whenever(repository.findById(b.id!!)).thenReturn(Optional.of(b))
-    whenever(locationsClient.getLocation(LOCATION)).thenReturn(null)
+    whenever(locationsClient.getPropertyLocation(LOCATION)).thenReturn(null)
 
     assertThatThrownBy {
       service.combine(CombineContainersRequest(listOf(a.id!!, b.id!!), ContainerType.STANDARD, "NEWSEAL", internalLocationId = LOCATION), "A_USER")

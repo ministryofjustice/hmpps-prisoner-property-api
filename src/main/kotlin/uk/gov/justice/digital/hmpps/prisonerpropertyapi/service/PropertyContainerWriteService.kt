@@ -38,8 +38,8 @@ class PropertyContainerWriteService(
 
   /**
    * Reject an internal location that cannot hold the container being placed there (raises a 400):
-   * - it is not a known non-residential location, or
-   * - it cannot store property (it has no PROPERTY usage - any location type may, not only BOX), or
+   * - it cannot store property (it is unknown, or has no PROPERTY usage - any location type may, not only
+   *   BOX; locations-inside-prison resolves both to "not a property storage location"), or
    * - it is full (the containers already there, excluding [excludingContainerIds], reach its capacity).
    *
    * [excludingContainerIds] are the container(s) being written, so a container is not counted against the
@@ -49,13 +49,10 @@ class PropertyContainerWriteService(
    */
   private fun requireValidLocation(internalLocationId: UUID?, excludingContainerIds: Set<UUID> = emptySet()) {
     if (internalLocationId == null) return
-    val location = locationsClient.getLocation(internalLocationId)
-      ?: throw InvalidLocationException(internalLocationId, "not found")
-    if (!location.canStoreProperty()) {
-      throw InvalidLocationException(internalLocationId, "cannot store property")
-    }
+    val location = locationsClient.getPropertyLocation(internalLocationId)
+      ?: throw InvalidLocationException(internalLocationId, "is not a property storage location")
     val used = repository.countContainersInLocation(internalLocationId, excludingContainerIds.takeIf { it.isNotEmpty() })
-    if (used >= location.propertyCapacity()) {
+    if (used >= (location.capacity ?: 0)) {
       throw InvalidLocationException(internalLocationId, "is full")
     }
   }
