@@ -15,9 +15,12 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.servlet.resource.NoResourceFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.ContainerAlreadyRemovedException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicatePropertyLocationNameException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicateSealNumberException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.InvalidLocationException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerNotFoundException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationInUseException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationNotFoundException
 import uk.gov.justice.hmpps.kotlin.common.ErrorResponse
 
 @RestControllerAdvice
@@ -54,6 +57,39 @@ class PrisonerPropertyApiExceptionHandler {
         developerMessage = e.message,
       ),
     ).also { log.info("Invalid location: {}", e.message) }
+
+  @ExceptionHandler(PropertyLocationNotFoundException::class)
+  fun handlePropertyLocationNotFoundException(e: PropertyLocationNotFoundException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(NOT_FOUND)
+    .body(
+      ErrorResponse(
+        status = NOT_FOUND,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Property location not found: {}", e.message) }
+
+  @ExceptionHandler(PropertyLocationInUseException::class)
+  fun handlePropertyLocationInUseException(e: PropertyLocationInUseException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(CONFLICT)
+    .body(
+      ErrorResponse(
+        status = CONFLICT,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Property location in use: {}", e.message) }
+
+  @ExceptionHandler(DuplicatePropertyLocationNameException::class)
+  fun handleDuplicatePropertyLocationNameException(e: DuplicatePropertyLocationNameException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(CONFLICT)
+    .body(
+      ErrorResponse(
+        status = CONFLICT,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Duplicate property location name: {}", e.message) }
 
   @ExceptionHandler(MethodArgumentNotValidException::class)
   fun handleMethodArgumentNotValidException(e: MethodArgumentNotValidException): ResponseEntity<ErrorResponse> = ResponseEntity

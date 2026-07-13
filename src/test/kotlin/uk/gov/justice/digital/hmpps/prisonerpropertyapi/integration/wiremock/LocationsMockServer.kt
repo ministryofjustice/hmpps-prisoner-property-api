@@ -2,8 +2,10 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock
 
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.client.WireMock.aResponse
+import com.github.tomakehurst.wiremock.client.WireMock.delete
 import com.github.tomakehurst.wiremock.client.WireMock.get
 import com.github.tomakehurst.wiremock.client.WireMock.post
+import com.github.tomakehurst.wiremock.client.WireMock.put
 import com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo
 import org.junit.jupiter.api.extension.AfterAllCallback
 import org.junit.jupiter.api.extension.BeforeAllCallback
@@ -149,6 +151,77 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
           .withHeader("Content-Type", "application/json")
           .withStatus(200)
           .withBody(body),
+      ),
+    )
+  }
+
+  private fun propertyLocationBody(id: String, prisonId: String, code: String, localName: String, capacity: Int) = """
+    {
+      "id": "$id",
+      "prisonId": "$prisonId",
+      "code": "$code",
+      "pathHierarchy": "$code",
+      "localName": "$localName",
+      "locationType": "BOX",
+      "capacity": $capacity
+    }
+  """.trimIndent()
+
+  /** Stub the create-property-location endpoint to return a created location. */
+  fun stubCreatePropertyLocation(prisonId: String, id: String, code: String = "PROP1", localName: String = "Reception Store", capacity: Int = 10) {
+    stubFor(
+      post(urlPathEqualTo("/locations/prison/$prisonId/property")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(201)
+          .withBody(propertyLocationBody(id, prisonId, code, localName, capacity)),
+      ),
+    )
+  }
+
+  /** Stub the create endpoint to return a conflict (duplicate local name). */
+  fun stubCreatePropertyLocationConflict(prisonId: String) {
+    stubFor(
+      post(urlPathEqualTo("/locations/prison/$prisonId/property")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(409)
+          .withBody("""{"status":409,"userMessage":"Local name already exists"}"""),
+      ),
+    )
+  }
+
+  /** Stub the update-property-location endpoint to return the updated location. */
+  fun stubUpdatePropertyLocation(id: String, prisonId: String = "MDI", code: String = "PROP1", localName: String = "Reception Store", capacity: Int = 25) {
+    stubFor(
+      put(urlPathEqualTo("/locations/property/$id")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(200)
+          .withBody(propertyLocationBody(id, prisonId, code, localName, capacity)),
+      ),
+    )
+  }
+
+  fun stubUpdatePropertyLocationNotFound(id: String) {
+    stubFor(
+      put(urlPathEqualTo("/locations/property/$id")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(404)
+          .withBody("""{"status":404,"userMessage":"Location $id not found"}"""),
+      ),
+    )
+  }
+
+  /** Stub the remove-property-designation endpoint to return the location it was removed from. */
+  fun stubRemovePropertyLocation(id: String, prisonId: String = "MDI", code: String = "PROP1", localName: String = "Reception Store", capacity: Int = 10) {
+    stubFor(
+      delete(urlPathEqualTo("/locations/property/$id")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(200)
+          .withBody(propertyLocationBody(id, prisonId, code, localName, capacity)),
       ),
     )
   }
