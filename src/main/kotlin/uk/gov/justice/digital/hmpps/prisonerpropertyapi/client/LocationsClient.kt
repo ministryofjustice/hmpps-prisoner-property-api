@@ -30,17 +30,18 @@ class LocationsClient(
   }
 
   /**
-   * Look up a non-residential location by its id. Returns null if it is not a known non-residential
-   * location (the endpoint returns 404 for unknown or residential ids).
+   * Look up a single property storage location by its id, with its capacity. Returns null if the id is
+   * unknown or the location cannot store property (locations-inside-prison returns 404 in both cases).
+   * Used to validate that a container's internal location can actually hold property.
    */
-  fun getLocation(id: UUID): LocationDetail? {
-    log.debug("Looking up non-residential location {}", id)
+  fun getPropertyLocation(id: UUID): PropertyLocation? {
+    log.debug("Looking up property location {}", id)
     try {
       return locationsWebClient
         .get()
-        .uri("/locations/non-residential/{id}", id)
+        .uri("/locations/property/{id}", id)
         .retrieve()
-        .bodyToMono<LocationDetail>()
+        .bodyToMono<PropertyLocation>()
         .block()
     } catch (ex: WebClientResponseException) {
       if (ex.statusCode == HttpStatus.NOT_FOUND) {
@@ -195,8 +196,8 @@ data class PropertyLocation(
 }
 
 /**
- * A single non-residential location from the locations-inside-prison lookup. Carries its non-residential
- * usages so we can tell whether it can hold property (a PROPERTY usage) and, if so, its capacity.
+ * A single non-residential location from the locations-inside-prison batch lookup, used to resolve a
+ * location id to a human-friendly name.
  */
 data class LocationDetail(
   val id: UUID,
@@ -205,26 +206,7 @@ data class LocationDetail(
   val pathHierarchy: String,
   val localName: String? = null,
   val locationType: String? = null,
-  val usage: List<NonResidentialUsage>? = null,
 ) {
   /** A human-friendly location name, preferring the local name and falling back to the path hierarchy. */
   fun displayName(): String = localName ?: pathHierarchy
-
-  private fun propertyUsage(): NonResidentialUsage? = usage?.firstOrNull { it.usageType == PROPERTY_USAGE }
-
-  /** Whether this location can hold property, i.e. it has a PROPERTY non-residential usage. */
-  fun canStoreProperty(): Boolean = propertyUsage() != null
-
-  /** The capacity of this location's PROPERTY usage (how many containers it can hold), or 0 if not set. */
-  fun propertyCapacity(): Int = propertyUsage()?.capacity ?: 0
-
-  private companion object {
-    const val PROPERTY_USAGE = "PROPERTY"
-  }
 }
-
-/** A non-residential usage of a location, as returned by the locations-inside-prison single lookup. */
-data class NonResidentialUsage(
-  val usageType: String,
-  val capacity: Int? = null,
-)

@@ -1,11 +1,8 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 
-import org.springframework.cache.annotation.CacheEvict
-import org.springframework.cache.annotation.Cacheable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonRegisterClient
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.config.CacheConfiguration.Companion.ACTIVE_AGENCIES_CACHE_NAME
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ActiveAgency
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ActiveAgencyRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.AgencyStatusDto
@@ -13,9 +10,9 @@ import java.time.LocalDateTime
 import kotlin.jvm.optionals.getOrNull
 
 /**
- * The set of agencies (prisons) the property service is switched on for. The active list is cached
- * because it is read on every `/info` poll; writes evict the local cache and a scheduled evict in
- * [uk.gov.justice.digital.hmpps.prisonerpropertyapi.config.CacheConfiguration] keeps other pods in step.
+ * The set of agencies (prisons) the property service is switched on for. Read live rather than cached: it
+ * is a tiny, indexed table, and a per-pod cache made an admin's on/off toggle appear to flip-flop as
+ * requests (e.g. the `/info` poll the frontend reads) were served by different pods.
  */
 @Service
 class ActiveAgenciesService(
@@ -23,7 +20,6 @@ class ActiveAgenciesService(
   private val prisonRegisterClient: PrisonRegisterClient,
 ) {
 
-  @Cacheable(ACTIVE_AGENCIES_CACHE_NAME)
   fun getActiveAgencies(): List<String> = repository.findAllByActiveTrue().map { it.agencyId }.sorted()
 
   /**
@@ -43,7 +39,6 @@ class ActiveAgenciesService(
   fun isActive(agencyId: String): Boolean = repository.findById(agencyId).getOrNull()?.active == true
 
   @Transactional
-  @CacheEvict(value = [ACTIVE_AGENCIES_CACHE_NAME], allEntries = true)
   fun setActive(agencyId: String, active: Boolean, username: String): AgencyStatusDto {
     val agency = repository.findById(agencyId).getOrNull()
       ?.apply {

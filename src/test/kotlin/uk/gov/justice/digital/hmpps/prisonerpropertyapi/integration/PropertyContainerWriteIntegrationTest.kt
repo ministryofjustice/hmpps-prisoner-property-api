@@ -44,8 +44,8 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   @BeforeEach
   fun stubLocationLookups() {
     hmppsAuth.stubGrantToken()
-    locations.stubGetLocation(LOCATION.toString())
-    locations.stubGetLocation("33333333-3333-3333-3333-333333333333")
+    locations.stubGetPropertyLocation(LOCATION.toString())
+    locations.stubGetPropertyLocation("33333333-3333-3333-3333-333333333333")
   }
 
   @AfterEach
@@ -158,23 +158,10 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `rejects creating a container with an internal location that does not exist`() {
-    val unknownLocation = UUID.fromString("99999999-9999-9999-9999-999999999999")
-    locations.stubGetLocationNotFound(unknownLocation.toString())
-
-    webTestClient.post().uri("/property-containers")
-      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
-      .bodyValue(createRequest().copy(internalLocationId = unknownLocation))
-      .exchange()
-      .expectStatus().isBadRequest
-      .expectBody()
-      .jsonPath("$.userMessage").isEqualTo("Internal location not found: $unknownLocation")
-  }
-
-  @Test
-  fun `rejects creating a container in a location that cannot store property`() {
+  fun `rejects creating a container in a location that is not a property store`() {
+    // locations-inside-prison returns 404 for both an unknown id and a location with no PROPERTY usage.
     val nonPropertyLocation = UUID.fromString("88888888-8888-8888-8888-888888888888")
-    locations.stubGetLocation(nonPropertyLocation.toString(), locationType = "STORE", canStoreProperty = false)
+    locations.stubGetPropertyLocationNotFound(nonPropertyLocation.toString())
 
     webTestClient.post().uri("/property-containers")
       .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
@@ -182,14 +169,14 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .exchange()
       .expectStatus().isBadRequest
       .expectBody()
-      .jsonPath("$.userMessage").isEqualTo("Internal location cannot store property: $nonPropertyLocation")
+      .jsonPath("$.userMessage").isEqualTo("Internal location is not a property storage location: $nonPropertyLocation")
   }
 
   @Test
   fun `rejects creating a container in a location that is full`() {
     val fullLocation = UUID.fromString("99999999-9999-9999-9999-999999999999")
     // The location has capacity 1 and already holds a container, so there is no room for another.
-    locations.stubGetLocation(fullLocation.toString(), propertyCapacity = 1)
+    locations.stubGetPropertyLocation(fullLocation.toString(), propertyCapacity = 1)
     val occupant = seedContainer(seal = "SEALFULL")
     occupant.currentInternalLocationId = fullLocation
     repository.save(occupant)
@@ -204,10 +191,10 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `rejects moving a container to an internal location that does not exist`() {
+  fun `rejects moving a container to an internal location that is not a property store`() {
     val id = repository.save(seedContainer()).id!!
     val unknownLocation = UUID.fromString("99999999-9999-9999-9999-999999999999")
-    locations.stubGetLocationNotFound(unknownLocation.toString())
+    locations.stubGetPropertyLocationNotFound(unknownLocation.toString())
 
     webTestClient.post().uri("/property-containers/{id}/move", id)
       .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
