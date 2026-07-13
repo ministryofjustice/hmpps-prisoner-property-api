@@ -26,10 +26,14 @@ class CacheConfiguration {
     log.info("Evicting cache: {} after {} hours", PRISON_NAMES_CACHE_NAME, TTL_PRISON_NAMES)
   }
 
+  // Property locations are evicted on write (see PropertyLocationAdminService), but that only clears the
+  // writing pod's local map. This scheduled evict is the cross-pod safety net so an admin's add/remove
+  // propagates to every pod's container-add read paths within a few minutes (the admin screens themselves
+  // read live and so never wait on this).
   @CacheEvict(value = [PROPERTY_LOCATIONS_CACHE_NAME], allEntries = true)
-  @Scheduled(fixedDelay = TTL_PROPERTY_LOCATIONS, timeUnit = TimeUnit.HOURS)
+  @Scheduled(fixedDelay = TTL_PROPERTY_LOCATIONS, timeUnit = TimeUnit.MINUTES)
   fun cacheEvictPropertyLocations() {
-    log.info("Evicting cache: {} after {} hours", PROPERTY_LOCATIONS_CACHE_NAME, TTL_PROPERTY_LOCATIONS)
+    log.info("Evicting cache: {} after {} minutes", PROPERTY_LOCATIONS_CACHE_NAME, TTL_PROPERTY_LOCATIONS)
   }
 
   // Active agencies are evicted on write (see ActiveAgenciesService), but that only clears the writing
@@ -46,7 +50,7 @@ class CacheConfiguration {
     const val PRISON_NAMES_CACHE_NAME: String = "prisonNames"
     const val TTL_PRISON_NAMES: Long = 24
     const val PROPERTY_LOCATIONS_CACHE_NAME: String = "propertyLocations"
-    const val TTL_PROPERTY_LOCATIONS: Long = 6
+    const val TTL_PROPERTY_LOCATIONS: Long = 10
     const val ACTIVE_AGENCIES_CACHE_NAME: String = "activeAgencies"
     const val TTL_ACTIVE_AGENCIES: Long = 10
   }

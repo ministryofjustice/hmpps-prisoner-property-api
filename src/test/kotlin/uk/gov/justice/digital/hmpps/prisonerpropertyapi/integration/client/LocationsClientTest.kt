@@ -1,5 +1,7 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.client
 
+import com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor
+import com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -91,5 +93,33 @@ class LocationsClientTest : IntegrationTestBase() {
   @Test
   fun `getPropertyLocations returns an empty list when the prison has no such locations`() {
     assertThat(locationsClient.getPropertyLocations("LEI")).isEmpty()
+  }
+
+  @Test
+  fun `getPropertyLocations is cached - a second call does not hit the api`() {
+    locations.stubGetBoxLocations("LEI", listOf(Triple(BOX1, "PROP1", "Property Box 1")))
+
+    locationsClient.getPropertyLocations("LEI")
+    locationsClient.getPropertyLocations("LEI")
+
+    locations.verify(1, getRequestedFor(urlPathEqualTo("/locations/prison/LEI/property")))
+  }
+
+  @Test
+  fun `getPropertyLocationsLive bypasses the cache and reads live on every call`() {
+    locations.stubGetBoxLocations("LEI", listOf(Triple(BOX1, "PROP1", "Property Box 1")))
+
+    // Two live reads hit the api twice (not served from the cache) - this is what lets an admin see their
+    // own add/rename/re-capacity/remove on the very next list read, whichever pod serves it.
+    val first = locationsClient.getPropertyLocationsLive("LEI")
+    val second = locationsClient.getPropertyLocationsLive("LEI")
+
+    assertThat(first.map { it.id.toString() }).containsExactly(BOX1)
+    assertThat(second.map { it.id.toString() }).containsExactly(BOX1)
+    locations.verify(2, getRequestedFor(urlPathEqualTo("/locations/prison/LEI/property")))
+  }
+
+  private companion object {
+    const val BOX1 = "11111111-1111-1111-1111-111111111111"
   }
 }

@@ -58,7 +58,8 @@ class PropertyLocationAdminServiceTest {
 
   @Test
   fun `list annotates each location with how full it is`() {
-    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(listOf(location(LOCATION, capacity = 10)))
+    // the admin list must read live (uncached) so an admin sees their own writes immediately across pods
+    whenever(locationsClient.getPropertyLocationsLive("LEI")).thenReturn(listOf(location(LOCATION, capacity = 10)))
     whenever(repository.countContainersByLocation("LEI")).thenReturn(listOf(count(LOCATION, 3)))
 
     val result = service.listPropertyLocations("LEI")
