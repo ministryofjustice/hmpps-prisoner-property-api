@@ -132,6 +132,20 @@ class PropertyLocationAdminResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `update is rejected when the capacity would drop below the containers held`() {
+    // one container is stored here; the downstream update is intentionally not stubbed - a 409 proves the
+    // guard rejects before any call to locations-inside-prison.
+    repository.save(seedContainerAt(LOCATION_B, "LEI"))
+
+    webTestClient.put().uri("/property-locations/$LOCATION_B")
+      .headers(setAuthorisation(roles = adminRole))
+      .contentType(MediaType.APPLICATION_JSON)
+      .bodyValue("""{ "capacity": 0 }""")
+      .exchange()
+      .expectStatus().isEqualTo(409)
+  }
+
+  @Test
   fun `remove is rejected when the location still holds containers`() {
     repository.save(seedContainerAt(LOCATION_B, "LEI"))
 

@@ -51,12 +51,20 @@ class PropertyLocationAdminService(
     return PropertyLocationAdminDto.from(created, containersHeld = 0)
   }
 
+  /**
+   * Rename and/or re-capacity a location. Capacity may not be set below the number of containers already
+   * stored there (that would leave it over capacity); this is checked here, before the downstream update,
+   * since this service owns the container count.
+   */
   @CacheEvict(value = [PROPERTY_LOCATIONS_CACHE_NAME], allEntries = true)
   fun updatePropertyLocation(id: UUID, request: UpdatePropertyLocationRequest): PropertyLocationAdminDto {
+    val held = repository.countContainersInLocation(id, null)
+    if (request.capacity != null && request.capacity < held) {
+      throw PropertyLocationCapacityBelowUsageException(id, request.capacity, held)
+    }
     val updated = locationsClient.updatePropertyLocation(id, request)
-    val held = repository.countContainersInLocation(id, null).toInt()
     log.info("Updated property location {}", id)
-    return PropertyLocationAdminDto.from(updated, containersHeld = held)
+    return PropertyLocationAdminDto.from(updated, containersHeld = held.toInt())
   }
 
   /**

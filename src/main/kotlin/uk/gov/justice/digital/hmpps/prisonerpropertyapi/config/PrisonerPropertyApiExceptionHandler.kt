@@ -19,6 +19,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicatePropert
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicateSealNumberException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.InvalidLocationException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerNotFoundException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationCapacityBelowUsageException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationInUseException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationNotFoundException
 import uk.gov.justice.hmpps.kotlin.common.ErrorResponse
@@ -79,6 +80,17 @@ class PrisonerPropertyApiExceptionHandler {
         developerMessage = e.message,
       ),
     ).also { log.info("Property location in use: {}", e.message) }
+
+  @ExceptionHandler(PropertyLocationCapacityBelowUsageException::class)
+  fun handlePropertyLocationCapacityBelowUsageException(e: PropertyLocationCapacityBelowUsageException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(CONFLICT)
+    .body(
+      ErrorResponse(
+        status = CONFLICT,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Property location capacity below usage: {}", e.message) }
 
   @ExceptionHandler(DuplicatePropertyLocationNameException::class)
   fun handleDuplicatePropertyLocationNameException(e: DuplicatePropertyLocationNameException): ResponseEntity<ErrorResponse> = ResponseEntity
