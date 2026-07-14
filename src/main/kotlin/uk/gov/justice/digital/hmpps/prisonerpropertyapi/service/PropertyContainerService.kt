@@ -220,9 +220,9 @@ class PropertyContainerService(
    * A prisoner's whole-property history: every event across all of their (non-archived) containers, interleaved
    * newest first, plus a de-duplicated "arrived at ..." item for each prison the prisoner moved into. Prison and
    * location ids are resolved to names, and each container event carries the seal number and acting establishment
-   * as at that point in the container's history (a container never changes prison, so its acting establishment is
-   * the prison holding it; the seal is carried forward from the container's seal events). Returns an empty list if
-   * the prisoner has no property.
+   * as at that point in the container's history - both carried forward through the events, so a transfer that
+   * reassigns the container's current prison does not relabel its earlier events. Returns an empty list if the
+   * prisoner has no property.
    */
   @Transactional(readOnly = true)
   fun getPrisonerTimeline(prisonerNumber: String): List<PrisonerTimelineItemDto> {
@@ -235,11 +235,19 @@ class PropertyContainerService(
     val locations = locationsClient.getLocations(containers.mapNotNull { it.currentLocation() })
 
     val containerItems = containers.flatMap { container ->
-      val actingEstablishmentName = prisonNames[container.prisonId]
       val locationDescription = container.currentLocation()?.let { locations[it]?.displayName() }
       var sealAsOfEvent: String? = null
+      // The prison holding the container as at each event, walked forward in time (like sealAsOfEvent): a
+      // CREATED_SEALED records the origin (toPrisonId) and each TRANSFERRED moves it on, so a historical event
+      // keeps the establishment it actually happened at even after a transfer reassigns the container's current
+      // prisonId. Falls back to the current prisonId only when no event carries a prison (never-transferred or
+      // legacy data, where current == origin).
+      var heldPrisonId: String? = null
       container.events.sortedBy { it.eventDateTime }.map { event ->
         event.sealNumber?.let { sealAsOfEvent = it }
+        (if (event.eventType == PropertyEventType.CREATED_SEALED) event.toPrisonId else event.fromPrisonId)?.let { heldPrisonId = it }
+        val actingEstablishmentName = prisonNames[heldPrisonId ?: container.prisonId]
+        if (event.eventType == PropertyEventType.TRANSFERRED) event.toPrisonId?.let { heldPrisonId = it }
         PrisonerTimelineItemDto.containerEvent(
           event = event,
           container = container,
