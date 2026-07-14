@@ -350,7 +350,7 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .expectBody()
       // 3 seed events + 3 transferred-container events + 2 prison-api movements (admission + transfer-in)
       .jsonPath("$.length()").isEqualTo(8)
-      // newest first: the transfer in to Moorland, then the admission to Leeds
+      // newest first: the prison-api movements - transfer in to Moorland, then admission to Leeds
       .jsonPath("$[0].itemType").isEqualTo("PRISONER_MOVEMENT")
       .jsonPath("$[0].movementKind").isEqualTo("TRANSFER_IN")
       .jsonPath("$[0].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
@@ -358,15 +358,23 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$[1].itemType").isEqualTo("PRISONER_MOVEMENT")
       .jsonPath("$[1].movementKind").isEqualTo("ADMISSION")
       .jsonPath("$[1].toPrisonName").isEqualTo("Leeds (HMP)")
-      // then the container events, newest first: the transfer out, held at Leeds, moving to Moorland
+      // then the container events, newest first. The container is NOW at Moorland (its current prisonId), but the
+      // transfer happened at Leeds - so the acting establishment stays Leeds and only the destination is Moorland.
       .jsonPath("$[2].itemType").isEqualTo("CONTAINER_EVENT")
       .jsonPath("$[2].eventType").isEqualTo("TRANSFERRED")
       .jsonPath("$[2].eventStatus").isEqualTo("TRANSFER")
       .jsonPath("$[2].actingEstablishmentName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[2].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
       .jsonPath("$[2].sealNumber").isEqualTo("SN880032")
+      // the received ("due for transfer out") event also happened at Leeds - it keeps Leeds, not the current Moorland
       .jsonPath("$[3].itemType").isEqualTo("CONTAINER_EVENT")
       .jsonPath("$[3].eventType").isEqualTo("PRISONER_RECEIVED")
       .jsonPath("$[3].eventStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
+      .jsonPath("$[3].actingEstablishmentName").isEqualTo("Leeds (HMP)")
+      // and the original creation at Leeds still reads Leeds after the transfer (the bug relabelled it Moorland)
+      .jsonPath("$[4].eventType").isEqualTo("CREATED_SEALED")
+      .jsonPath("$[4].actingEstablishmentName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[4].toPrisonName").isEqualTo("Leeds (HMP)")
       // oldest item is the seed container's creation: seal-as-of-event is the original seal, while the
       // container's *current* seal (in the expandable details) is the later one
       .jsonPath("$[7].eventType").isEqualTo("CREATED_SEALED")
@@ -801,14 +809,15 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   /**
-   * A second container for A1234BC that has been transferred out: created and sealed at Leeds, flagged due for
-   * transfer out when the prisoner was received at Moorland, then transferred. Later-dated than [seedContainer]
-   * so its events sort to the top of the timeline.
+   * A second container for A1234BC that has been transferred out via the remove endpoint: created and sealed at
+   * Leeds, flagged due for transfer out when the prisoner was received at Moorland, then transferred out to
+   * Moorland - so (like the real transferTo path) its current prisonId is now MDI, even though its earlier events
+   * happened at Leeds. Later-dated than [seedContainer] so its events sort to the top of the timeline.
    */
   private fun transferredContainer(): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
-      prisonId = "LEI",
+      prisonId = "MDI",
       containerType = ContainerType.VALUABLES,
       createdByUserId = "USER1",
       currentSealNumber = "SN880032",
@@ -822,8 +831,6 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     container.events.add(
       PropertyEvent(container, PropertyEventType.TRANSFERRED, baseTime.plusDays(3), "USER2", eventDate = baseTime.plusDays(3).toLocalDate(), fromPrisonId = "LEI", toPrisonId = "MDI"),
     )
-    container.removalOutcome = RemovalOutcome.TRANSFERRED
-    container.removalDate = baseTime.plusDays(3).toLocalDate()
     container.refreshDerivedState()
     return container
   }
