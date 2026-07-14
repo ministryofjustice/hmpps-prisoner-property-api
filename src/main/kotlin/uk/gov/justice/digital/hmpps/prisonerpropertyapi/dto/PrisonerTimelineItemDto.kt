@@ -29,6 +29,12 @@ enum class MovementKind {
   TRANSFER_IN,
 }
 
+/** Whether an establishment was managing property in DPS or still in NOMIS at the time of an arrival. */
+enum class PropertySystem {
+  DPS,
+  NOMIS,
+}
+
 /**
  * A single item in a prisoner's whole-property history timeline: either an event against one of their
  * containers, or a prisoner movement ("arrived at ...") derived from the received events. All prison and
@@ -43,6 +49,9 @@ data class PrisonerTimelineItemDto(
 
   @Schema(description = "For a prisoner movement, whether it was an initial admission or a transfer in; null otherwise", example = "ADMISSION", nullable = true)
   val movementKind: MovementKind?,
+
+  @Schema(description = "For a prisoner movement, whether the receiving establishment was managing property in DPS or NOMIS at that date; null otherwise", example = "DPS", nullable = true)
+  val propertySystem: PropertySystem? = null,
 
   @Schema(description = "Id of the underlying event", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d")
   val eventId: UUID,
@@ -151,9 +160,11 @@ data class PrisonerTimelineItemDto(
       dateInToPrison: LocalDateTime,
       toPrisonId: String,
       toPrisonName: String?,
+      propertySystem: PropertySystem,
     ) = PrisonerTimelineItemDto(
       itemType = TimelineItemType.PRISONER_MOVEMENT,
       movementKind = kind,
+      propertySystem = propertySystem,
       eventId = UUID.nameUUIDFromBytes("movement:$prisonerNumber:$kind:$toPrisonId:$dateInToPrison".toByteArray()),
       eventType = null,
       eventStatus = null,

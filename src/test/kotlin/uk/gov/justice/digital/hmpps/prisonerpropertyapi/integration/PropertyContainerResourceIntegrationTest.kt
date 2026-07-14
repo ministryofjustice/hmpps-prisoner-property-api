@@ -454,6 +454,43 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `timeline labels each arrival with the receiving prison's property system (DPS on or after rollout, else NOMIS)`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonRegister.stubGetPrisons()
+    // Leeds went live on DPS on 2026-03-01; Moorland is not on DPS.
+    activeAgencyRepository.save(ActiveAgency("LEI", active = true, updatedAt = LocalDateTime.parse("2026-03-01T09:00:00"), updatedBy = "ADMIN"))
+    prisonApi.stubGetPrisonTimeline(
+      "A1234BC",
+      admissions = listOf(
+        "LEI" to "2026-06-01T09:00:00", // after Leeds' rollout -> DPS
+        "MDI" to "2026-04-01T09:00:00", // Moorland not on DPS -> NOMIS
+        "LEI" to "2026-02-01T09:00:00", // before Leeds' rollout -> NOMIS
+      ),
+      transfers = listOf("LEI" to "2026-07-01T09:00:00"), // after Leeds' rollout -> DPS
+    )
+    repository.deleteAll() // property-less, so only the four movement items appear
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.length()").isEqualTo(4)
+      // newest first
+      .jsonPath("$[0].movementKind").isEqualTo("TRANSFER_IN")
+      .jsonPath("$[0].toPrisonName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[0].propertySystem").isEqualTo("DPS")
+      .jsonPath("$[1].movementKind").isEqualTo("ADMISSION")
+      .jsonPath("$[1].toPrisonName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[1].propertySystem").isEqualTo("DPS")
+      .jsonPath("$[2].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
+      .jsonPath("$[2].propertySystem").isEqualTo("NOMIS")
+      .jsonPath("$[3].toPrisonName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[3].propertySystem").isEqualTo("NOMIS")
+  }
+
+  @Test
   fun `timeline includes a scheduled-for-release marker, preferring the confirmed release date`() {
     hmppsAuth.stubGrantToken()
     // Confirmed date is preferred over the conditional (sentence-calculated) one.
