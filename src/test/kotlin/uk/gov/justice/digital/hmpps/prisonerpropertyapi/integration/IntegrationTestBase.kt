@@ -17,6 +17,8 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.Hmp
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonApiExtension
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonApiExtension.Companion.prisonApi
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonerSearchApiExtension
@@ -28,6 +30,7 @@ import uk.gov.justice.hmpps.test.kotlin.auth.JwtAuthorisationHelper
   PrisonerSearchApiExtension::class,
   PrisonRegisterApiExtension::class,
   LocationsApiExtension::class,
+  PrisonApiExtension::class,
 )
 @SpringBootTest(webEnvironment = RANDOM_PORT)
 @ActiveProfiles("test")
@@ -70,5 +73,6 @@ abstract class IntegrationTestBase {
     prisonerSearch.stubHealthPing(status)
     prisonRegister.stubHealthPing(status)
     locations.stubHealthPing(status)
+    prisonApi.stubHealthPing(status)
   }
 }

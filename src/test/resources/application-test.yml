@@ -14,6 +14,7 @@ api:
       prisoner-search: "http://localhost:8091"
       prison-register: "http://localhost:8092"
       locations-inside-prison: "http://localhost:8093"
+      prison-api: "http://localhost:8094"
 
 system:
   client:

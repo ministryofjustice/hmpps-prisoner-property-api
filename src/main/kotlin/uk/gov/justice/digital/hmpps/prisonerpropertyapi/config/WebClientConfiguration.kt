@@ -16,6 +16,7 @@ class WebClientConfiguration(
   @param:Value("\${api.base.url.prisoner-search}") val prisonerSearchBaseUri: String,
   @param:Value("\${api.base.url.prison-register}") val prisonRegisterBaseUri: String,
   @param:Value("\${api.base.url.locations-inside-prison}") val locationsBaseUri: String,
+  @param:Value("\${api.base.url.prison-api}") val prisonApiBaseUri: String,
   @param:Value("\${api.health-timeout:2s}") val healthTimeout: Duration,
   @param:Value("\${api.timeout:20s}") val timeout: Duration,
 ) {
@@ -33,6 +34,9 @@ class WebClientConfiguration(
 
   @Bean
   fun locationsHealthWebClient(builder: WebClient.Builder): WebClient = builder.healthWebClient(locationsBaseUri, healthTimeout)
+
+  @Bean
+  fun prisonApiHealthWebClient(builder: WebClient.Builder): WebClient = builder.healthWebClient(prisonApiBaseUri, healthTimeout)
 
   // OAuth2 authorised web clients (system token via client_credentials)
   @Bean
@@ -54,6 +58,17 @@ class WebClientConfiguration(
     authorizedClientManager,
     registrationId = SYSTEM_USERNAME,
     url = locationsBaseUri,
+    timeout,
+  )
+
+  @Bean
+  fun prisonApiWebClient(
+    authorizedClientManager: OAuth2AuthorizedClientManager,
+    builder: WebClient.Builder,
+  ): WebClient = builder.authorisedWebClient(
+    authorizedClientManager,
+    registrationId = SYSTEM_USERNAME,
+    url = prisonApiBaseUri,
     timeout,
   )
 }

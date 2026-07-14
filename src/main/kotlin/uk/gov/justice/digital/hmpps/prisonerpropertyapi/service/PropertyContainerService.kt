@@ -7,6 +7,7 @@ import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonApiClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonRegisterClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.Prisoner
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchClient
@@ -19,6 +20,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerMovementS
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MovementKind
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonPropertySummaryDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyGroupDto
@@ -35,6 +37,7 @@ class PropertyContainerService(
   private val prisonerSearchClient: PrisonerSearchClient,
   private val prisonRegisterClient: PrisonRegisterClient,
   private val locationsClient: LocationsClient,
+  private val prisonApiClient: PrisonApiClient,
 ) {
 
   /**
@@ -227,12 +230,10 @@ class PropertyContainerService(
   @Transactional(readOnly = true)
   fun getPrisonerTimeline(prisonerNumber: String): List<PrisonerTimelineItemDto> {
     val containers = repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber)
-    if (containers.isEmpty()) return emptyList()
-
     val prisonNames = prisonRegisterClient.getPrisonNames()
     val prisoner = prisonerSearchClient.getPrisoner(prisonerNumber)
     val prisonerName = prisoner.fullName()
-    val locations = locationsClient.getLocations(containers.mapNotNull { it.currentLocation() })
+    val locations = if (containers.isEmpty()) emptyMap() else locationsClient.getLocations(containers.mapNotNull { it.currentLocation() })
 
     val containerItems = containers.flatMap { container ->
       val locationDescription = container.currentLocation()?.let { locations[it]?.displayName() }
@@ -260,23 +261,17 @@ class PropertyContainerService(
       }
     }
 
-    // One "arrived at ..." item per prison move, de-duplicated across the containers that each recorded it.
-    val movementItems = containers.flatMap { it.events }
-      .filter { it.eventType == PropertyEventType.PRISONER_RECEIVED && it.toPrisonId != null }
-      .distinctBy { it.toPrisonId to it.eventDateTime }
-      .map { event ->
-        PrisonerTimelineItemDto.prisonerMovement(
-          event = event,
-          prisonerName = prisonerName,
-          toPrisonName = event.toPrisonId?.let { prisonNames[it] },
-        )
-      }
+    // Admission / transfer-in items are assembled at read time from prison-api's movement history, so they show
+    // even for a prisoner with no property. Best-effort: a prison-api failure yields no movement items rather
+    // than failing the whole timeline.
+    val movementItems = buildMovementItems(prisonerNumber, prisonerName, prisonNames)
 
     // A forward-looking "scheduled for release" marker, derived from the prisoner's release dates: prefer the
-    // confirmed date, fall back to the conditional (sentence-calculated) one. Suppressed once the prisoner has
-    // actually been released (the real release is already recorded as a PRISONER_RELEASED event).
+    // confirmed date, fall back to the conditional (sentence-calculated) one. Only meaningful when there is
+    // property to return, and suppressed once the prisoner has actually been released (the real release is
+    // already recorded as a PRISONER_RELEASED event).
     val releaseDate = prisoner?.confirmedReleaseDate ?: prisoner?.conditionalReleaseDate
-    val scheduledItems = if (releaseDate != null && prisoner.movementStatus() != PrisonerMovementStatus.RELEASED) {
+    val scheduledItems = if (containers.isNotEmpty() && releaseDate != null && prisoner.movementStatus() != PrisonerMovementStatus.RELEASED) {
       listOf(PrisonerTimelineItemDto.scheduledForRelease(prisonerNumber, prisonerName, releaseDate))
     } else {
       emptyList()
@@ -287,6 +282,49 @@ class PropertyContainerService(
       compareByDescending<PrisonerTimelineItemDto> { it.eventDateTime }
         .thenByDescending { it.itemType == TimelineItemType.PRISONER_MOVEMENT },
     )
+  }
+
+  /**
+   * Admission and transfer-in movement items from prison-api's prison-timeline. Per booking, each ADM movement
+   * becomes an "admitted to" item and each transfer a "transferred in to" item; TAP (temporary-absence returns)
+   * are skipped. Degrades to an empty list on any prison-api failure so the timeline never fails.
+   */
+  private fun buildMovementItems(
+    prisonerNumber: String,
+    prisonerName: String?,
+    prisonNames: Map<String, String>,
+  ): List<PrisonerTimelineItemDto> {
+    val summary = runCatching { prisonApiClient.getPrisonTimeline(prisonerNumber) }
+      .onFailure { log.warn("prison-api timeline lookup failed for {}, omitting movement items", prisonerNumber, it) }
+      .getOrNull() ?: return emptyList()
+
+    return summary.prisonPeriod.flatMap { period ->
+      val admissions = period.movementDates
+        .filter { it.inwardType == ADMISSION_MOVEMENT_TYPE && it.admittedIntoPrisonId != null && it.dateInToPrison != null }
+        .map {
+          PrisonerTimelineItemDto.prisonerMovement(
+            kind = MovementKind.ADMISSION,
+            prisonerNumber = prisonerNumber,
+            prisonerName = prisonerName,
+            dateInToPrison = it.dateInToPrison!!,
+            toPrisonId = it.admittedIntoPrisonId!!,
+            toPrisonName = prisonNames[it.admittedIntoPrisonId],
+          )
+        }
+      val transfersIn = period.transfers
+        .filter { it.toPrisonId != null && it.dateInToPrison != null }
+        .map {
+          PrisonerTimelineItemDto.prisonerMovement(
+            kind = MovementKind.TRANSFER_IN,
+            prisonerNumber = prisonerNumber,
+            prisonerName = prisonerName,
+            dateInToPrison = it.dateInToPrison!!,
+            toPrisonId = it.toPrisonId!!,
+            toPrisonName = prisonNames[it.toPrisonId],
+          )
+        }
+      admissions + transfersIn
+    }
   }
 
   /** When the container was last touched - the most recent event, falling back to its creation time. */
@@ -322,8 +360,13 @@ class PropertyContainerService(
     .map { it.id }
 
   private companion object {
+    private val log = org.slf4j.LoggerFactory.getLogger(this::class.java)
+
     /** The storage-location search term that means "held offsite at Branston" rather than an internal code. */
     const val BRANSTON_SEARCH_TERM = "BRANSTON"
+
+    /** prison-api SignificantMovement.inwardType for a genuine admission into custody (vs TAP, a temporary-absence return). */
+    const val ADMISSION_MOVEMENT_TYPE = "ADM"
 
     /** prisoner-search prisonId + lastMovementTypeCode values that mean the prisoner is in transit between prisons. */
     const val TRANSIT_PRISON_ID = "TRN"

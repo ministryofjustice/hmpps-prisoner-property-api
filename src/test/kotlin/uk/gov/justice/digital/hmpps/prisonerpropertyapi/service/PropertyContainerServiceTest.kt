@@ -18,6 +18,7 @@ import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationDetail
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonApiClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonRegisterClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.Prisoner
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchClient
@@ -46,7 +47,8 @@ class PropertyContainerServiceTest {
   private val prisonerSearchClient = mock<PrisonerSearchClient>()
   private val prisonRegisterClient = mock<PrisonRegisterClient>()
   private val locationsClient = mock<LocationsClient>()
-  private val service = PropertyContainerService(repository, prisonerSearchClient, prisonRegisterClient, locationsClient)
+  private val prisonApiClient = mock<PrisonApiClient>()
+  private val service = PropertyContainerService(repository, prisonerSearchClient, prisonRegisterClient, locationsClient, prisonApiClient)
 
   @BeforeEach
   fun stubEnrichmentByDefault() {
