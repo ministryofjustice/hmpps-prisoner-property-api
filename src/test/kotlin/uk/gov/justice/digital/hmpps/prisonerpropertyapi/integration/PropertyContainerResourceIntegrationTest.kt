@@ -31,8 +31,8 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   @BeforeEach
   fun setUp() {
-    // getPropertyLocations is @Cacheable and several tests here stub it with different locations for the same
-    // prison - clear so each resolves against its own stub rather than a prior test's cached result.
+    // Clear cached lookups (prison names) so each case resolves against its own stub rather than a prior
+    // test's cached result.
     cacheManager.cacheNames.forEach { cacheManager.getCache(it)?.clear() }
     containerId = repository.save(seedContainer()).id!!
   }

@@ -15,6 +15,7 @@ import software.amazon.awssdk.services.sns.model.PublishRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
@@ -48,6 +49,27 @@ class PrisonerReleasedIntegrationTest : IntegrationTestBase() {
       assertThat(repository.findById(container.id).orElseThrow().currentStatus())
         .isEqualTo(ContainerStatus.DUE_FOR_RETURN)
     }
+    assertThat(latestEventType(container.id)).isEqualTo(PropertyEventType.PRISONER_RELEASED)
+    verify(domainEventPublisher).publish(
+      check {
+        assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+        assertThat(it.prisonerNumber).isEqualTo("A1234BC")
+        assertThat(it.additionalInformation?.get("dpsId")).isEqualTo(container.id.toString())
+      },
+    )
+  }
+
+  @Test
+  fun `death in custody flags property as due for return with a distinct event`() {
+    val container = createContainer(prisonId = "LEI")
+
+    publishPrisonerReleased(prisonerNumber = "A1234BC", reason = "RELEASED", movementReasonCode = "DEC")
+
+    await untilAsserted {
+      assertThat(latestEventType(container.id)).isEqualTo(PropertyEventType.DIED_IN_CUSTODY)
+    }
+    assertThat(repository.findById(container.id).orElseThrow().currentStatus())
+      .isEqualTo(ContainerStatus.DUE_FOR_RETURN)
     verify(domainEventPublisher).publish(
       check {
         assertThat(it.eventType).isEqualTo("prison-property.container.updated")
@@ -84,11 +106,17 @@ class PrisonerReleasedIntegrationTest : IntegrationTestBase() {
     .expectBody(PropertyContainerDto::class.java)
     .returnResult().responseBody!!
 
-  private fun publishPrisonerReleased(prisonerNumber: String, reason: String) {
+  private fun latestEventType(id: java.util.UUID) = repository.findById(id).orElseThrow().events.maxBy { it.eventDateTime }.eventType
+
+  private fun publishPrisonerReleased(prisonerNumber: String, reason: String, movementReasonCode: String? = null) {
     val topic = hmppsQueueService.findByTopicId("domainevents")!!
     val event = HmppsDomainEvent(
       eventType = "prison-offender-events.prisoner.released",
-      additionalInformation = mapOf("nomsNumber" to prisonerNumber, "reason" to reason),
+      additionalInformation = buildMap {
+        put("nomsNumber", prisonerNumber)
+        put("reason", reason)
+        movementReasonCode?.let { put("nomisMovementReasonCode", it) }
+      },
     )
     topic.snsClient.publish(
       PublishRequest.builder()
