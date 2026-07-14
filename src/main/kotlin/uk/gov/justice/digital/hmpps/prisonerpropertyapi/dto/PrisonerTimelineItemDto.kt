@@ -13,12 +13,14 @@ import java.util.UUID
 
 /**
  * Whether a timeline item is something that happened to a single container, a prisoner movement between prisons,
- * or a forward-looking "scheduled for release" marker synthesised from the prisoner's release dates.
+ * a forward-looking "scheduled for release" marker synthesised from the prisoner's release dates, or an
+ * establishment-level "property management started in DPS" marker derived from when the prison was switched on.
  */
 enum class TimelineItemType {
   CONTAINER_EVENT,
   PRISONER_MOVEMENT,
   SCHEDULED_FOR_RELEASE,
+  DPS_FIRST_USED,
 }
 
 /** For a prisoner-movement item, whether it was an initial admission into custody or a transfer in from another prison. */
@@ -196,6 +198,41 @@ data class PrisonerTimelineItemDto(
       actingEstablishmentName = null,
       fromPrisonName = null,
       toPrisonName = null,
+      toStorageLocationType = null,
+      sealNumber = null,
+      relatedContainerId = null,
+      containerId = null,
+      containerType = null,
+      containerSealNumber = null,
+      containerStatus = null,
+      containerLocationDescription = null,
+    )
+
+    /**
+     * Build a synthesised "property management started in DPS" marker for an establishment the prisoner has
+     * held property at, derived at read time from when the prison was switched on in DPS ([rolloutAt]). It is
+     * an establishment-level fact rather than a stored event, so it carries a deterministic id derived from the
+     * establishment and rollout date and sits on the timeline at the rollout date. The establishment name is
+     * carried in [toPrisonName] (not [actingEstablishmentName]) so the byline stays a plain "System generated".
+     */
+    fun dpsFirstUsed(
+      agencyId: String,
+      establishmentName: String?,
+      rolloutAt: LocalDateTime,
+    ) = PrisonerTimelineItemDto(
+      itemType = TimelineItemType.DPS_FIRST_USED,
+      movementKind = null,
+      eventId = UUID.nameUUIDFromBytes("dps-first-used:$agencyId:${rolloutAt.toLocalDate()}".toByteArray()),
+      eventType = null,
+      eventStatus = null,
+      eventDateTime = rolloutAt,
+      eventDate = rolloutAt.toLocalDate(),
+      eventUserId = SYSTEM_USER,
+      systemGenerated = true,
+      prisonerName = null,
+      actingEstablishmentName = null,
+      fromPrisonName = null,
+      toPrisonName = establishmentName,
       toStorageLocationType = null,
       sealNumber = null,
       relatedContainerId = null,
