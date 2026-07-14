@@ -847,6 +847,113 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .expectStatus().isBadRequest
   }
 
+  @Test
+  fun `returns a prisoner's property summary counts split by establishment and status`() {
+    hmppsAuth.stubGrantToken()
+    // The prisoner is currently at Leeds; setUp already seeded one STORED container held there.
+    prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "LEI")
+    prisonRegister.stubGetPrisons()
+    // Held elsewhere (MDI) and due to transfer in to Leeds.
+    repository.save(dueForTransferInContainer("SEALIN", prisonerNumber = "A1234BC", heldAt = "MDI", receivedAt = "LEI"))
+    // Held at Leeds and due to transfer out (owner received elsewhere).
+    repository.save(
+      containerWithStatus("SEALT") {
+        events.add(PropertyEvent(this, PropertyEventType.PRISONER_RECEIVED, baseTime.plusHours(1), "USER1"))
+      },
+    )
+    // Held at Leeds and due for return following release.
+    repository.save(
+      containerWithStatus("SEALR") {
+        events.add(PropertyEvent(this, PropertyEventType.PRISONER_RELEASED, baseTime.plusHours(1), "USER1"))
+      },
+    )
+    // Held at Leeds with a disposal date that has already arisen.
+    repository.save(containerWithStatus("SEALD") { proposedDisposalDate = baseTime.toLocalDate() })
+    // A removed container - excluded from the active counts but proving the prisoner has had property.
+    repository.save(
+      containerWithStatus("SEALX") {
+        removalOutcome = RemovalOutcome.DISPOSED
+        removalDate = baseTime.toLocalDate()
+      },
+    )
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.currentEstablishmentId").isEqualTo("LEI")
+      .jsonPath("$.currentEstablishmentName").isEqualTo("Leeds (HMP)")
+      // Held at Leeds and active: the seed (STORED), the transfer-out, the return and the disposal one.
+      .jsonPath("$.heldInCurrentEstablishment").isEqualTo(4)
+      // Only the incoming container is held elsewhere.
+      .jsonPath("$.heldInOtherEstablishments").isEqualTo(1)
+      .jsonPath("$.dueForTransferIn").isEqualTo(1)
+      .jsonPath("$.dueForTransferOut").isEqualTo(1)
+      .jsonPath("$.overdueForDisposal").isEqualTo(1)
+      .jsonPath("$.overdueForReturn").isEqualTo(1)
+      .jsonPath("$.hasEverHadProperty").isEqualTo(true)
+  }
+
+  @Test
+  fun `prisoner summary reports no property and no establishment counts when the prisoner has none`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("B5678CD")
+    prisonRegister.stubGetPrisons()
+
+    webTestClient.get().uri("/property-containers/prisoner/B5678CD/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // The establishment is still resolved from prisoner-search even with no property.
+      .jsonPath("$.currentEstablishmentId").isEqualTo("MDI")
+      .jsonPath("$.currentEstablishmentName").isEqualTo("Moorland (HMP & YOI)")
+      .jsonPath("$.heldInCurrentEstablishment").isEqualTo(0)
+      .jsonPath("$.heldInOtherEstablishments").isEqualTo(0)
+      .jsonPath("$.dueForTransferIn").isEqualTo(0)
+      .jsonPath("$.dueForTransferOut").isEqualTo(0)
+      .jsonPath("$.overdueForDisposal").isEqualTo(0)
+      .jsonPath("$.overdueForReturn").isEqualTo(0)
+      .jsonPath("$.hasEverHadProperty").isEqualTo(false)
+  }
+
+  @Test
+  fun `prisoner summary has no current establishment when the prisoner is released, so their property counts as held elsewhere`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "OUT", lastMovementTypeCode = "REL")
+    prisonRegister.stubGetPrisons()
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.currentEstablishmentId").doesNotExist()
+      .jsonPath("$.currentEstablishmentName").doesNotExist()
+      // The seeded container (held at LEI) counts as "other establishments" with no current establishment.
+      .jsonPath("$.heldInCurrentEstablishment").isEqualTo(0)
+      .jsonPath("$.heldInOtherEstablishments").isEqualTo(1)
+      .jsonPath("$.dueForTransferIn").isEqualTo(0)
+      .jsonPath("$.hasEverHadProperty").isEqualTo(true)
+  }
+
+  @Test
+  fun `prisoner summary returns forbidden without the read role`() {
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_WRONG")))
+      .exchange()
+      .expectStatus().isForbidden
+  }
+
+  @Test
+  fun `prisoner summary returns bad request for an invalid prisoner number`() {
+    webTestClient.get().uri("/property-containers/prisoner/NOTVALID/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
   private fun containerWithStatus(seal: String, configure: PropertyContainer.() -> Unit): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
