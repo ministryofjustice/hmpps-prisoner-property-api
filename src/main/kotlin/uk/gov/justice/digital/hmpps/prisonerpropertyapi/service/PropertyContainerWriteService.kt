@@ -367,21 +367,33 @@ class PropertyContainerWriteService(
     events.maxByOrNull { it.eventDateTime }?.toPrisonId == newPrisonId
 
   /**
-   * Handle a prisoner being released from custody (or dying in custody). Every active container the
-   * prisoner still has - at any prison - is flagged due for return by appending a
-   * [PropertyEventType.PRISONER_RELEASED] event; the container stays where it is, only its derived status
-   * and history change. Idempotent: containers already due for return are skipped, so the delayed and
-   * potentially duplicated release events are safe no-ops. Returns one
-   * [PropertyDomainEventType.CONTAINER_UPDATED] event per container changed, to publish after commit.
+   * Handle a prisoner being released from custody. Every active container the prisoner still has - at any
+   * prison - is flagged due for return; see [flagDueForReturn].
    */
   @Transactional
-  fun prisonerReleased(prisonerNumber: String): List<HmppsDomainEvent> {
+  fun prisonerReleased(prisonerNumber: String): List<HmppsDomainEvent> = flagDueForReturn(prisonerNumber, PropertyEventType.PRISONER_RELEASED)
+
+  /**
+   * Handle a prisoner dying in custody. Handled like a release - the property is still due for return -
+   * but recorded with a distinct [PropertyEventType.DIED_IN_CUSTODY] event so the history reads correctly.
+   */
+  @Transactional
+  fun prisonerDied(prisonerNumber: String): List<HmppsDomainEvent> = flagDueForReturn(prisonerNumber, PropertyEventType.DIED_IN_CUSTODY)
+
+  /**
+   * Flag every active container the prisoner still has - at any prison - as due for return by appending
+   * [eventType]; the container stays where it is, only its derived status and history change. Idempotent:
+   * containers already due for return are skipped, so the delayed and potentially duplicated release
+   * events are safe no-ops. Returns one [PropertyDomainEventType.CONTAINER_UPDATED] event per container
+   * changed, to publish after commit.
+   */
+  private fun flagDueForReturn(prisonerNumber: String, eventType: PropertyEventType): List<HmppsDomainEvent> {
     val now = LocalDateTime.now()
     return repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber)
       .filter { !it.isRemoved() && it.baseStatus() != ContainerStatus.DUE_FOR_RETURN }
       .map { container ->
         container.events.add(
-          PropertyEvent(container, PropertyEventType.PRISONER_RELEASED, now, SYSTEM_USER, fromPrisonId = container.prisonId),
+          PropertyEvent(container, eventType, now, SYSTEM_USER, fromPrisonId = container.prisonId),
         )
         container.refreshDerivedState()
         PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, listOf("currentStatus"))
