@@ -27,8 +27,10 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyGrou
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerTimelineItemDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyEventDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertySystem
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.TimelineItemType
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.util.UUID
 
 @Service
@@ -265,10 +267,14 @@ class PropertyContainerService(
       }
     }
 
+    // When each active establishment was switched on in DPS: used both to label arrivals DPS-vs-NOMIS and to
+    // build the DPS-first-used markers. Fetched once and shared by both.
+    val rolloutDates = activeAgenciesService.getActiveAgencyRolloutDates()
+
     // Admission / transfer-in items are assembled at read time from prison-api's movement history, so they show
     // even for a prisoner with no property. Best-effort: a prison-api failure yields no movement items rather
     // than failing the whole timeline.
-    val movementItems = buildMovementItems(prisonerNumber, prisonerName, prisonNames)
+    val movementItems = buildMovementItems(prisonerNumber, prisonerName, prisonNames, rolloutDates)
 
     // A forward-looking "scheduled for release" marker, derived from the prisoner's release dates: prefer the
     // confirmed date, fall back to the conditional (sentence-calculated) one. Only meaningful when there is
@@ -283,7 +289,7 @@ class PropertyContainerService(
 
     // One "property management started in DPS" marker per establishment the prisoner has held property at,
     // derived at read time from when that prison was switched on in DPS.
-    val dpsRolloutItems = buildDpsRolloutItems(containers, prisonNames)
+    val dpsRolloutItems = buildDpsRolloutItems(containers, prisonNames, rolloutDates)
 
     // Newest first; at the same instant a movement sits above the container events it triggered.
     return (containerItems + movementItems + scheduledItems + dpsRolloutItems).sortedWith(
@@ -300,9 +306,9 @@ class PropertyContainerService(
   private fun buildDpsRolloutItems(
     containers: List<PropertyContainer>,
     prisonNames: Map<String, String>,
+    rolloutDates: Map<String, LocalDateTime>,
   ): List<PrisonerTimelineItemDto> {
     if (containers.isEmpty()) return emptyList()
-    val rolloutDates = activeAgenciesService.getActiveAgencyRolloutDates()
     val heldPrisonIds = containers.flatMapTo(mutableSetOf()) { container ->
       container.events.flatMap { listOfNotNull(it.fromPrisonId, it.toPrisonId) } + container.prisonId
     }
@@ -316,12 +322,14 @@ class PropertyContainerService(
   /**
    * Admission and transfer-in movement items from prison-api's prison-timeline. Per booking, each ADM movement
    * becomes an "admitted to" item and each transfer a "transferred in to" item; TAP (temporary-absence returns)
-   * are skipped. Degrades to an empty list on any prison-api failure so the timeline never fails.
+   * are skipped. Each arrival is labelled with the receiving establishment's property system at that date (see
+   * [propertySystemAt]). Degrades to an empty list on any prison-api failure so the timeline never fails.
    */
   private fun buildMovementItems(
     prisonerNumber: String,
     prisonerName: String?,
     prisonNames: Map<String, String>,
+    rolloutDates: Map<String, LocalDateTime>,
   ): List<PrisonerTimelineItemDto> {
     val summary = runCatching { prisonApiClient.getPrisonTimeline(prisonerNumber) }
       .onFailure { log.warn("prison-api timeline lookup failed for {}, omitting movement items", prisonerNumber, it) }
@@ -338,6 +346,7 @@ class PropertyContainerService(
             dateInToPrison = it.dateInToPrison!!,
             toPrisonId = it.admittedIntoPrisonId!!,
             toPrisonName = prisonNames[it.admittedIntoPrisonId],
+            propertySystem = propertySystemAt(it.admittedIntoPrisonId, it.dateInToPrison, rolloutDates),
           )
         }
       val transfersIn = period.transfers
@@ -350,11 +359,27 @@ class PropertyContainerService(
             dateInToPrison = it.dateInToPrison!!,
             toPrisonId = it.toPrisonId!!,
             toPrisonName = prisonNames[it.toPrisonId],
+            propertySystem = propertySystemAt(it.toPrisonId, it.dateInToPrison, rolloutDates),
           )
         }
       admissions + transfersIn
     }
   }
+
+  /**
+   * The property system in force at [prisonId] on [dateInToPrison]: DPS if the prison was switched on in DPS
+   * on or before that date (rollout date on/before the arrival), NOMIS otherwise (arrived before rollout, or
+   * the prison is not on DPS). Relies on prisons not being switched off once on - see the DPS/NOMIS-variant
+   * decision - so the single rollout date is a reliable DPS-since boundary.
+   */
+  private fun propertySystemAt(
+    prisonId: String,
+    dateInToPrison: LocalDateTime,
+    rolloutDates: Map<String, LocalDateTime>,
+  ): PropertySystem = rolloutDates[prisonId]
+    ?.takeIf { !dateInToPrison.isBefore(it) }
+    ?.let { PropertySystem.DPS }
+    ?: PropertySystem.NOMIS
 
   /** When the container was last touched - the most recent event, falling back to its creation time. */
   private fun PropertyContainer.lastUpdated() = events.maxOfOrNull { it.eventDateTime } ?: createDateTime
