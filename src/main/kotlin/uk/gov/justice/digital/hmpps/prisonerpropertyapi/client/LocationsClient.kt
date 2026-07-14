@@ -3,13 +3,11 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.client
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.cache.annotation.Cacheable
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.WebClientResponseException
 import org.springframework.web.reactive.function.client.bodyToMono
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.config.CacheConfiguration
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyLocationRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyLocationRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicatePropertyLocationNameException
@@ -80,24 +78,15 @@ class LocationsClient(
    * The leaf locations in a prison that can hold property, each with the capacity of its PROPERTY usage.
    * A location can hold property iff it has a non-residential usage of type PROPERTY (any location type),
    * not only BOX-typed locations. Used both to list a prison's storage locations and to resolve a searched
-   * storage-location term (code, local name or path hierarchy) to its location id(s). Cached per prison -
-   * the set rarely changes. Returns an empty list if the prison has none or is unknown.
+   * storage-location term (code, local name or path hierarchy) to its location id(s). Returns an empty list
+   * if the prison has none or is unknown.
    *
-   * The cache is a per-pod in-memory map, so a write only evicts the writing pod (see
-   * [CacheConfiguration]); other pods converge via the scheduled evict. That lag is fine for these
-   * high-traffic read paths but not for the admin management screens, which must reflect a write
-   * immediately - those read live via [getPropertyLocationsLive].
+   * Read live on every call (not cached). The service runs multiple pods, so a per-pod cache made an admin's
+   * add/rename/re-capacity/remove appear only on the pod that made it (and the write-time capacity guard,
+   * which already reads live, could then disagree with the cached picker) until a scheduled evict caught up.
+   * locations-inside-prison is a cheap internal call, so we read it live and stay consistent across pods.
    */
-  @Cacheable(CacheConfiguration.PROPERTY_LOCATIONS_CACHE_NAME)
   fun getPropertyLocations(prisonId: String): List<PropertyLocation> = fetchPropertyLocations(prisonId)
-
-  /**
-   * The same property-location read as [getPropertyLocations] but bypassing the cache, so the caller
-   * always sees the live state in locations-inside-prison. Used by the property-location management
-   * screens, where an admin must see their own add/rename/re-capacity/remove take effect straight away
-   * regardless of which pod serves the follow-up read.
-   */
-  fun getPropertyLocationsLive(prisonId: String): List<PropertyLocation> = fetchPropertyLocations(prisonId)
 
   private fun fetchPropertyLocations(prisonId: String): List<PropertyLocation> {
     log.debug("Looking up property locations for prison {}", prisonId)

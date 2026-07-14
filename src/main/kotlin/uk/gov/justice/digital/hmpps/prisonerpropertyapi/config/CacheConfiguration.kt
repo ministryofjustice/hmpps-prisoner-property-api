@@ -17,8 +17,12 @@ import java.util.concurrent.TimeUnit
 @EnableScheduling
 class CacheConfiguration {
 
+  // Only prison names are cached. They are a large, rarely-changing reference lookup where a stale *name* is
+  // merely cosmetic, so a per-pod cache is acceptable. Property locations are deliberately NOT cached - they
+  // drive capacity/validation decisions that must stay consistent across pods, so they are read live (see
+  // LocationsClient.getPropertyLocations).
   @Bean
-  fun cacheManager(): CacheManager = ConcurrentMapCacheManager(PRISON_NAMES_CACHE_NAME, PROPERTY_LOCATIONS_CACHE_NAME)
+  fun cacheManager(): CacheManager = ConcurrentMapCacheManager(PRISON_NAMES_CACHE_NAME)
 
   @CacheEvict(value = [PRISON_NAMES_CACHE_NAME], allEntries = true)
   @Scheduled(fixedDelay = TTL_PRISON_NAMES, timeUnit = TimeUnit.HOURS)
@@ -26,21 +30,9 @@ class CacheConfiguration {
     log.info("Evicting cache: {} after {} hours", PRISON_NAMES_CACHE_NAME, TTL_PRISON_NAMES)
   }
 
-  // Property locations are evicted on write (see PropertyLocationAdminService), but that only clears the
-  // writing pod's local map. This scheduled evict is the cross-pod safety net so an admin's add/remove
-  // propagates to every pod's container-add read paths within a few minutes (the admin screens themselves
-  // read live and so never wait on this).
-  @CacheEvict(value = [PROPERTY_LOCATIONS_CACHE_NAME], allEntries = true)
-  @Scheduled(fixedDelay = TTL_PROPERTY_LOCATIONS, timeUnit = TimeUnit.MINUTES)
-  fun cacheEvictPropertyLocations() {
-    log.info("Evicting cache: {} after {} minutes", PROPERTY_LOCATIONS_CACHE_NAME, TTL_PROPERTY_LOCATIONS)
-  }
-
   companion object {
     val log: Logger = LoggerFactory.getLogger(this::class.java)
     const val PRISON_NAMES_CACHE_NAME: String = "prisonNames"
     const val TTL_PRISON_NAMES: Long = 24
-    const val PROPERTY_LOCATIONS_CACHE_NAME: String = "propertyLocations"
-    const val TTL_PROPERTY_LOCATIONS: Long = 10
   }
 }
