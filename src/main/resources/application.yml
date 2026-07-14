@@ -111,6 +111,7 @@ api:
       prisoner-search: ${PRISONER_SEARCH_URL}
       prison-register: ${PRISON_REGISTER_URL}
       locations-inside-prison: ${LOCATIONS_INSIDE_PRISON_URL}
+      prison-api: ${PRISON_API_URL}
   health-timeout: 2s
   timeout: 20s
 

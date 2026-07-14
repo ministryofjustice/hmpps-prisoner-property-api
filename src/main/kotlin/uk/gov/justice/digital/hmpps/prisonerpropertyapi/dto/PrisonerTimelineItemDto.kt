@@ -21,6 +21,12 @@ enum class TimelineItemType {
   SCHEDULED_FOR_RELEASE,
 }
 
+/** For a prisoner-movement item, whether it was an initial admission into custody or a transfer in from another prison. */
+enum class MovementKind {
+  ADMISSION,
+  TRANSFER_IN,
+}
+
 /**
  * A single item in a prisoner's whole-property history timeline: either an event against one of their
  * containers, or a prisoner movement ("arrived at ...") derived from the received events. All prison and
@@ -32,6 +38,9 @@ enum class TimelineItemType {
 data class PrisonerTimelineItemDto(
   @Schema(description = "Whether the item is a container event or a prisoner movement", example = "CONTAINER_EVENT")
   val itemType: TimelineItemType,
+
+  @Schema(description = "For a prisoner movement, whether it was an initial admission or a transfer in; null otherwise", example = "ADMISSION", nullable = true)
+  val movementKind: MovementKind?,
 
   @Schema(description = "Id of the underlying event", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d")
   val eventId: UUID,
@@ -105,6 +114,7 @@ data class PrisonerTimelineItemDto(
       containerLocationDescription: String?,
     ) = PrisonerTimelineItemDto(
       itemType = TimelineItemType.CONTAINER_EVENT,
+      movementKind = null,
       eventId = event.id!!,
       eventType = event.eventType,
       eventStatus = event.eventType.status,
@@ -126,20 +136,29 @@ data class PrisonerTimelineItemDto(
       containerLocationDescription = containerLocationDescription,
     )
 
-    /** Build a "prisoner arrived at ..." movement item from a received event. */
+    /**
+     * Build a synthesised prisoner-movement item (an admission into custody or a transfer in from another
+     * prison), derived at read time from prison-api. Not backed by a stored event, so it carries a
+     * deterministic id derived from the prisoner, kind, destination prison and date, and sits on the timeline
+     * at the date the person entered that prison.
+     */
     fun prisonerMovement(
-      event: PropertyEvent,
+      kind: MovementKind,
+      prisonerNumber: String,
       prisonerName: String?,
+      dateInToPrison: LocalDateTime,
+      toPrisonId: String,
       toPrisonName: String?,
     ) = PrisonerTimelineItemDto(
       itemType = TimelineItemType.PRISONER_MOVEMENT,
-      eventId = event.id!!,
+      movementKind = kind,
+      eventId = UUID.nameUUIDFromBytes("movement:$prisonerNumber:$kind:$toPrisonId:$dateInToPrison".toByteArray()),
       eventType = null,
       eventStatus = null,
-      eventDateTime = event.eventDateTime,
+      eventDateTime = dateInToPrison,
       eventDate = null,
-      eventUserId = event.eventUserId,
-      systemGenerated = event.eventUserId == SYSTEM_USER,
+      eventUserId = SYSTEM_USER,
+      systemGenerated = true,
       prisonerName = prisonerName,
       actingEstablishmentName = toPrisonName,
       fromPrisonName = null,
@@ -165,6 +184,7 @@ data class PrisonerTimelineItemDto(
       releaseDate: LocalDate,
     ) = PrisonerTimelineItemDto(
       itemType = TimelineItemType.SCHEDULED_FOR_RELEASE,
+      movementKind = null,
       eventId = UUID.nameUUIDFromBytes("scheduled-release:$prisonerNumber:$releaseDate".toByteArray()),
       eventType = null,
       eventStatus = null,

@@ -13,6 +13,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonApiExtension.Companion.prisonApi
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonerSearchApiExtension.Companion.prisonerSearch
 import java.time.LocalDateTime
@@ -331,6 +332,13 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     prisonerSearch.stubGetPrisoner("A1234BC")
     prisonRegister.stubGetPrisons()
     locations.stubPostLocationsBatch(LOCATION_B.toString())
+    // Admission and transfer-in movement rows are sourced from prison-api (later-dated than the container
+    // events, so they sit at the top of the newest-first list).
+    prisonApi.stubGetPrisonTimeline(
+      "A1234BC",
+      admissions = listOf("LEI" to "2026-05-01T09:00:00"),
+      transfers = listOf("MDI" to "2026-06-01T10:00:00"),
+    )
     // A second container for the same prisoner: created, the prisoner then moved to MDI (received),
     // and it was finally transferred out. Its seal never changes, so every item shows SN880032.
     repository.save(transferredContainer())
@@ -340,31 +348,52 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      // 3 seed events + 3 transferred-container events + 1 de-duplicated "arrived at" movement
-      .jsonPath("$.length()").isEqualTo(7)
-      // newest first: the transfer out, held at Leeds, moving to Moorland
-      .jsonPath("$[0].itemType").isEqualTo("CONTAINER_EVENT")
-      .jsonPath("$[0].eventType").isEqualTo("TRANSFERRED")
-      .jsonPath("$[0].eventStatus").isEqualTo("TRANSFER")
-      .jsonPath("$[0].actingEstablishmentName").isEqualTo("Leeds (HMP)")
+      // 3 seed events + 3 transferred-container events + 2 prison-api movements (admission + transfer-in)
+      .jsonPath("$.length()").isEqualTo(8)
+      // newest first: the transfer in to Moorland, then the admission to Leeds
+      .jsonPath("$[0].itemType").isEqualTo("PRISONER_MOVEMENT")
+      .jsonPath("$[0].movementKind").isEqualTo("TRANSFER_IN")
       .jsonPath("$[0].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
-      .jsonPath("$[0].sealNumber").isEqualTo("SN880032")
-      .jsonPath("$[0].systemGenerated").isEqualTo(false)
-      // the prisoner movement sits just above the received event it triggered
+      .jsonPath("$[0].systemGenerated").isEqualTo(true)
       .jsonPath("$[1].itemType").isEqualTo("PRISONER_MOVEMENT")
-      .jsonPath("$[1].prisonerName").isEqualTo("JOHN SMITH")
-      .jsonPath("$[1].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
-      .jsonPath("$[1].systemGenerated").isEqualTo(true)
+      .jsonPath("$[1].movementKind").isEqualTo("ADMISSION")
+      .jsonPath("$[1].toPrisonName").isEqualTo("Leeds (HMP)")
+      // then the container events, newest first: the transfer out, held at Leeds, moving to Moorland
       .jsonPath("$[2].itemType").isEqualTo("CONTAINER_EVENT")
-      .jsonPath("$[2].eventType").isEqualTo("PRISONER_RECEIVED")
-      .jsonPath("$[2].eventStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
-      .jsonPath("$[2].systemGenerated").isEqualTo(true)
+      .jsonPath("$[2].eventType").isEqualTo("TRANSFERRED")
+      .jsonPath("$[2].eventStatus").isEqualTo("TRANSFER")
+      .jsonPath("$[2].actingEstablishmentName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[2].sealNumber").isEqualTo("SN880032")
+      .jsonPath("$[3].itemType").isEqualTo("CONTAINER_EVENT")
+      .jsonPath("$[3].eventType").isEqualTo("PRISONER_RECEIVED")
+      .jsonPath("$[3].eventStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
       // oldest item is the seed container's creation: seal-as-of-event is the original seal, while the
       // container's *current* seal (in the expandable details) is the later one
-      .jsonPath("$[6].eventType").isEqualTo("CREATED_SEALED")
-      .jsonPath("$[6].sealNumber").isEqualTo("SEAL001")
-      .jsonPath("$[6].containerSealNumber").isEqualTo("SEAL002")
-      .jsonPath("$[6].containerLocationDescription").isEqualTo("Reception Property Store")
+      .jsonPath("$[7].eventType").isEqualTo("CREATED_SEALED")
+      .jsonPath("$[7].sealNumber").isEqualTo("SEAL001")
+      .jsonPath("$[7].containerSealNumber").isEqualTo("SEAL002")
+      .jsonPath("$[7].containerLocationDescription").isEqualTo("Reception Property Store")
+  }
+
+  @Test
+  fun `timeline shows prison-api admissions even for a prisoner with no property`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonRegister.stubGetPrisons()
+    prisonApi.stubGetPrisonTimeline("A1234BC", admissions = listOf("LEI" to "2026-05-01T09:00:00"))
+    // No property saved for A1234BC beyond the seed - remove it so the person is property-less.
+    repository.deleteAll()
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // just the admission - the timeline is no longer empty when the person has no property
+      .jsonPath("$.length()").isEqualTo(1)
+      .jsonPath("$[0].itemType").isEqualTo("PRISONER_MOVEMENT")
+      .jsonPath("$[0].movementKind").isEqualTo("ADMISSION")
+      .jsonPath("$[0].toPrisonName").isEqualTo("Leeds (HMP)")
   }
 
   @Test
@@ -444,7 +473,12 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `timeline is empty for a prisoner with no property`() {
+  fun `timeline is empty for a prisoner with no property and no movements`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    prisonerSearch.stubGetPrisonerNotFound("Z9999ZZ")
+    prisonApi.stubGetPrisonTimelineEmpty("Z9999ZZ")
+
     webTestClient.get().uri("/property-containers/prisoner/Z9999ZZ/events")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
