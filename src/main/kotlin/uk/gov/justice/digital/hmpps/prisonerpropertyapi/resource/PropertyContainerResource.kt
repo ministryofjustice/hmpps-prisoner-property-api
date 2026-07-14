@@ -124,8 +124,10 @@ class PropertyContainerResource(
       "(locations-inside-prison-api). Optionally filtered by a free-text query (prisoner number, seal number or " +
       "storage location), prisoner number, seal number, container type(s), status and storage location. With no " +
       "status filter, containers that have left active storage (disposed, returned, transferred, combined) are " +
-      "hidden; pass a status filter, or includeRemoved=true to also surface returned/disposed containers. Use the " +
-      "standard page, size and sort query parameters for pagination.",
+      "hidden; pass a status filter, or includeRemoved=true to also surface returned/disposed containers. Set " +
+      "dueForTransferIn=true to additionally surface property held at another prison that is due to be " +
+      "transferred in to this establishment (its owner was received here). Use the standard page, size and sort " +
+      "query parameters for pagination.",
     responses = [
       ApiResponse(responseCode = "200", description = "Page of prisoners with their property containers returned"),
       ApiResponse(responseCode = "400", description = "Invalid prison id", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
@@ -162,6 +164,9 @@ class PropertyContainerResource(
     @Parameter(description = "Filter by where the property's owner currently is: IN_ESTABLISHMENT (people held here) or LEFT_ESTABLISHMENT (people no longer here). Resolved from prisoner-search.", example = "IN_ESTABLISHMENT")
     @RequestParam(required = false)
     personLocation: PersonLocation?,
+    @Parameter(description = "Also include property held at another prison that is due to be transferred in to this establishment (its owner was received here). Additive to the held-here list; when it is the only status selection, only incoming property is returned.", example = "false")
+    @RequestParam(required = false, defaultValue = "false")
+    dueForTransferIn: Boolean,
     @ParameterObject
     pageable: Pageable,
   ): Page<PrisonerPropertyGroupDto> = propertyContainerService.getPrisonProperty(
@@ -174,6 +179,7 @@ class PropertyContainerResource(
     includeRemoved = includeRemoved,
     search = query,
     personLocation = personLocation,
+    includeTransferIn = dueForTransferIn,
     pageable = pageable,
   )
 
@@ -215,9 +221,9 @@ class PropertyContainerResource(
   @Operation(
     summary = "Get the whole-prison property summary counts for a prison",
     description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns the establishment summary tiles for the prison " +
-      "as a whole, independent of any list paging or filtering: the number of BOX storage locations configured " +
-      "(from locations-inside-prison-api) and how many containers are stored on-site, due to transfer out and due " +
-      "to be disposed. 'Due to be returned' is always 0 for now - no status yet represents a pending return.",
+      "as a whole, independent of any list paging or filtering: the remaining storage spaces across the prison's " +
+      "property locations (from locations-inside-prison-api) and how many containers are stored on-site, due to " +
+      "transfer out, due to be returned and due to be disposed.",
     responses = [
       ApiResponse(responseCode = "200", description = "Prison property summary returned"),
       ApiResponse(responseCode = "400", description = "Invalid prison id", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),

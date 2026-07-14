@@ -16,6 +16,10 @@ import java.util.UUID
  * @param branstonOnly restrict to containers held offsite at Branston (takes precedence over [locationIds]).
  * @param search a single free-text term matched (OR) against prisoner number, seal number and storage
  *   location. [searchLocationIds]/[searchBranston] carry the resolved storage-location part of that term.
+ * @param includeTransferIn when true, additionally surface containers held at another prison that are due
+ *   to be transferred *in* to this establishment (its owner was received here). Additive: it widens the
+ *   held-here result rather than narrowing it. When it is the only status selection, only incoming
+ *   property is returned.
  */
 data class PrisonPropertyFilter(
   val prisonerNumber: String? = null,
@@ -28,4 +32,5 @@ data class PrisonPropertyFilter(
   val search: String? = null,
   val searchLocationIds: List<UUID> = emptyList(),
   val searchBranston: Boolean = false,
+  val includeTransferIn: Boolean = false,
 )

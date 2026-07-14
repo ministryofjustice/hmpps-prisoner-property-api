@@ -721,6 +721,82 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `omits due-for-transfer-in property by default but includes it when dueForTransferIn is set`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch()
+    // B5678CD's container is held at LEI, but they were received at MDI, so it is due to transfer in to MDI.
+    repository.save(dueForTransferInContainer("SEALIN", prisonerNumber = "B5678CD", heldAt = "LEI", receivedAt = "MDI"))
+    prisonerSearch.stubFindByNumbers("B5678CD" to "MDI")
+
+    // Viewing MDI by default: nothing is physically held at MDI, so the incoming property is not listed.
+    webTestClient.get().uri("/property-containers/prison/MDI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(0)
+
+    // With dueForTransferIn=true the incoming container surfaces, still recording its holding prison (LEI).
+    webTestClient.get().uri("/property-containers/prison/MDI?dueForTransferIn=true")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].prisonerNumber").isEqualTo("B5678CD")
+      .jsonPath("$.content[0].containers.length()").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentSealNumber").isEqualTo("SEALIN")
+      .jsonPath("$.content[0].containers[0].prisonId").isEqualTo("LEI")
+      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
+  }
+
+  @Test
+  fun `dueForTransferIn alone returns only incoming property, not the viewed prison's held stock`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    // One container held at MDI (STORED), and one held at LEI due to transfer in to MDI.
+    repository.save(dueForTransferInContainer("SEALIN", prisonerNumber = "B5678CD", heldAt = "LEI", receivedAt = "MDI"))
+    repository.save(
+      seedContainer().apply {
+        prisonId = "MDI"
+        refreshDerivedState()
+      },
+    )
+    prisonerSearch.stubFindByNumbers("A1234BC" to "MDI", "B5678CD" to "MDI")
+
+    // Ticking transfer-in on its own drops the held-here scope: only the incoming container is returned.
+    webTestClient.get().uri("/property-containers/prison/MDI?dueForTransferIn=true")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].prisonerNumber").isEqualTo("B5678CD")
+      .jsonPath("$.content[0].containers[0].currentSealNumber").isEqualTo("SEALIN")
+  }
+
+  @Test
+  fun `the holding prison still lists incoming property as due for transfer out`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch()
+    repository.save(dueForTransferInContainer("SEALIN", prisonerNumber = "B5678CD", heldAt = "LEI", receivedAt = "MDI"))
+    prisonerSearch.stubFindByNumbers("A1234BC" to "MDI", "B5678CD" to "MDI")
+
+    // From LEI (the holding prison) the same container is held here and reads as due for transfer out.
+    webTestClient.get().uri("/property-containers/prison/LEI?status=DUE_FOR_TRANSFER_OUT")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].prisonerNumber").isEqualTo("B5678CD")
+      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
+  }
+
+  @Test
   fun `returns the prison property summary counts`() {
     hmppsAuth.stubGrantToken()
     // setUp already seeded one STORED container at LEI; add one due for disposal and one due to transfer out
@@ -783,6 +859,29 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       PropertyEvent(container, PropertyEventType.CREATED_SEALED, baseTime, "USER1", sealNumber = seal),
     )
     container.configure()
+    container.refreshDerivedState()
+    return container
+  }
+
+  /**
+   * A container physically held at [heldAt] whose owner was received at [receivedAt], so it is due for
+   * transfer out from [heldAt] and, equivalently, due to be transferred *in* to [receivedAt]
+   * (receivingPrisonId = receivedAt).
+   */
+  private fun dueForTransferInContainer(seal: String, prisonerNumber: String, heldAt: String, receivedAt: String): PropertyContainer {
+    val container = PropertyContainer(
+      prisonerNumber = prisonerNumber,
+      prisonId = heldAt,
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "USER1",
+      currentSealNumber = seal,
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, baseTime, "USER1", sealNumber = seal, toPrisonId = heldAt),
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.PRISONER_RECEIVED, baseTime.plusHours(1), "PRISONER_PROPERTY_API", fromPrisonId = heldAt, toPrisonId = receivedAt),
+    )
     container.refreshDerivedState()
     return container
   }

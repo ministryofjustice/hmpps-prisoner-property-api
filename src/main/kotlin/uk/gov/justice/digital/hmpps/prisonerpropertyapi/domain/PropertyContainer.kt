@@ -69,6 +69,15 @@ class PropertyContainer(
   var currentStorageLocationType: StorageLocationType? = null,
 
   /**
+   * Denormalised destination prison for a container that is due to transfer out: the establishment its
+   * owner has moved to (and so the prison it is due to be transferred *in* to). Mirrors [receivingPrison];
+   * null unless the container is currently due for transfer out. Lets the establishment-wide list surface
+   * incoming property (held elsewhere, destined here) without loading events.
+   */
+  @Column(name = "receiving_prison_id")
+  var receivingPrisonId: String? = null,
+
+  /**
    * Whether the container is archived (NOMIS ACTIVE_FLAG = 'N'). Archived containers are retained but
    * hidden from normal reads, surfaced only when fetched explicitly by id (e.g. a future archive screen).
    */
@@ -121,6 +130,17 @@ class PropertyContainer(
     ?.eventType?.status?.takeUnless { it == ContainerStatus.TRANSFER } ?: ContainerStatus.STORED
 
   /**
+   * The prison this container is due to be transferred in to, when it is currently due for transfer out:
+   * the destination recorded on the latest event (the PRISONER_RECEIVED that flagged it). Null for any
+   * container not due for transfer out. Denormalised into [receivingPrisonId] for the establishment list.
+   */
+  fun receivingPrison(): String? = if (baseStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT) {
+    events.maxByOrNull { it.eventDateTime }?.toPrisonId
+  } else {
+    null
+  }
+
+  /**
    * The current internal location id, from the most recent location-affecting event. Null when the
    * container is offsite at Branston (no internal id), has no recorded location, has been removed, or
    * has just been transferred to another prison (a [PropertyEventType.TRANSFERRED] clears the location
@@ -152,6 +172,7 @@ class PropertyContainer(
     currentStatusValue = baseStatus()
     currentInternalLocationId = currentLocation()
     currentStorageLocationType = currentLocationType()
+    receivingPrisonId = receivingPrison()
   }
 
   private fun latestLocationEvent(): PropertyEvent? = events
