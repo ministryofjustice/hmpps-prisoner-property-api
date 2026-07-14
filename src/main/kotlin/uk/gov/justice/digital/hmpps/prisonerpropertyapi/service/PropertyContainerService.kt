@@ -230,7 +230,8 @@ class PropertyContainerService(
     if (containers.isEmpty()) return emptyList()
 
     val prisonNames = prisonRegisterClient.getPrisonNames()
-    val prisonerName = prisonerSearchClient.getPrisoner(prisonerNumber).fullName()
+    val prisoner = prisonerSearchClient.getPrisoner(prisonerNumber)
+    val prisonerName = prisoner.fullName()
     val locations = locationsClient.getLocations(containers.mapNotNull { it.currentLocation() })
 
     val containerItems = containers.flatMap { container ->
@@ -263,8 +264,18 @@ class PropertyContainerService(
         )
       }
 
+    // A forward-looking "scheduled for release" marker, derived from the prisoner's release dates: prefer the
+    // confirmed date, fall back to the conditional (sentence-calculated) one. Suppressed once the prisoner has
+    // actually been released (the real release is already recorded as a PRISONER_RELEASED event).
+    val releaseDate = prisoner?.confirmedReleaseDate ?: prisoner?.conditionalReleaseDate
+    val scheduledItems = if (releaseDate != null && prisoner.movementStatus() != PrisonerMovementStatus.RELEASED) {
+      listOf(PrisonerTimelineItemDto.scheduledForRelease(prisonerNumber, prisonerName, releaseDate))
+    } else {
+      emptyList()
+    }
+
     // Newest first; at the same instant a movement sits above the container events it triggered.
-    return (containerItems + movementItems).sortedWith(
+    return (containerItems + movementItems + scheduledItems).sortedWith(
       compareByDescending<PrisonerTimelineItemDto> { it.eventDateTime }
         .thenByDescending { it.itemType == TimelineItemType.PRISONER_MOVEMENT },
     )

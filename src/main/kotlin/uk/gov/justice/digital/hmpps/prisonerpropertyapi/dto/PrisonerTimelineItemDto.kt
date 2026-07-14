@@ -11,10 +11,14 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
 
-/** Whether a timeline item is something that happened to a single container, or a prisoner movement between prisons. */
+/**
+ * Whether a timeline item is something that happened to a single container, a prisoner movement between prisons,
+ * or a forward-looking "scheduled for release" marker synthesised from the prisoner's release dates.
+ */
 enum class TimelineItemType {
   CONTAINER_EVENT,
   PRISONER_MOVEMENT,
+  SCHEDULED_FOR_RELEASE,
 }
 
 /**
@@ -140,6 +144,38 @@ data class PrisonerTimelineItemDto(
       actingEstablishmentName = toPrisonName,
       fromPrisonName = null,
       toPrisonName = toPrisonName,
+      toStorageLocationType = null,
+      sealNumber = null,
+      relatedContainerId = null,
+      containerId = null,
+      containerType = null,
+      containerSealNumber = null,
+      containerStatus = null,
+      containerLocationDescription = null,
+    )
+
+    /**
+     * Build a synthesised "scheduled for release" marker for the prisoner. It is not backed by a stored event,
+     * so it carries a deterministic id derived from the prisoner number and date, and sits on the timeline at the
+     * release date (start of day) so an upcoming release surfaces at the top of the newest-first list.
+     */
+    fun scheduledForRelease(
+      prisonerNumber: String,
+      prisonerName: String?,
+      releaseDate: LocalDate,
+    ) = PrisonerTimelineItemDto(
+      itemType = TimelineItemType.SCHEDULED_FOR_RELEASE,
+      eventId = UUID.nameUUIDFromBytes("scheduled-release:$prisonerNumber:$releaseDate".toByteArray()),
+      eventType = null,
+      eventStatus = null,
+      eventDateTime = releaseDate.atStartOfDay(),
+      eventDate = releaseDate,
+      eventUserId = SYSTEM_USER,
+      systemGenerated = true,
+      prisonerName = prisonerName,
+      actingEstablishmentName = null,
+      fromPrisonName = null,
+      toPrisonName = null,
       toStorageLocationType = null,
       sealNumber = null,
       relatedContainerId = null,

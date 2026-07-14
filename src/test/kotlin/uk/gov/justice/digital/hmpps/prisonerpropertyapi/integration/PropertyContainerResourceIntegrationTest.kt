@@ -368,6 +368,65 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `timeline includes a scheduled-for-release marker, preferring the confirmed release date`() {
+    hmppsAuth.stubGrantToken()
+    // Confirmed date is preferred over the conditional (sentence-calculated) one.
+    prisonerSearch.stubGetPrisoner("A1234BC", confirmedReleaseDate = "2026-08-12", conditionalReleaseDate = "2026-05-01")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // 3 seed events + 1 synthesised scheduled-for-release marker
+      .jsonPath("$.length()").isEqualTo(4)
+      // the release date is in the future, so the marker sits at the top of the newest-first list
+      .jsonPath("$[0].itemType").isEqualTo("SCHEDULED_FOR_RELEASE")
+      .jsonPath("$[0].eventDate").isEqualTo("2026-08-12")
+      .jsonPath("$[0].prisonerName").isEqualTo("JOHN SMITH")
+      .jsonPath("$[0].systemGenerated").isEqualTo(true)
+  }
+
+  @Test
+  fun `timeline falls back to the conditional release date when there is no confirmed date`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC", conditionalReleaseDate = "2026-09-01")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.length()").isEqualTo(4)
+      .jsonPath("$[0].itemType").isEqualTo("SCHEDULED_FOR_RELEASE")
+      .jsonPath("$[0].eventDate").isEqualTo("2026-09-01")
+  }
+
+  @Test
+  fun `timeline omits the scheduled-for-release marker once the prisoner has actually been released`() {
+    hmppsAuth.stubGrantToken()
+    // Released (prisonId OUT + REL): the real release is already recorded, so no forward-looking marker.
+    prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "OUT", lastMovementTypeCode = "REL", confirmedReleaseDate = "2026-08-12")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // only the 3 seed container events - no synthesised marker
+      .jsonPath("$.length()").isEqualTo(3)
+      .jsonPath("$[0].itemType").isEqualTo("CONTAINER_EVENT")
+      .jsonPath("$[1].itemType").isEqualTo("CONTAINER_EVENT")
+      .jsonPath("$[2].itemType").isEqualTo("CONTAINER_EVENT")
+  }
+
+  @Test
   fun `timeline excludes archived containers`() {
     hmppsAuth.stubGrantToken()
     prisonerSearch.stubGetPrisoner("A1234BC")
