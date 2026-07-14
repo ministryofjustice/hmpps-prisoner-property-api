@@ -48,13 +48,19 @@ class PrisonerSearchMockServer : WireMockServer(WIREMOCK_PORT) {
     )
   }
 
-  fun stubGetPrisoner(prisonerNumber: String, prisonId: String = "MDI", lastMovementTypeCode: String = "ADM") {
+  fun stubGetPrisoner(
+    prisonerNumber: String,
+    prisonId: String = "MDI",
+    lastMovementTypeCode: String = "ADM",
+    confirmedReleaseDate: String? = null,
+    conditionalReleaseDate: String? = null,
+  ) {
     stubFor(
       get(urlPathEqualTo("/prisoner/$prisonerNumber")).willReturn(
         aResponse()
           .withHeader("Content-Type", "application/json")
           .withStatus(200)
-          .withBody(prisonerJson(prisonerNumber, prisonId, lastMovementTypeCode)),
+          .withBody(prisonerJson(prisonerNumber, prisonId, lastMovementTypeCode, confirmedReleaseDate, conditionalReleaseDate)),
       ),
     )
   }
@@ -79,7 +85,18 @@ class PrisonerSearchMockServer : WireMockServer(WIREMOCK_PORT) {
     )
   }
 
-  private fun prisonerJson(prisonerNumber: String, prisonId: String, lastMovementTypeCode: String) = """
+  private fun prisonerJson(
+    prisonerNumber: String,
+    prisonId: String,
+    lastMovementTypeCode: String,
+    confirmedReleaseDate: String? = null,
+    conditionalReleaseDate: String? = null,
+  ): String {
+    val releaseDates = listOfNotNull(
+      confirmedReleaseDate?.let { """"confirmedReleaseDate": "$it"""" },
+      conditionalReleaseDate?.let { """"conditionalReleaseDate": "$it"""" },
+    ).joinToString("") { ",\n      $it" }
+    return """
     {
       "prisonerNumber": "$prisonerNumber",
       "firstName": "JOHN",
@@ -87,9 +104,10 @@ class PrisonerSearchMockServer : WireMockServer(WIREMOCK_PORT) {
       "prisonId": "$prisonId",
       "prisonName": "Moorland (HMP & YOI)",
       "cellLocation": "1-1-001",
-      "lastMovementTypeCode": "$lastMovementTypeCode"
+      "lastMovementTypeCode": "$lastMovementTypeCode"$releaseDates
     }
-  """.trimIndent()
+    """.trimIndent()
+  }
 
   fun stubGetPrisonerNotFound(prisonerNumber: String) {
     stubFor(

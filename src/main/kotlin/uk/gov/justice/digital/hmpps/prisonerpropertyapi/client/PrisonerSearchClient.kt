@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.WebClientResponseException
 import org.springframework.web.reactive.function.client.bodyToMono
+import java.time.LocalDate
 
 /**
  * Calls prisoner-search to look up a prisoner's name and current location.
@@ -86,4 +87,9 @@ data class Prisoner(
   val cellLocation: String?,
   // The prisoner's last movement type. TRN when in transit (with prisonId TRN), REL when released (prisonId OUT).
   val lastMovementTypeCode: String?,
+  // Planned release dates from the sentence. The confirmed date (set by the establishment) is preferred when
+  // present; the conditional (sentence-calculated) date is the fallback. Only requested on the single-prisoner
+  // lookup (the full record), not the trimmed bulk list.
+  val confirmedReleaseDate: LocalDate? = null,
+  val conditionalReleaseDate: LocalDate? = null,
 )
