@@ -120,6 +120,7 @@ class PropertyContainerService(
     includeRemoved: Boolean = false,
     search: String? = null,
     personLocation: PersonLocation? = null,
+    includeTransferIn: Boolean = false,
     pageable: Pageable,
   ): Page<PrisonerPropertyGroupDto> {
     val branstonOnly = storageLocation.equals(BRANSTON_SEARCH_TERM, ignoreCase = true)
@@ -141,6 +142,7 @@ class PropertyContainerService(
       search = search,
       searchLocationIds = searchLocationIds,
       searchBranston = searchBranston,
+      includeTransferIn = includeTransferIn,
     )
 
     if (personLocation == null) {

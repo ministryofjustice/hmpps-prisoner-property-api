@@ -81,6 +81,36 @@ class PropertyContainerTest {
     assertThat(container.currentStatus()).isEqualTo(ContainerStatus.RETURNED)
   }
 
+  @Test
+  fun `receiving prison is the destination while due for transfer out, cleared once transferred`() {
+    val container = PropertyContainer(
+      prisonerNumber = "A1234BC",
+      prisonId = "LEI",
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "USER1",
+      currentSealNumber = "SEAL1",
+    )
+    container.events.add(PropertyEvent(container, PropertyEventType.CREATED_SEALED, BASE_TIME, "USER1", toPrisonId = "LEI"))
+    // No pending transfer yet: nothing to transfer in.
+    container.refreshDerivedState()
+    assertThat(container.receivingPrison()).isNull()
+    assertThat(container.receivingPrisonId).isNull()
+
+    // Prisoner received at MDI: the container held at LEI is now due to transfer in to MDI.
+    container.events.add(PropertyEvent(container, PropertyEventType.PRISONER_RECEIVED, BASE_TIME.plusDays(1), "USER1", fromPrisonId = "LEI", toPrisonId = "MDI"))
+    container.refreshDerivedState()
+    assertThat(container.currentStatus()).isEqualTo(ContainerStatus.DUE_FOR_TRANSFER_OUT)
+    assertThat(container.receivingPrison()).isEqualTo("MDI")
+    assertThat(container.receivingPrisonId).isEqualTo("MDI")
+
+    // Transferred out to MDI: no longer due for transfer, so the receiving prison is cleared.
+    container.events.add(PropertyEvent(container, PropertyEventType.TRANSFERRED, BASE_TIME.plusDays(2), "USER1", fromPrisonId = "LEI", toPrisonId = "MDI"))
+    container.prisonId = "MDI"
+    container.refreshDerivedState()
+    assertThat(container.receivingPrison()).isNull()
+    assertThat(container.receivingPrisonId).isNull()
+  }
+
   private companion object {
     private val BASE_TIME: LocalDateTime = LocalDateTime.parse("2026-01-01T09:00:00")
   }
