@@ -5,6 +5,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.cache.CacheManager
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ActiveAgency
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ActiveAgencyRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
@@ -25,6 +27,9 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   private lateinit var repository: PropertyContainerRepository
 
   @Autowired
+  private lateinit var activeAgencyRepository: ActiveAgencyRepository
+
+  @Autowired
   private lateinit var cacheManager: CacheManager
 
   private lateinit var containerId: UUID
@@ -38,7 +43,10 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @AfterEach
-  fun cleanUp() = repository.deleteAll()
+  fun cleanUp() {
+    repository.deleteAll()
+    activeAgencyRepository.deleteAll()
+  }
 
   @Test
   fun `returns the property containers for a prisoner enriched with names`() {
@@ -402,6 +410,47 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$[0].itemType").isEqualTo("PRISONER_MOVEMENT")
       .jsonPath("$[0].movementKind").isEqualTo("ADMISSION")
       .jsonPath("$[0].toPrisonName").isEqualTo("Leeds (HMP)")
+  }
+
+  @Test
+  fun `timeline includes a DPS-first-used marker for a held establishment switched on in DPS`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    prisonApi.stubGetPrisonTimeline("A1234BC")
+    // LEI (where the seeded container is held) was switched on in DPS on 2026-03-01; the marker sits at that
+    // date, which is newer than the seed container's events (2026-01-01), so it leads the newest-first list.
+    activeAgencyRepository.save(ActiveAgency("LEI", active = true, updatedAt = LocalDateTime.parse("2026-03-01T09:00:00"), updatedBy = "ADMIN"))
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // 3 seed-container events + 1 DPS-first-used marker for Leeds
+      .jsonPath("$.length()").isEqualTo(4)
+      .jsonPath("$[0].itemType").isEqualTo("DPS_FIRST_USED")
+      .jsonPath("$[0].toPrisonName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[0].eventDate").isEqualTo("2026-03-01")
+      .jsonPath("$[0].systemGenerated").isEqualTo(true)
+  }
+
+  @Test
+  fun `timeline omits the DPS-first-used marker for a property-less prisoner even when the prison is active`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonRegister.stubGetPrisons()
+    prisonApi.stubGetPrisonTimeline("A1234BC")
+    activeAgencyRepository.save(ActiveAgency("LEI", active = true, updatedAt = LocalDateTime.parse("2026-03-01T09:00:00"), updatedBy = "ADMIN"))
+    repository.deleteAll() // property-less: the DPS marker is scoped to establishments the person holds property at
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.length()").isEqualTo(0)
   }
 
   @Test

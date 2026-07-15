@@ -38,6 +38,7 @@ class PropertyContainerService(
   private val prisonRegisterClient: PrisonRegisterClient,
   private val locationsClient: LocationsClient,
   private val prisonApiClient: PrisonApiClient,
+  private val activeAgenciesService: ActiveAgenciesService,
 ) {
 
   /**
@@ -223,11 +224,12 @@ class PropertyContainerService(
 
   /**
    * A prisoner's whole-property history: every event across all of their (non-archived) containers, interleaved
-   * newest first, plus a de-duplicated "arrived at ..." item for each prison the prisoner moved into. Prison and
-   * location ids are resolved to names, and each container event carries the seal number and acting establishment
-   * as at that point in the container's history - both carried forward through the events, so a transfer that
-   * reassigns the container's current prison does not relabel its earlier events. Returns an empty list if the
-   * prisoner has no property.
+   * newest first, plus a de-duplicated "arrived at ..." item for each prison the prisoner moved into and a
+   * "property management started in DPS at ..." marker for each establishment they have held property at that is
+   * switched on in DPS. Prison and location ids are resolved to names, and each container event carries the seal
+   * number and acting establishment as at that point in the container's history - both carried forward through
+   * the events, so a transfer that reassigns the container's current prison does not relabel its earlier events.
+   * Returns an empty list if the prisoner has no property.
    */
   @Transactional(readOnly = true)
   fun getPrisonerTimeline(prisonerNumber: String): List<PrisonerTimelineItemDto> {
@@ -279,11 +281,36 @@ class PropertyContainerService(
       emptyList()
     }
 
+    // One "property management started in DPS" marker per establishment the prisoner has held property at,
+    // derived at read time from when that prison was switched on in DPS.
+    val dpsRolloutItems = buildDpsRolloutItems(containers, prisonNames)
+
     // Newest first; at the same instant a movement sits above the container events it triggered.
-    return (containerItems + movementItems + scheduledItems).sortedWith(
+    return (containerItems + movementItems + scheduledItems + dpsRolloutItems).sortedWith(
       compareByDescending<PrisonerTimelineItemDto> { it.eventDateTime }
         .thenByDescending { it.itemType == TimelineItemType.PRISONER_MOVEMENT },
     )
+  }
+
+  /**
+   * A "property management started in DPS at ..." item for each establishment the prisoner has held property
+   * at (from their container history) that is currently switched on in DPS, placed at that prison's rollout
+   * date. An establishment-level fact derived at read time from the active-agency rows - no stored event.
+   */
+  private fun buildDpsRolloutItems(
+    containers: List<PropertyContainer>,
+    prisonNames: Map<String, String>,
+  ): List<PrisonerTimelineItemDto> {
+    if (containers.isEmpty()) return emptyList()
+    val rolloutDates = activeAgenciesService.getActiveAgencyRolloutDates()
+    val heldPrisonIds = containers.flatMapTo(mutableSetOf()) { container ->
+      container.events.flatMap { listOfNotNull(it.fromPrisonId, it.toPrisonId) } + container.prisonId
+    }
+    return heldPrisonIds.mapNotNull { prisonId ->
+      rolloutDates[prisonId]?.let { rolloutAt ->
+        PrisonerTimelineItemDto.dpsFirstUsed(prisonId, prisonNames[prisonId], rolloutAt)
+      }
+    }
   }
 
   /**

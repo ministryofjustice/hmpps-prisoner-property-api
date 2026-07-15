@@ -48,7 +48,8 @@ class PropertyContainerServiceTest {
   private val prisonRegisterClient = mock<PrisonRegisterClient>()
   private val locationsClient = mock<LocationsClient>()
   private val prisonApiClient = mock<PrisonApiClient>()
-  private val service = PropertyContainerService(repository, prisonerSearchClient, prisonRegisterClient, locationsClient, prisonApiClient)
+  private val activeAgenciesService = mock<ActiveAgenciesService>()
+  private val service = PropertyContainerService(repository, prisonerSearchClient, prisonRegisterClient, locationsClient, prisonApiClient, activeAgenciesService)
 
   @BeforeEach
   fun stubEnrichmentByDefault() {

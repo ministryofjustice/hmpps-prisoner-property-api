@@ -23,6 +23,12 @@ class ActiveAgenciesService(
   fun getActiveAgencies(): List<String> = repository.findAllByActiveTrue().map { it.agencyId }.sorted()
 
   /**
+   * When each currently-active agency was switched on in DPS (its `updated_at`), keyed by agency id. Used to
+   * derive the "property management started in DPS" timeline marker at read time.
+   */
+  fun getActiveAgencyRolloutDates(): Map<String, LocalDateTime> = repository.findAllByActiveTrue().associate { it.agencyId to it.updatedAt }
+
+  /**
    * The operational prisons (from prison-register) with whether the property service is active for
    * each - for the rollout admin console. Closed/non-operational agencies are filtered out, but any
    * prison already switched on stays listed even if it later drops out of the active set, so it can
