@@ -38,6 +38,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonPropertySummaryDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyGroupDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertySummaryDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerTimelineItemDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyEventDto
@@ -113,6 +114,29 @@ class PropertyContainerResource(
     @RequestParam(required = false, defaultValue = "DESC")
     sortDirection: Sort.Direction,
   ): List<PrisonerPropertyContainerDto> = propertyContainerService.getByPrisonerNumber(prisonerNumber, status ?: emptyList(), sortDirection)
+
+  @GetMapping("/prisoner/{prisonerNumber}/summary")
+  @Operation(
+    summary = "Get a prisoner's property summary counts for the profile tile",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns just the totals a prisoner-profile " +
+      "\"Property containers\" tile needs, over the person's active (not removed) containers: how many are " +
+      "held at their current establishment (from prisoner-search) versus other establishments, how many are " +
+      "due to be transferred in or out, and how many are overdue for disposal or return - plus whether they " +
+      "have ever had any property recorded. The current establishment (and its name) is null when the " +
+      "prisoner is released or in transit.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Prisoner property summary returned"),
+      ApiResponse(responseCode = "400", description = "Invalid prisoner number", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RO role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun getPrisonerSummary(
+    @Parameter(description = "Prisoner (NOMS) number", example = "A1234BC", required = true)
+    @Pattern(regexp = "([a-zA-Z][0-9]{4}[a-zA-Z]{2})", message = "Prisoner number must be in the format A1234BC")
+    @PathVariable
+    prisonerNumber: String,
+  ): PrisonerPropertySummaryDto = propertyContainerService.getPrisonerPropertySummary(prisonerNumber)
 
   @GetMapping("/prison/{prisonId}")
   @Operation(

@@ -24,6 +24,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MovementKind
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonPropertySummaryDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyGroupDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertySummaryDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerTimelineItemDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyEventDto
@@ -77,6 +78,38 @@ class PropertyContainerService(
         inPrisonersCurrentPrison = prisoner?.prisonId == container.prisonId,
       )
     }
+  }
+
+  /**
+   * A single prisoner's property totals for the profile "Property containers" tile. Counts are over the
+   * prisoner's active (not removed) containers, split by where they are held relative to their current
+   * establishment (from prisoner-search; null when released or in transit). Derived in code from the
+   * container set - it is small per prisoner - so no dedicated count query is needed. [hasEverHadProperty]
+   * covers every recorded container (including ones since returned/disposed/transferred) so the tile can
+   * tell "never had property" apart from "no longer has any".
+   */
+  @Transactional(readOnly = true)
+  fun getPrisonerPropertySummary(prisonerNumber: String): PrisonerPropertySummaryDto {
+    val containers = repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber)
+    val prisoner = prisonerSearchClient.getPrisoner(prisonerNumber)
+    // The prisoner's real establishment: prisoner-search reports TRN/OUT while in transit or released - treat
+    // those as no current establishment, so all their property counts as held "in other establishments".
+    val currentEstablishmentId = prisoner?.prisonId?.takeUnless { it == TRANSIT_PRISON_ID || it == RELEASED_PRISON_ID }
+
+    val active = containers.filterNot { it.isRemoved() }
+    val (here, elsewhere) = active.partition { currentEstablishmentId != null && it.prisonId == currentEstablishmentId }
+
+    return PrisonerPropertySummaryDto(
+      currentEstablishmentId = currentEstablishmentId,
+      currentEstablishmentName = currentEstablishmentId?.let { prisonRegisterClient.getPrisonNames()[it] },
+      heldInCurrentEstablishment = here.size,
+      heldInOtherEstablishments = elsewhere.size,
+      dueForTransferIn = elsewhere.count { currentEstablishmentId != null && it.receivingPrisonId == currentEstablishmentId },
+      dueForTransferOut = here.count { it.currentStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT },
+      overdueForDisposal = active.count { it.isDisposalDue() },
+      overdueForReturn = active.count { it.currentStatus() == ContainerStatus.DUE_FOR_RETURN },
+      hasEverHadProperty = containers.isNotEmpty(),
+    )
   }
 
   /**
