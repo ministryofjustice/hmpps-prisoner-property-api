@@ -1,5 +1,16 @@
 # Property history timeline — missing events: architecture & scoping
 
+> ## ⚠️ Superseded — historical record only
+>
+> This was a decision aid written *before* the timeline work. Most of what it proposes has since been
+> built, and **some of its current-state claims are now false** — it says there is no prison-api /
+> movements client (§4.3), but `client/PrisonApiClient.kt` exists and powers the timeline's movement
+> items. Do not read this as a description of how things work today.
+>
+> It is kept because it still explains **why** the timeline was built the way it was, and records the
+> options that were rejected. For current state see [architecture.md](architecture.md) and
+> [technical-implementation.md](technical-implementation.md).
+
 **Status:** Draft for discussion · **Scope:** Task: property history/timeline work
 · **Audience:** property service engineers + designers making a build/no-build decision
 

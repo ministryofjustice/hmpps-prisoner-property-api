@@ -110,9 +110,22 @@ This API never calls those services directly — they call us.
 
 ### Front end
 
-A TypeScript front end, **`hmpps-prisoner-property`** (built from the
-[hmpps-template-typescript](https://github.com/ministryofjustice/hmpps-template-typescript)),
-will consume this API to let staff manage prisoner property. It is to be created shortly.
+The staff-facing front end is
+[**`hmpps-prisoner-property-ui`**](https://github.com/ministryofjustice/hmpps-prisoner-property-ui) — a
+TypeScript/Express/Nunjucks app built from the
+[hmpps-template-typescript](https://github.com/ministryofjustice/hmpps-template-typescript). It consumes
+this API to let staff manage prisoner property, and is the only caller of these endpoints other than the
+NOMIS sync services above.
+
+## Documentation
+
+| Doc | For |
+| --- | --- |
+| [Business overview](docs/business-overview.md) | What the service does and why, in plain English. Start here. |
+| [Architecture](docs/architecture.md) | The whole service — both repos, diagrams, messaging, domain model. |
+| [Technical implementation](docs/technical-implementation.md) | This API's internals: packages, patterns, dependencies. |
+| [Establishment summary counts](docs/establishment-summary-counts.md) | How the summary tiles are counted. |
+| [Property returned or transferred tab](docs/property-returned-or-transferred-tab.md) | Roadmap item — not built. |
 
 ## Tech stack
 
