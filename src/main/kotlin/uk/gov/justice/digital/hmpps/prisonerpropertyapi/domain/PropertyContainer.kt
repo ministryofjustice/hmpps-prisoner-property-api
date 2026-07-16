@@ -78,8 +78,10 @@ class PropertyContainer(
   var receivingPrisonId: String? = null,
 
   /**
-   * Whether the container is archived (NOMIS ACTIVE_FLAG = 'N'). Archived containers are retained but
-   * hidden from normal reads, surfaced only when fetched explicitly by id (e.g. a future archive screen).
+   * Whether the container is archived: retained but hidden from normal reads, surfaced only when fetched
+   * explicitly by id (e.g. a future archive screen). No longer driven by NOMIS sync - an inactive NOMIS
+   * container (ACTIVE_FLAG='N') is recorded as disposed and stays visible - so this is reserved for future
+   * explicit archival.
    */
   @Column(name = "archived", nullable = false)
   var archived: Boolean = false,

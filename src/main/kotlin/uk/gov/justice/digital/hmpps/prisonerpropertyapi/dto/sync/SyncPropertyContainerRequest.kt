@@ -53,7 +53,13 @@ data class SyncPropertyContainerRequest(
   @Schema(description = "NOMIS PROPOSED_DISPOSAL_DATE", example = "2026-09-01", nullable = true)
   val proposedDisposalDate: LocalDate? = null,
 
-  @Schema(description = "NOMIS EXPIRY_DATE - the date the container was disposed of", example = "2026-09-15", nullable = true)
+  @Schema(
+    description = "NOMIS EXPIRY_DATE - the date the container became inactive. Used as the disposal/removal date " +
+      "only when the container is inactive (active=false); it may be a future planned date while still active, " +
+      "in which case it does not dispose the container.",
+    example = "2026-09-15",
+    nullable = true,
+  )
   val expiryDate: LocalDate? = null,
 
   @Schema(description = "NOMIS CREATE_DATETIME", requiredMode = Schema.RequiredMode.REQUIRED)
@@ -70,7 +76,8 @@ data class SyncPropertyContainerRequest(
   val modifyUsername: String? = null,
 
   @Schema(
-    description = "NOMIS ACTIVE_FLAG. False (inactive) archives the container - it is retained but hidden from normal reads.",
+    description = "NOMIS ACTIVE_FLAG. False (inactive) means the container has left storage and is recorded as " +
+      "disposed (dated by EXPIRY_DATE); it remains visible with a disposed status.",
     example = "true",
     defaultValue = "true",
   )
