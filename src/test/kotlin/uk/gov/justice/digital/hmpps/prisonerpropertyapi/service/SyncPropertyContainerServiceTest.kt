@@ -68,24 +68,62 @@ class SyncPropertyContainerServiceTest {
   }
 
   @Test
-  fun `create archives the container when inactive`() {
+  fun `create disposes the container when inactive and keeps it visible`() {
     stubSaveAssigningId()
 
-    service.sync(request(active = false))
+    service.sync(request(active = false, expiryDate = LocalDate.parse("2026-09-15")))
 
-    assertThat(captureSaved().archived).isTrue()
+    val saved = captureSaved()
+    assertThat(saved.archived).isFalse()
+    assertThat(saved.removalOutcome).isEqualTo(RemovalOutcome.DISPOSED)
+    assertThat(saved.removalDate).isEqualTo(LocalDate.parse("2026-09-15"))
+    assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.DISPOSED)
+    assertThat(saved.currentLocation()).isNull()
+    assertThat(saved.events.map { it.eventType }).contains(PropertyEventType.DISPOSED)
   }
 
   @Test
-  fun `archiving an existing container flips the flag and reports an archived change`() {
+  fun `create inactive with no expiry date still disposes with no removal date`() {
+    stubSaveAssigningId()
+
+    service.sync(request(active = false, expiryDate = null))
+
+    val saved = captureSaved()
+    assertThat(saved.removalOutcome).isEqualTo(RemovalOutcome.DISPOSED)
+    assertThat(saved.removalDate).isNull()
+    assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.DISPOSED)
+  }
+
+  @Test
+  fun `deactivating an existing container disposes it and reports a disposed change`() {
     val existing = existingContainer()
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
 
-    val result = service.sync(request(dpsId = existing.id, active = false))
+    val result = service.sync(request(dpsId = existing.id, active = false, expiryDate = LocalDate.parse("2026-09-15")))
 
-    assertThat(existing.archived).isTrue()
+    assertThat(existing.archived).isFalse()
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.DISPOSED)
+    assertThat(existing.removalDate).isEqualTo(LocalDate.parse("2026-09-15"))
+    assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.DISPOSED)
     assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
-    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("archived"))
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("disposed"))
+  }
+
+  @Test
+  fun `reactivating a disposed container clears the removal`() {
+    val existing = existingContainer()
+    existing.removalOutcome = RemovalOutcome.DISPOSED
+    existing.removalDate = LocalDate.parse("2026-09-15")
+    existing.refreshDerivedState()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    val result = service.sync(request(dpsId = existing.id, active = true))
+
+    assertThat(existing.removalOutcome).isNull()
+    assertThat(existing.removalDate).isNull()
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.STORED)
+    @Suppress("UNCHECKED_CAST")
+    assertThat(result.event?.additionalInformation?.get("changedFields") as List<String>).contains("disposed")
   }
 
   @Test
@@ -123,17 +161,18 @@ class SyncPropertyContainerServiceTest {
   }
 
   @Test
-  fun `create with an expiry date disposes the container and clears its location`() {
+  fun `create with an expiry date but still active does not dispose the container`() {
     stubSaveAssigningId()
 
-    service.sync(request(expiryDate = LocalDate.parse("2026-09-15")))
+    // Regression: NOMIS may carry a (future) EXPIRY_DATE while ACTIVE_FLAG='Y' - the container must stay stored.
+    service.sync(request(active = true, expiryDate = LocalDate.parse("2027-01-01"), proposedDisposalDate = LocalDate.parse("2030-01-01")))
 
     val saved = captureSaved()
-    assertThat(saved.removalOutcome).isEqualTo(RemovalOutcome.DISPOSED)
-    assertThat(saved.removalDate).isEqualTo(LocalDate.parse("2026-09-15"))
-    assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.DISPOSED)
-    assertThat(saved.currentLocation()).isNull()
-    assertThat(saved.events.map { it.eventType }).contains(PropertyEventType.DISPOSED)
+    assertThat(saved.removalOutcome).isNull()
+    assertThat(saved.removalDate).isNull()
+    assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.STORED)
+    assertThat(saved.currentLocation()).isEqualTo(LOCATION)
+    assertThat(saved.events.map { it.eventType }).doesNotContain(PropertyEventType.DISPOSED)
   }
 
   @Test
@@ -182,7 +221,7 @@ class SyncPropertyContainerServiceTest {
     val existing = existingContainer()
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
 
-    service.sync(request(dpsId = existing.id, expiryDate = LocalDate.parse("2026-09-15")))
+    service.sync(request(dpsId = existing.id, active = false, expiryDate = LocalDate.parse("2026-09-15")))
 
     assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.DISPOSED)
     assertThat(existing.removalDate).isEqualTo(LocalDate.parse("2026-09-15"))
