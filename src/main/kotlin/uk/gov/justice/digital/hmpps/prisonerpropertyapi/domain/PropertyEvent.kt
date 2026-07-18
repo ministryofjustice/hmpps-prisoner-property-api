@@ -57,6 +57,11 @@ class PropertyEvent(
   @Column(name = "related_container_id")
   val relatedContainerId: UUID? = null,
 
+  // The seal number of the related (combined-into) container as at this event, snapshotted so the history
+  // names it by the seal it had at combine time rather than any later reseal.
+  @Column(name = "related_container_seal_number")
+  val relatedContainerSealNumber: String? = null,
+
   // Snapshot of the container's type at the moment of the event, so the history stays a self-contained,
   // audit-durable record. Defaulted from the container (Kotlin allows a default to reference an earlier
   // param), so every call site captures the type automatically; for a type change the container's type is

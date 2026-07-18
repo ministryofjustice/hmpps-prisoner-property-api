@@ -29,6 +29,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublish
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -81,6 +82,57 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
         assertThat(it.prisonerNumber).isEqualTo("A1234BC")
       },
     )
+  }
+
+  @Test
+  fun `creates excess property offsite at Branston when locationType is BRANSTON`() {
+    val created = webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(createRequest(sealNumber = "EX1").copy(containerType = ContainerType.EXCESS, internalLocationId = null, locationType = StorageLocationType.BRANSTON))
+      .exchange()
+      .expectStatus().isCreated
+      .expectBody(PropertyContainerDto::class.java)
+      .returnResult().responseBody!!
+
+    assertThat(created.currentLocationType).isEqualTo(StorageLocationType.BRANSTON)
+    assertThat(created.currentLocation).isNull()
+  }
+
+  @Test
+  fun `creates excess property in an internal location when one is given`() {
+    val created = webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(createRequest(sealNumber = "EX2").copy(containerType = ContainerType.EXCESS, internalLocationId = LOCATION))
+      .exchange()
+      .expectStatus().isCreated
+      .expectBody(PropertyContainerDto::class.java)
+      .returnResult().responseBody!!
+
+    assertThat(created.currentLocationType).isEqualTo(StorageLocationType.INTERNAL)
+    assertThat(created.currentLocation).isEqualTo(LOCATION)
+  }
+
+  @Test
+  fun `rejects a create that sets both BRANSTON and an internal location`() {
+    webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(createRequest(sealNumber = "EX3").copy(containerType = ContainerType.EXCESS, internalLocationId = LOCATION, locationType = StorageLocationType.BRANSTON))
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
+  @Test
+  fun `updates an internal container to be stored offsite at Branston`() {
+    val id = repository.save(seedContainer(seal = "EX4")).id!!
+
+    webTestClient.put().uri("/property-containers/{id}", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(updateRequest(sealNumber = "EX4").copy(containerType = ContainerType.EXCESS, internalLocationId = null, locationType = StorageLocationType.BRANSTON))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.currentLocationType").isEqualTo("BRANSTON")
+      .jsonPath("$.currentLocation").doesNotExist()
   }
 
   @Test
@@ -340,10 +392,53 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
     assertThat(repository.findById(a).get().removalOutcome).isEqualTo(RemovalOutcome.COMBINED)
     assertThat(repository.findById(b).get().removalOutcome).isEqualTo(RemovalOutcome.COMBINED)
 
+    // Each source's COMBINED event names the container it was combined into (id + resolved seal), so the
+    // timeline can show which containers were combined together.
+    prisonRegister.stubGetPrisons()
+    webTestClient.get().uri("/property-containers/{id}/events", a)
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$[0].eventType").isEqualTo("COMBINED")
+      .jsonPath("$[0].relatedContainerId").isEqualTo(created.id.toString())
+      .jsonPath("$[0].relatedContainerSealNumber").isEqualTo("NEWSEAL")
+
     val captor = argumentCaptor<HmppsDomainEvent>()
     verify(domainEventPublisher, times(3)).publish(captor.capture())
     assertThat(captor.allValues.map { it.eventType })
       .containsExactly("prison-property.container.created", "prison-property.container.updated", "prison-property.container.updated")
+  }
+
+  @Test
+  fun `the combined-into seal on a source event is snapshotted at combine time, not the destination's later seal`() {
+    val a = repository.save(seedContainer(seal = "SEALA")).id!!
+    val b = repository.save(seedContainer(seal = "SEALB")).id!!
+
+    val created = webTestClient.post().uri("/property-containers/combine")
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(CombineContainersRequest(sourceContainerIds = listOf(a, b), containerType = ContainerType.STANDARD, sealNumber = "NEWSEAL", internalLocationId = LOCATION))
+      .exchange()
+      .expectStatus().isCreated
+      .expectBody(PropertyContainerDto::class.java)
+      .returnResult().responseBody!!
+
+    // Reseal the combined container after the fact.
+    webTestClient.put().uri("/property-containers/{id}", created.id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(updateRequest(sealNumber = "RESEALED"))
+      .exchange()
+      .expectStatus().isOk
+
+    // The source's COMBINED event still names the seal the destination had at the time of the combine.
+    prisonRegister.stubGetPrisons()
+    webTestClient.get().uri("/property-containers/{id}/events", a)
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$[0].eventType").isEqualTo("COMBINED")
+      .jsonPath("$[0].relatedContainerSealNumber").isEqualTo("NEWSEAL")
   }
 
   @Test

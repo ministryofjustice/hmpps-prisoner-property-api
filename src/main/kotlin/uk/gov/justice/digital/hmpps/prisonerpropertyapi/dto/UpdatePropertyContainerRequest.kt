@@ -3,6 +3,7 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import java.time.LocalDate
 import java.util.UUID
 
@@ -21,6 +22,15 @@ data class UpdatePropertyContainerRequest(
 
   @Schema(description = "Internal storage location id (locations-inside-prison-api), if known", example = "11111111-1111-1111-1111-111111111111", nullable = true)
   val internalLocationId: UUID? = null,
+
+  @Schema(
+    description = "Where the container is stored: INTERNAL (a prison location, given by internalLocationId) or " +
+      "BRANSTON (the offsite warehouse, no internal location). Send BRANSTON to move excess property offsite. " +
+      "Leave null (with no internalLocationId) to leave the storage location unchanged.",
+    example = "INTERNAL",
+    nullable = true,
+  )
+  val locationType: StorageLocationType? = null,
 
   @Schema(description = "Date the container is proposed to be disposed of, if any", example = "2026-09-01", nullable = true)
   val proposedDisposalDate: LocalDate? = null,

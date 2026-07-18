@@ -55,6 +55,9 @@ data class PropertyEventDto(
 
   @Schema(description = "Id of a related container, for combine events", example = "33333333-3333-3333-3333-333333333333", nullable = true)
   val relatedContainerId: UUID?,
+
+  @Schema(description = "Seal number of the related container, for combine events - the container this one was combined into", example = "SN991234", nullable = true)
+  val relatedContainerSealNumber: String? = null,
 ) {
   companion object {
     /** [prisonNames] resolves prison ids to names (from prison-register); pass an empty map to skip resolution. */
@@ -74,6 +77,7 @@ data class PropertyEventDto(
       containerType = event.containerType,
       eventDate = event.eventDate,
       relatedContainerId = event.relatedContainerId,
+      relatedContainerSealNumber = event.relatedContainerSealNumber,
     )
   }
 }

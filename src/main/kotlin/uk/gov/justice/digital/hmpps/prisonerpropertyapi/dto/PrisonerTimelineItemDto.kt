@@ -95,6 +95,9 @@ data class PrisonerTimelineItemDto(
   @Schema(description = "Id of a related container, for combine events", example = "33333333-3333-3333-3333-333333333333", nullable = true)
   val relatedContainerId: UUID?,
 
+  @Schema(description = "Seal number of the related container, for combine events - the container this one was combined into", example = "SN991234", nullable = true)
+  val relatedContainerSealNumber: String? = null,
+
   @Schema(description = "Id of the container this event belongs to; null for prisoner movements", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d", nullable = true)
   val containerId: UUID?,
 
@@ -140,6 +143,7 @@ data class PrisonerTimelineItemDto(
       toStorageLocationType = event.toStorageLocationType,
       sealNumber = sealAsOfEvent,
       relatedContainerId = event.relatedContainerId,
+      relatedContainerSealNumber = event.relatedContainerSealNumber,
       containerId = container.id,
       containerType = container.containerType,
       containerSealNumber = container.currentSealNumber,
