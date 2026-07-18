@@ -14,4 +14,8 @@ enum class ContainerStatus {
   TRANSFER,
   COMBINED,
   CREATED_IN_ERROR,
+
+  // Removed from the establishment with no recorded reason - the reversible state a NOMIS "inactive"
+  // (ACTIVE_FLAG='N') container maps to, where we can't tell whether it was returned, disposed or transferred.
+  REMOVED,
 }

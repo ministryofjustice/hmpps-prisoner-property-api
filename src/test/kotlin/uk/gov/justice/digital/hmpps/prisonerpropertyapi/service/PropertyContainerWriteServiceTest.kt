@@ -237,7 +237,7 @@ class PropertyContainerWriteServiceTest {
   fun `create reconciles a matching due-for-transfer-out container arriving from another prison`() {
     stubSaveAssigningId()
     val source = dueForTransferOut("LEI", "OLDSEAL", toPrisonId = "MDI")
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
 
     val result = service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
 
@@ -268,7 +268,7 @@ class PropertyContainerWriteServiceTest {
   fun `create with the same arriving seal succeeds because the reconciled source frees its seal`() {
     stubSaveAssigningId()
     val source = dueForTransferOut("LEI", "SAMESEAL", toPrisonId = "MDI")
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
     // the seal is still held by the source at this point; the create must exclude the source it is reconciling
     whenever(repository.existsByCurrentSealNumberAndRemovalOutcomeIsNull("SAMESEAL")).thenReturn(true)
 
@@ -282,7 +282,7 @@ class PropertyContainerWriteServiceTest {
   fun `create ignores a previous seal that matches no due-for-transfer-out container`() {
     stubSaveAssigningId()
     val storedElsewhere = containerAt("MDI", "OLDSEAL") // active elsewhere but not due for transfer out
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(storedElsewhere))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(storedElsewhere))
 
     val result = service.create(createRequest(prisonId = "LEI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
 
@@ -582,7 +582,7 @@ class PropertyContainerWriteServiceTest {
     val atSendingPrison = containerAt("LEI", "SEAL1")
     val atNewPrison = containerAt("MDI", "SEAL2")
     val removedAtSendingPrison = containerAt("LEI", "SEAL3").apply { removalOutcome = RemovalOutcome.RETURNED }
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(atSendingPrison, atNewPrison, removedAtSendingPrison))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(atSendingPrison, atNewPrison, removedAtSendingPrison))
 
     val events = service.prisonerReceived("A1234BC", "MDI")
 
@@ -603,7 +603,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `prisonerReceived is idempotent - a repeated receive to the same prison does nothing`() {
     val atSendingPrison = containerAt("LEI", "SEAL1")
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(atSendingPrison))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(atSendingPrison))
 
     service.prisonerReceived("A1234BC", "MDI")
     val secondCallEvents = service.prisonerReceived("A1234BC", "MDI")
@@ -614,7 +614,7 @@ class PropertyContainerWriteServiceTest {
 
   @Test
   fun `prisonerReceived with no property at another prison returns no events`() {
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("MDI", "SEAL1")))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("MDI", "SEAL1")))
 
     assertThat(service.prisonerReceived("A1234BC", "MDI")).isEmpty()
     verify(repository, never()).save(any())
@@ -626,7 +626,7 @@ class PropertyContainerWriteServiceTest {
     // A container already due for transfer out flips to due for return on release.
     val elsewhere = dueForTransferOut("MDI", "SEAL2", "LEI")
     val removed = containerAt("LEI", "SEAL3").apply { removalOutcome = RemovalOutcome.RETURNED }
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(here, elsewhere, removed))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(here, elsewhere, removed))
 
     val events = service.prisonerReleased("A1234BC")
 
@@ -641,7 +641,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `prisonerReleased is idempotent - a repeat does nothing`() {
     val container = containerAt("LEI", "SEAL1")
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
 
     service.prisonerReleased("A1234BC")
     val secondCallEvents = service.prisonerReleased("A1234BC")
@@ -654,7 +654,7 @@ class PropertyContainerWriteServiceTest {
   fun `prisonerDied flags all active containers as due for return with a distinct DIED_IN_CUSTODY event`() {
     val here = containerAt("LEI", "SEAL1")
     val removed = containerAt("LEI", "SEAL2").apply { removalOutcome = RemovalOutcome.RETURNED }
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(here, removed))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(here, removed))
 
     val events = service.prisonerDied("A1234BC")
 
@@ -668,7 +668,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `prisonerDied is idempotent - a repeat does nothing`() {
     val container = containerAt("LEI", "SEAL1")
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
 
     service.prisonerDied("A1234BC")
     val secondCallEvents = service.prisonerDied("A1234BC")

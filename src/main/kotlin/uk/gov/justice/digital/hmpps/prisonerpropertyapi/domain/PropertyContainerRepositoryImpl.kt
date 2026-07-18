@@ -69,7 +69,7 @@ class PropertyContainerRepositoryImpl(
 
   private fun predicates(cb: CriteriaBuilder, root: Root<PropertyContainer>, prisonId: String, filter: PrisonPropertyFilter): List<Predicate> {
     // Filters that apply to every row regardless of scope (held here vs due to transfer in).
-    val predicates = mutableListOf<Predicate>(cb.isFalse(root.get("archived")))
+    val predicates = mutableListOf<Predicate>()
     filter.prisonerNumber?.let { predicates += cb.equal(root.get<String>("prisonerNumber"), it) }
     filter.sealNumber?.let { predicates += cb.equal(root.get<String>("currentSealNumber"), it) }
     if (filter.containerTypes.isNotEmpty()) predicates += root.get<ContainerType>("containerType").`in`(filter.containerTypes)

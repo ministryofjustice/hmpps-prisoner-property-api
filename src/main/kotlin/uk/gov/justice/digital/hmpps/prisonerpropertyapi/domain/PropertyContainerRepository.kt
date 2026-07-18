@@ -16,10 +16,7 @@ interface PropertyContainerRepository :
   @EntityGraph("PropertyContainer.withEvents")
   override fun findById(id: UUID): Optional<PropertyContainer>
 
-  // List reads exclude archived containers - they are only returned when fetched explicitly by id.
-  fun findByPrisonerNumberAndArchivedFalse(prisonerNumber: String): List<PropertyContainer>
-
-  fun findByPrisonIdAndArchivedFalse(prisonId: String): List<PropertyContainer>
+  fun findByPrisonerNumber(prisonerNumber: String): List<PropertyContainer>
 
   /**
    * How many containers are currently held in each internal location of a prison, read straight from the
@@ -29,7 +26,7 @@ interface PropertyContainerRepository :
   @Query(
     "select c.currentInternalLocationId as locationId, count(c) as count " +
       "from PropertyContainer c " +
-      "where c.prisonId = :prisonId and c.archived = false and c.currentInternalLocationId is not null " +
+      "where c.prisonId = :prisonId and c.currentInternalLocationId is not null " +
       "group by c.currentInternalLocationId",
   )
   fun countContainersByLocation(@Param("prisonId") prisonId: String): List<LocationContainerCount>
@@ -41,7 +38,7 @@ interface PropertyContainerRepository :
    */
   @Query(
     "select count(c) from PropertyContainer c " +
-      "where c.currentInternalLocationId = :locationId and c.archived = false " +
+      "where c.currentInternalLocationId = :locationId " +
       "and (:excludedIds is null or c.id not in :excludedIds)",
   )
   fun countContainersInLocation(
@@ -56,7 +53,7 @@ interface PropertyContainerRepository :
   @Query(
     "select c.currentStatusValue as status, count(c) as count " +
       "from PropertyContainer c " +
-      "where c.prisonId = :prisonId and c.archived = false and c.removalOutcome is null " +
+      "where c.prisonId = :prisonId and c.removalOutcome is null " +
       "group by c.currentStatusValue",
   )
   fun countContainersByStatus(@Param("prisonId") prisonId: String): List<StatusContainerCount>
@@ -68,7 +65,7 @@ interface PropertyContainerRepository :
    */
   @Query(
     "select count(c) from PropertyContainer c " +
-      "where c.prisonId = :prisonId and c.archived = false and c.removalOutcome is null " +
+      "where c.prisonId = :prisonId and c.removalOutcome is null " +
       "and c.proposedDisposalDate is not null and c.proposedDisposalDate <= :today",
   )
   fun countDueForDisposal(@Param("prisonId") prisonId: String, @Param("today") today: LocalDate): Long

@@ -96,16 +96,30 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `deactivating a container disposes it, sets the status and clears the location`() {
+  fun `deactivating a container removes it, sets the status and clears the location`() {
     val created = upsert(request())
 
     upsert(request(dpsId = created.dpsId, active = false, expiryDate = LocalDate.parse("2026-09-15")))
 
     getById(created.dpsId)
-      .jsonPath("$.currentStatus").isEqualTo("DISPOSED")
-      .jsonPath("$.removalOutcome").isEqualTo("DISPOSED")
+      .jsonPath("$.currentStatus").isEqualTo("REMOVED")
+      .jsonPath("$.removalOutcome").isEqualTo("REMOVED")
       .jsonPath("$.removalDate").isEqualTo("2026-09-15")
       .jsonPath("$.currentLocation").doesNotExist()
+  }
+
+  @Test
+  fun `reactivating a removed container restores it to stored and records the history`() {
+    val created = upsert(request())
+    upsert(request(dpsId = created.dpsId, active = false, expiryDate = LocalDate.parse("2026-09-15")))
+
+    // NOMIS reactivates the container (active again), re-allocating its location on the same snapshot.
+    upsert(request(dpsId = created.dpsId, active = true))
+
+    getById(created.dpsId)
+      .jsonPath("$.currentStatus").isEqualTo("STORED")
+      .jsonPath("$.removalOutcome").doesNotExist()
+      .jsonPath("$.currentLocation").isEqualTo(LOCATION.toString())
   }
 
   @Test
@@ -163,21 +177,20 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `an inactive snapshot disposes the container - it stays in the prisoner list but is out of the default establishment list`() {
+  fun `an inactive snapshot removes the container - it stays in the prisoner list but is out of the default establishment list`() {
     val created = upsert(request(active = false, expiryDate = LocalDate.parse("2026-09-15")))
 
     getById(created.dpsId)
-      .jsonPath("$.archived").isEqualTo(false)
-      .jsonPath("$.currentStatus").isEqualTo("DISPOSED")
-      .jsonPath("$.removalOutcome").isEqualTo("DISPOSED")
-    // Disposed containers remain visible in a prisoner's own property list...
+      .jsonPath("$.currentStatus").isEqualTo("REMOVED")
+      .jsonPath("$.removalOutcome").isEqualTo("REMOVED")
+    // Removed containers remain visible in a prisoner's own property list...
     listByPrisoner("A1234BC").jsonPath("$.length()").isEqualTo(1)
     // ...but the establishment list excludes removed containers unless explicitly included.
     listByPrison("LEI").jsonPath("$.totalElements").isEqualTo(0)
   }
 
   @Test
-  fun `deactivating an existing container disposes it but keeps it in the prisoner list`() {
+  fun `deactivating an existing container removes it but keeps it in the prisoner list`() {
     val created = upsert(request())
     listByPrisoner("A1234BC").jsonPath("$.length()").isEqualTo(1)
 
@@ -185,8 +198,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
     listByPrisoner("A1234BC").jsonPath("$.length()").isEqualTo(1)
     getById(created.dpsId)
-      .jsonPath("$.archived").isEqualTo(false)
-      .jsonPath("$.currentStatus").isEqualTo("DISPOSED")
+      .jsonPath("$.currentStatus").isEqualTo("REMOVED")
   }
 
   @Test

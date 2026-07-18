@@ -77,15 +77,6 @@ class PropertyContainer(
   @Column(name = "receiving_prison_id")
   var receivingPrisonId: String? = null,
 
-  /**
-   * Whether the container is archived: retained but hidden from normal reads, surfaced only when fetched
-   * explicitly by id (e.g. a future archive screen). No longer driven by NOMIS sync - an inactive NOMIS
-   * container (ACTIVE_FLAG='N') is recorded as disposed and stays visible - so this is reserved for future
-   * explicit archival.
-   */
-  @Column(name = "archived", nullable = false)
-  var archived: Boolean = false,
-
   @OneToMany(mappedBy = "container", cascade = [CascadeType.ALL], orphanRemoval = true)
   val events: MutableList<PropertyEvent> = mutableListOf(),
 
@@ -125,10 +116,14 @@ class PropertyContainer(
    */
   fun baseStatus(): ContainerStatus = removalOutcome?.status ?: baseEventStatus()
 
-  /** The status from the most recent non-disposal event (disposal is derived from the date, not the event). */
+  /**
+   * The status from the most recent non-disposal event (disposal is derived from the date, not the event).
+   * Events are appended chronologically, so when two share a timestamp - e.g. a REMOVED and the REACTIVATED
+   * that reverses it in one sync snapshot - the later-appended one wins.
+   */
   private fun baseEventStatus(): ContainerStatus = events
     .filter { it.eventType != PropertyEventType.DISPOSAL_REQUIRED }
-    .maxByOrNull { it.eventDateTime }
+    .reduceOrNull { latest, event -> if (event.eventDateTime >= latest.eventDateTime) event else latest }
     ?.eventType?.status?.takeUnless { it == ContainerStatus.TRANSFER } ?: ContainerStatus.STORED
 
   /**

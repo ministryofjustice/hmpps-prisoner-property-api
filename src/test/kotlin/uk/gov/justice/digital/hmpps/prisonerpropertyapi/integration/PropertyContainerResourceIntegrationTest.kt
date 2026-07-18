@@ -550,23 +550,6 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `timeline excludes archived containers`() {
-    hmppsAuth.stubGrantToken()
-    prisonerSearch.stubGetPrisoner("A1234BC")
-    prisonRegister.stubGetPrisons()
-    locations.stubPostLocationsBatch(LOCATION_B.toString())
-    repository.save(seedContainer().apply { archived = true })
-
-    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
-      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
-      .exchange()
-      .expectStatus().isOk
-      .expectBody()
-      // only the (non-archived) seed container's 3 events, not the archived container's
-      .jsonPath("$.length()").isEqualTo(3)
-  }
-
-  @Test
   fun `timeline is empty for a prisoner with no property and no movements`() {
     hmppsAuth.stubGrantToken()
     prisonRegister.stubGetPrisons()

@@ -62,7 +62,7 @@ class PropertyContainerServiceTest {
 
   @Test
   fun `getByPrisonerNumber maps containers to enriched DTOs with derived and resolved fields`() {
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerWithHistory()))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerWithHistory()))
 
     val result = service.getByPrisonerNumber("A1234BC")
 
@@ -79,12 +79,12 @@ class PropertyContainerServiceTest {
       assertThat(it.currentLocation).isEqualTo(LOCATION_B)
       assertThat(it.locationDescription).isEqualTo("Reception Property Store")
     })
-    verify(repository).findByPrisonerNumberAndArchivedFalse("A1234BC")
+    verify(repository).findByPrisonerNumber("A1234BC")
   }
 
   @Test
   fun `getByPrisonerNumber returns an empty list without calling enrichment when the prisoner has no containers`() {
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(emptyList())
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(emptyList())
 
     assertThat(service.getByPrisonerNumber("A1234BC")).isEmpty()
     verify(prisonerSearchClient, never()).getPrisoner(any())
@@ -97,7 +97,7 @@ class PropertyContainerServiceTest {
       removalOutcome = RemovalOutcome.DISPOSED
       removalDate = LocalDate.parse("2026-02-01")
     }
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(stored, disposed))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(stored, disposed))
 
     val result = service.getByPrisonerNumber("A1234BC", statuses = listOf(ContainerStatus.DISPOSED))
 
@@ -111,7 +111,7 @@ class PropertyContainerServiceTest {
   fun `getByPrisonerNumber shows stored property as due for return from a day before the confirmed release date`() {
     whenever(prisonerSearchClient.getPrisoner("A1234BC"))
       .thenReturn(prisoner(prisonId = "LEI").copy(confirmedReleaseDate = LocalDate.now().plusDays(1)))
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
 
     assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
       assertThat(it.currentStatus).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
@@ -122,7 +122,7 @@ class PropertyContainerServiceTest {
   fun `getByPrisonerNumber leaves stored property stored when the confirmed release date is further off`() {
     whenever(prisonerSearchClient.getPrisoner("A1234BC"))
       .thenReturn(prisoner(prisonId = "LEI").copy(confirmedReleaseDate = LocalDate.now().plusDays(5)))
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
 
     assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
       assertThat(it.currentStatus).isEqualTo(ContainerStatus.STORED)
@@ -133,7 +133,7 @@ class PropertyContainerServiceTest {
   fun `getByPrisonerNumber does not derive due for return once the prisoner has actually been released`() {
     whenever(prisonerSearchClient.getPrisoner("A1234BC"))
       .thenReturn(prisoner(prisonId = "OUT", lastMovementTypeCode = "REL").copy(confirmedReleaseDate = LocalDate.now().minusDays(1)))
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
 
     assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
       assertThat(it.currentStatus).isEqualTo(ContainerStatus.STORED)
@@ -144,7 +144,7 @@ class PropertyContainerServiceTest {
   fun `getByPrisonerNumber sorts by last-updated date in the requested direction`() {
     val older = containerAt("LEI", "OLD", eventTime = LocalDateTime.parse("2026-01-01T09:00:00"))
     val newer = containerAt("LEI", "NEW", eventTime = LocalDateTime.parse("2026-03-01T09:00:00"))
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(older, newer))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(older, newer))
 
     assertThat(service.getByPrisonerNumber("A1234BC", sortDirection = Sort.Direction.DESC).map { it.currentSealNumber })
       .containsExactly("NEW", "OLD")
@@ -155,7 +155,7 @@ class PropertyContainerServiceTest {
   @Test
   fun `getByPrisonerNumber flags property not held in the prisoner's current prison`() {
     whenever(prisonerSearchClient.getPrisoner("A1234BC")).thenReturn(prisoner(prisonId = "MDI"))
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
 
     assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
       assertThat(it.inPrisonersCurrentPrison).isFalse()
@@ -169,7 +169,7 @@ class PropertyContainerServiceTest {
   @Test
   fun `getByPrisonerNumber leaves names null when the prisoner cannot be resolved`() {
     whenever(prisonerSearchClient.getPrisoner("A1234BC")).thenReturn(null)
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
 
     assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
       assertThat(it.prisonerName).isNull()
@@ -182,7 +182,7 @@ class PropertyContainerServiceTest {
 
   @Test
   fun `getByPrisonerNumber surfaces the prisoner's movement status - in transit and released`() {
-    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
 
     whenever(prisonerSearchClient.getPrisoner("A1234BC")).thenReturn(prisoner(prisonId = "TRN", lastMovementTypeCode = "TRN"))
     assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({

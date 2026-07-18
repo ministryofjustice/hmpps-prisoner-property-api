@@ -75,9 +75,6 @@ data class PrisonerPropertyContainerDto(
 
   @Schema(description = "Id of the user who created the container", example = "AUSER_GEN")
   val createdByUserId: String,
-
-  @Schema(description = "Whether the container is archived (hidden from normal reads, e.g. NOMIS inactive containers)", example = "false")
-  val archived: Boolean,
 ) {
   companion object {
     fun from(
@@ -110,7 +107,6 @@ data class PrisonerPropertyContainerDto(
       removalDate = container.removalDate,
       createDateTime = container.createDateTime,
       createdByUserId = container.createdByUserId,
-      archived = container.archived,
     )
 
     /**
@@ -149,7 +145,6 @@ data class PrisonerPropertyContainerDto(
       removalDate = container.removalDate,
       createDateTime = container.createDateTime,
       createdByUserId = container.createdByUserId,
-      archived = container.archived,
     )
   }
 }

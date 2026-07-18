@@ -91,7 +91,7 @@ class PropertyContainerWriteService(
     val locationType = resolveLocationType(request.locationType, request.internalLocationId)
 
     val source = request.previousSealNumber?.let { previousSeal ->
-      repository.findByPrisonerNumberAndArchivedFalse(request.prisonerNumber).firstOrNull {
+      repository.findByPrisonerNumber(request.prisonerNumber).firstOrNull {
         !it.isRemoved() &&
           it.prisonId != request.prisonId &&
           it.currentSealNumber == previousSeal &&
@@ -386,7 +386,7 @@ class PropertyContainerWriteService(
   @Transactional
   fun prisonerReceived(prisonerNumber: String, newPrisonId: String): List<HmppsDomainEvent> {
     val now = LocalDateTime.now()
-    return repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber)
+    return repository.findByPrisonerNumber(prisonerNumber)
       .filter { !it.isRemoved() && it.prisonId != newPrisonId && !it.isAlreadyDueForTransferOut(newPrisonId) }
       .map { container ->
         container.events.add(
@@ -430,7 +430,7 @@ class PropertyContainerWriteService(
    */
   private fun flagDueForReturn(prisonerNumber: String, eventType: PropertyEventType): List<HmppsDomainEvent> {
     val now = LocalDateTime.now()
-    return repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber)
+    return repository.findByPrisonerNumber(prisonerNumber)
       .filter { !it.isRemoved() && it.baseStatus() != ContainerStatus.DUE_FOR_RETURN }
       .map { container ->
         container.events.add(

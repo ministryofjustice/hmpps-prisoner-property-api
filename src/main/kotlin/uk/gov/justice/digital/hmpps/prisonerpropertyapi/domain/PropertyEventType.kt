@@ -18,4 +18,9 @@ enum class PropertyEventType(val status: ContainerStatus, val carriesSeal: Boole
   DISPOSED(ContainerStatus.DISPOSED),
   COMBINED(ContainerStatus.COMBINED),
   CREATED_IN_ERROR(ContainerStatus.CREATED_IN_ERROR),
+
+  // Removed from the establishment with no recorded reason (a NOMIS "inactive" container), and its reversal:
+  // REACTIVATED brings a removed container back to active storage (STORED), re-deriving its location.
+  REMOVED(ContainerStatus.REMOVED),
+  REACTIVATED(ContainerStatus.STORED),
 }
