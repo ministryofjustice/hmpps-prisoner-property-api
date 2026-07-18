@@ -55,7 +55,7 @@ class PropertyContainerService(
     statuses: List<ContainerStatus> = emptyList(),
     sortDirection: Sort.Direction = Sort.Direction.DESC,
   ): List<PrisonerPropertyContainerDto> {
-    val containers = repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber)
+    val containers = repository.findByPrisonerNumber(prisonerNumber)
       .filter { statuses.isEmpty() || it.currentStatus() in statuses }
       .sortedWith(compareBy { it.lastUpdated() })
       .let { if (sortDirection.isDescending) it.reversed() else it }
@@ -104,7 +104,7 @@ class PropertyContainerService(
    */
   @Transactional(readOnly = true)
   fun getPrisonerPropertySummary(prisonerNumber: String): PrisonerPropertySummaryDto {
-    val containers = repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber)
+    val containers = repository.findByPrisonerNumber(prisonerNumber)
     val prisoner = prisonerSearchClient.getPrisoner(prisonerNumber)
     // The prisoner's real establishment: prisoner-search reports TRN/OUT while in transit or released - treat
     // those as no current establishment, so all their property counts as held "in other establishments".
@@ -272,7 +272,7 @@ class PropertyContainerService(
   }
 
   /**
-   * A prisoner's whole-property history: every event across all of their (non-archived) containers, interleaved
+   * A prisoner's whole-property history: every event across all of their containers, interleaved
    * newest first, plus a de-duplicated "arrived at ..." item for each prison the prisoner moved into and a
    * "property management started in DPS at ..." marker for each establishment they have held property at that is
    * switched on in DPS. Prison and location ids are resolved to names, and each container event carries the seal
@@ -282,7 +282,7 @@ class PropertyContainerService(
    */
   @Transactional(readOnly = true)
   fun getPrisonerTimeline(prisonerNumber: String): List<PrisonerTimelineItemDto> {
-    val containers = repository.findByPrisonerNumberAndArchivedFalse(prisonerNumber)
+    val containers = repository.findByPrisonerNumber(prisonerNumber)
     val prisonNames = prisonRegisterClient.getPrisonNames()
     val prisoner = prisonerSearchClient.getPrisoner(prisonerNumber)
     val prisonerName = prisoner.fullName()

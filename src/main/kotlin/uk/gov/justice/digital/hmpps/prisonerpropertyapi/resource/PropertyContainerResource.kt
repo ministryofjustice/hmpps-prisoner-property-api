@@ -303,7 +303,7 @@ class PropertyContainerResource(
   @Operation(
     summary = "Get a prisoner's whole-property history timeline, newest first",
     description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns a single interleaved timeline of every event " +
-      "across all of the prisoner's (non-archived) containers, newest first, plus a de-duplicated \"arrived at ...\" " +
+      "across all of the prisoner's containers, newest first, plus a de-duplicated \"arrived at ...\" " +
       "item for each prison the prisoner moved into. Prison and location ids are resolved to names, and each " +
       "container event carries the seal number and acting establishment as at that point in its history. Returns an " +
       "empty list if the prisoner has no property.",

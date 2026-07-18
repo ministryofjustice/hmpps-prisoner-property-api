@@ -55,10 +55,11 @@ class SyncPropertyContainerService(
       createDateTime = request.createDateTime,
       proposedDisposalDate = request.proposedDisposalDate,
     )
-    // NOMIS ACTIVE_FLAG='N' means the container has left storage: model it as disposed, dated by EXPIRY_DATE.
-    // An active container is never disposed, even if NOMIS carries a (possibly future) EXPIRY_DATE.
+    // NOMIS ACTIVE_FLAG='N' means the container has left the establishment, reason unknown: model it as REMOVED
+    // (a reversible removal), dated by EXPIRY_DATE. An active container is never removed, even if NOMIS carries a
+    // (possibly future) EXPIRY_DATE - that only drives the disposal-due date below.
     if (!request.active) {
-      container.removalOutcome = RemovalOutcome.DISPOSED
+      container.removalOutcome = RemovalOutcome.REMOVED
       container.removalDate = request.expiryDate
     }
     val disposalTime = request.modifyDateTime ?: request.createDateTime
@@ -82,7 +83,7 @@ class SyncPropertyContainerService(
       container.events.add(disposalRequiredEvent(container, request.proposedDisposalDate, disposalTime, request.createUsername))
     }
     if (!request.active) {
-      container.events.add(disposedEvent(container, request.expiryDate, disposalTime, request.createUsername))
+      container.events.add(removedEvent(container, request.expiryDate, disposalTime, request.createUsername))
     }
 
     container.refreshDerivedState()
@@ -143,21 +144,24 @@ class SyncPropertyContainerService(
       changed += "proposedDisposalDate"
     }
 
-    // Disposal follows NOMIS ACTIVE_FLAG: inactive -> disposed (dated by EXPIRY_DATE), reactivation clears it.
-    val wasDisposed = existing.removalOutcome == RemovalOutcome.DISPOSED
+    // Removal follows NOMIS ACTIVE_FLAG: inactive -> removed (dated by EXPIRY_DATE); reactivation clears the
+    // removal and records a REACTIVATED event so the history shows the container coming back to life (its
+    // location re-derives from the last location event, or a MOVED event NOMIS sends alongside reactivation).
+    val wasRemoved = existing.removalOutcome == RemovalOutcome.REMOVED
     if (!request.active) {
-      if (!wasDisposed || existing.removalDate != request.expiryDate) {
-        if (!wasDisposed) {
-          existing.events.add(disposedEvent(existing, request.expiryDate, now, user))
+      if (!wasRemoved || existing.removalDate != request.expiryDate) {
+        if (!wasRemoved) {
+          existing.events.add(removedEvent(existing, request.expiryDate, now, user))
         }
-        existing.removalOutcome = RemovalOutcome.DISPOSED
+        existing.removalOutcome = RemovalOutcome.REMOVED
         existing.removalDate = request.expiryDate
-        changed += "disposed"
+        changed += "removed"
       }
-    } else if (wasDisposed) {
+    } else if (wasRemoved) {
       existing.removalOutcome = null
       existing.removalDate = null
-      changed += "disposed"
+      existing.events.add(PropertyEvent(existing, PropertyEventType.REACTIVATED, now, user))
+      changed += "removed"
     }
 
     var event: HmppsDomainEvent? = null
@@ -173,7 +177,7 @@ class SyncPropertyContainerService(
 
   private fun disposalRequiredEvent(container: PropertyContainer, date: LocalDate, time: LocalDateTime, user: String) = PropertyEvent(container, PropertyEventType.DISPOSAL_REQUIRED, time, user, eventDate = date)
 
-  private fun disposedEvent(container: PropertyContainer, date: LocalDate?, time: LocalDateTime, user: String) = PropertyEvent(container, PropertyEventType.DISPOSED, time, user, eventDate = date)
+  private fun removedEvent(container: PropertyContainer, date: LocalDate?, time: LocalDateTime, user: String) = PropertyEvent(container, PropertyEventType.REMOVED, time, user, eventDate = date)
 }
 
 /**
