@@ -58,6 +58,23 @@ class PropertyContainerWriteService(
   }
 
   /**
+   * The storage location type to record for a create/move, from the [requested] type and whether an
+   * [internalLocationId] was given: an internal location always implies INTERNAL; an explicit BRANSTON (with no
+   * internal location) means offsite; anything else leaves the type unset. BRANSTON with an internal location is
+   * contradictory and rejected.
+   */
+  private fun resolveLocationType(requested: StorageLocationType?, internalLocationId: UUID?): StorageLocationType? {
+    if (requested == StorageLocationType.BRANSTON && internalLocationId != null) {
+      throw ValidationException("internalLocationId must not be set for Branston storage")
+    }
+    return when {
+      internalLocationId != null -> StorageLocationType.INTERNAL
+      requested == StorageLocationType.BRANSTON -> StorageLocationType.BRANSTON
+      else -> null
+    }
+  }
+
+  /**
    * Create a new sealed container. When [CreatePropertyContainerRequest.previousSealNumber] is supplied and
    * matches a container the same prisoner has due for transfer out at another prison, that container is the
    * property physically arriving here on transfer: it is linked to the new record and deactivated (TRANSFERRED)
@@ -68,6 +85,10 @@ class PropertyContainerWriteService(
   @Transactional
   fun create(request: CreatePropertyContainerRequest, username: String): CreateResult {
     requireValidLocation(request.internalLocationId)
+    // Where the container is stored: an internal prison location (given by internalLocationId), or offsite at
+    // Branston (BRANSTON, no internal location - used for excess property held offsite). INTERNAL is implied by
+    // an internalLocationId; a null type with no location is left unset (unknown location).
+    val locationType = resolveLocationType(request.locationType, request.internalLocationId)
 
     val source = request.previousSealNumber?.let { previousSeal ->
       repository.findByPrisonerNumberAndArchivedFalse(request.prisonerNumber).firstOrNull {
@@ -102,7 +123,7 @@ class PropertyContainerWriteService(
         eventUserId = username,
         sealNumber = request.sealNumber,
         toInternalLocationId = request.internalLocationId,
-        toStorageLocationType = request.internalLocationId?.let { StorageLocationType.INTERNAL },
+        toStorageLocationType = locationType,
         toPrisonId = request.prisonId,
         relatedContainerId = source?.id,
       ),
@@ -138,13 +159,21 @@ class PropertyContainerWriteService(
     val now = LocalDateTime.now()
     val changed = mutableListOf<String>()
 
+    if (request.locationType == StorageLocationType.BRANSTON && request.internalLocationId != null) {
+      throw ValidationException("internalLocationId must not be set for Branston storage")
+    }
+
     // Only a genuine move needs the target location validated. Re-checking a location the container is
     // already in would block edits to its seal/type/disposal date when that location is no longer a valid
     // property store - e.g. migrated data, or a designation removed or changed after the container was
     // placed there - trapping the container so it could not even be edited to move it out.
-    val movingLocation = request.internalLocationId != null &&
+    val movingToInternal = request.internalLocationId != null &&
       (container.currentLocationType() != StorageLocationType.INTERNAL || request.internalLocationId != container.currentLocation())
-    if (movingLocation) {
+    // A move offsite to Branston: requested explicitly and not already there. Excess property held offsite has
+    // no internal location, so this clears any internal location it was in.
+    val movingToBranston = request.locationType == StorageLocationType.BRANSTON &&
+      container.currentLocationType() != StorageLocationType.BRANSTON
+    if (movingToInternal) {
       requireValidLocation(request.internalLocationId, excludingContainerIds = setOf(id))
     }
 
@@ -163,7 +192,7 @@ class PropertyContainerWriteService(
       changed += "containerType"
     }
 
-    if (movingLocation) {
+    if (movingToInternal) {
       container.events.add(
         PropertyEvent(
           container,
@@ -173,6 +202,18 @@ class PropertyContainerWriteService(
           fromInternalLocationId = container.currentLocation(),
           toInternalLocationId = request.internalLocationId,
           toStorageLocationType = StorageLocationType.INTERNAL,
+        ),
+      )
+      changed += "location"
+    } else if (movingToBranston) {
+      container.events.add(
+        PropertyEvent(
+          container,
+          PropertyEventType.MOVED,
+          now,
+          username,
+          fromInternalLocationId = container.currentLocation(),
+          toStorageLocationType = StorageLocationType.BRANSTON,
         ),
       )
       changed += "location"
@@ -288,7 +329,7 @@ class PropertyContainerWriteService(
     )
     sources.forEach { source ->
       source.events.add(
-        PropertyEvent(source, PropertyEventType.COMBINED, now, username, eventDate = today, relatedContainerId = saved.id),
+        PropertyEvent(source, PropertyEventType.COMBINED, now, username, eventDate = today, relatedContainerId = saved.id, relatedContainerSealNumber = saved.currentSealNumber),
       )
       source.removalOutcome = RemovalOutcome.COMBINED
       source.removalDate = today

@@ -108,6 +108,39 @@ class PropertyContainerServiceTest {
   }
 
   @Test
+  fun `getByPrisonerNumber shows stored property as due for return from a day before the confirmed release date`() {
+    whenever(prisonerSearchClient.getPrisoner("A1234BC"))
+      .thenReturn(prisoner(prisonId = "LEI").copy(confirmedReleaseDate = LocalDate.now().plusDays(1)))
+    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+
+    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
+      assertThat(it.currentStatus).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+    })
+  }
+
+  @Test
+  fun `getByPrisonerNumber leaves stored property stored when the confirmed release date is further off`() {
+    whenever(prisonerSearchClient.getPrisoner("A1234BC"))
+      .thenReturn(prisoner(prisonId = "LEI").copy(confirmedReleaseDate = LocalDate.now().plusDays(5)))
+    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+
+    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
+      assertThat(it.currentStatus).isEqualTo(ContainerStatus.STORED)
+    })
+  }
+
+  @Test
+  fun `getByPrisonerNumber does not derive due for return once the prisoner has actually been released`() {
+    whenever(prisonerSearchClient.getPrisoner("A1234BC"))
+      .thenReturn(prisoner(prisonId = "OUT", lastMovementTypeCode = "REL").copy(confirmedReleaseDate = LocalDate.now().minusDays(1)))
+    whenever(repository.findByPrisonerNumberAndArchivedFalse("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+
+    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
+      assertThat(it.currentStatus).isEqualTo(ContainerStatus.STORED)
+    })
+  }
+
+  @Test
   fun `getByPrisonerNumber sorts by last-updated date in the requested direction`() {
     val older = containerAt("LEI", "OLD", eventTime = LocalDateTime.parse("2026-01-01T09:00:00"))
     val newer = containerAt("LEI", "NEW", eventTime = LocalDateTime.parse("2026-03-01T09:00:00"))
