@@ -66,8 +66,17 @@ class PropertyContainerService(
     val prisonNames = prisonRegisterClient.getPrisonNames()
     val locations = locationsClient.getLocations(containers.mapNotNull { it.currentLocation() })
 
+    // Surface stored property as due for return from a day before the prisoner's confirmed release date, so
+    // staff can prepare it ahead of release. Uses the confirmed date only (not the sentence-calculated one,
+    // which can move) and stops once actually released, when the real release event has already flagged it.
+    // A read-time display hint on this person view only - it does not change the stored status or the
+    // establishment list/summary counts.
+    val dueForReturnSoon = prisoner != null &&
+      prisoner.movementStatus() != PrisonerMovementStatus.RELEASED &&
+      prisoner.confirmedReleaseDate?.let { !it.isAfter(LocalDate.now().plusDays(1)) } == true
+
     return containers.map { container ->
-      PrisonerPropertyContainerDto.from(
+      val dto = PrisonerPropertyContainerDto.from(
         container = container,
         prisonerName = prisoner.fullName(),
         prisonName = prisonNames[container.prisonId],
@@ -77,6 +86,11 @@ class PropertyContainerService(
         locationDescription = container.currentLocation()?.let { locations[it]?.displayName() },
         inPrisonersCurrentPrison = prisoner?.prisonId == container.prisonId,
       )
+      if (dueForReturnSoon && dto.currentStatus == ContainerStatus.STORED) {
+        dto.copy(currentStatus = ContainerStatus.DUE_FOR_RETURN)
+      } else {
+        dto
+      }
     }
   }
 
