@@ -21,6 +21,7 @@ class PropertyContainerEventFactoryTest {
 
     assertThat(event.eventType).isEqualTo("prison-property.container.updated")
     assertThat(event.description).isEqualTo("A prisoner property container was synchronised from NOMIS")
+    assertThat(event.source).isEqualTo(PropertyEventSource.NOMIS)
     assertThat(event.prisonerNumber).isEqualTo("A1234BC")
     assertThat(event.additionalInformation).containsExactly(
       entry("dpsId", dpsId.toString()),
@@ -40,6 +41,7 @@ class PropertyContainerEventFactoryTest {
 
     assertThat(event.eventType).isEqualTo("prison-property.container.created")
     assertThat(event.description).isEqualTo("A prisoner property container was changed in DPS")
+    assertThat(event.source).isEqualTo(PropertyEventSource.DPS)
     assertThat(event.prisonerNumber).isEqualTo("A1234BC")
     assertThat(event.additionalInformation).containsExactly(
       entry("dpsId", dpsId.toString()),

@@ -22,12 +22,26 @@ class DomainEventPublisher(
       .topicArn(domainEventsTopic.arn)
       .message(objectMapper.writeValueAsString(event))
       .messageAttributes(
-        mapOf(
-          "eventType" to MessageAttributeValue.builder()
-            .dataType("String")
-            .stringValue(event.eventType)
-            .build(),
-        ),
+        buildMap {
+          put(
+            "eventType",
+            MessageAttributeValue.builder()
+              .dataType("String")
+              .stringValue(event.eventType)
+              .build(),
+          )
+          // Surface the originating system as an attribute so subscribers can filter (e.g. a sync-back
+          // ignoring NOMIS-origin events) via an SNS subscription filter policy rather than in code.
+          event.source?.let {
+            put(
+              "source",
+              MessageAttributeValue.builder()
+                .dataType("String")
+                .stringValue(it.name)
+                .build(),
+            )
+          }
+        },
       )
       .build()
 

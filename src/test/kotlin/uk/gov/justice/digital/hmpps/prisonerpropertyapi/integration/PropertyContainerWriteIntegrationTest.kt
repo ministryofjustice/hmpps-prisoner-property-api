@@ -27,6 +27,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerReque
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyEventSource
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
@@ -150,6 +151,7 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
     verify(domainEventPublisher).publish(
       check {
         assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+        assertThat(it.source).isEqualTo(PropertyEventSource.DPS)
         assertThat(it.additionalInformation?.get("changedFields")).isEqualTo(listOf("sealNumber"))
       },
     )
