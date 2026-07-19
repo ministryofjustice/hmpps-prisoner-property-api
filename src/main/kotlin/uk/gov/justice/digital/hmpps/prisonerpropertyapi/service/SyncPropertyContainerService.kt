@@ -155,13 +155,13 @@ class SyncPropertyContainerService(
         }
         existing.removalOutcome = RemovalOutcome.REMOVED
         existing.removalDate = request.expiryDate
-        changed += "removed"
+        changed += "removalOutcome"
       }
     } else if (wasRemoved) {
       existing.removalOutcome = null
       existing.removalDate = null
       existing.events.add(PropertyEvent(existing, PropertyEventType.REACTIVATED, now, user))
-      changed += "removed"
+      changed += "removalOutcome"
     }
 
     var event: HmppsDomainEvent? = null

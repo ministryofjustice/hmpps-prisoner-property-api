@@ -95,7 +95,7 @@ class SyncPropertyContainerServiceTest {
     assertThat(existing.removalDate).isEqualTo(LocalDate.parse("2026-09-15"))
     assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.REMOVED)
     assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
-    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("removed"))
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("removalOutcome"))
   }
 
   @Test
@@ -113,7 +113,7 @@ class SyncPropertyContainerServiceTest {
     assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.STORED)
     assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.REACTIVATED)
     @Suppress("UNCHECKED_CAST")
-    assertThat(result.event?.additionalInformation?.get("changedFields") as List<String>).contains("removed")
+    assertThat(result.event?.additionalInformation?.get("changedFields") as List<String>).contains("removalOutcome")
   }
 
   @Test
