@@ -69,18 +69,22 @@ class SyncPropertyContainerServiceTest {
     assertThat(saved.removalDate).isEqualTo(LocalDate.parse("2026-09-15"))
     assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.REMOVED)
     assertThat(saved.currentLocation()).isNull()
+    // A removed container ignores the NOMIS location entirely - it is not even recorded on the create event.
+    assertThat(saved.events.first { it.eventType == PropertyEventType.CREATED_SEALED }.toInternalLocationId).isNull()
     assertThat(saved.events.map { it.eventType }).contains(PropertyEventType.REMOVED)
   }
 
   @Test
-  fun `create inactive with no expiry date still removes with no removal date`() {
+  fun `create inactive with no expiry date dates the removal from the modify time`() {
     stubSaveAssigningId()
 
     service.sync(request(active = false, expiryDate = null))
 
     val saved = captureSaved()
     assertThat(saved.removalOutcome).isEqualTo(RemovalOutcome.REMOVED)
-    assertThat(saved.removalDate).isNull()
+    // EXPIRY_DATE is absent, so the removal date falls back to MODIFY_DATETIME's date.
+    assertThat(saved.removalDate).isEqualTo(MODIFY_TIME.toLocalDate())
+    assertThat(saved.events.first { it.eventType == PropertyEventType.REMOVED }.eventDate).isEqualTo(MODIFY_TIME.toLocalDate())
     assertThat(saved.currentStatus()).isEqualTo(ContainerStatus.REMOVED)
   }
 
@@ -111,9 +115,37 @@ class SyncPropertyContainerServiceTest {
     assertThat(existing.removalOutcome).isNull()
     assertThat(existing.removalDate).isNull()
     assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.STORED)
+    // The reactivation snapshot is active, so its location is applied (via a MOVED) as the container comes back.
+    assertThat(existing.currentLocation()).isEqualTo(LOCATION)
     assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.REACTIVATED)
     @Suppress("UNCHECKED_CAST")
     assertThat(result.event?.additionalInformation?.get("changedFields") as List<String>).contains("removalOutcome")
+  }
+
+  @Test
+  fun `reactivating a container that was removed with no location leaves it locationless`() {
+    val container = PropertyContainer(
+      prisonerNumber = "A1234BC",
+      prisonId = "LEI",
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "USER1",
+      createDateTime = CREATE_TIME,
+      currentSealNumber = "SEAL1",
+      id = UUID.randomUUID(),
+    )
+    // Created inactive: the sealed event carries no location, so there is nothing to re-derive on reactivation.
+    container.events.add(PropertyEvent(container, PropertyEventType.CREATED_SEALED, CREATE_TIME, "USER1", sealNumber = "SEAL1"))
+    container.removalOutcome = RemovalOutcome.REMOVED
+    container.removalDate = LocalDate.parse("2026-09-15")
+    container.refreshDerivedState()
+    whenever(repository.findById(container.id!!)).thenReturn(Optional.of(container))
+
+    service.sync(request(dpsId = container.id, active = true, internalLocationId = null))
+
+    assertThat(container.removalOutcome).isNull()
+    assertThat(container.currentStatus()).isEqualTo(ContainerStatus.STORED)
+    assertThat(container.currentLocation()).isNull()
+    assertThat(container.events.last().eventType).isEqualTo(PropertyEventType.REACTIVATED)
   }
 
   @Test

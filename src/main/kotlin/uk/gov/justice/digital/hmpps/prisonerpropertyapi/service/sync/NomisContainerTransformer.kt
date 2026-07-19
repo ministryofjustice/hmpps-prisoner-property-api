@@ -43,13 +43,15 @@ class NomisContainerTransformer {
   fun resolveSeal(nomisPropertyContainerId: Long, sealMark: String?): String = sealMark?.takeIf { it.isNotBlank() } ?: "$MISSING_SEAL_PREFIX$nomisPropertyContainerId"
 
   /**
-   * Resolves the storage location. A 'Branston Storage' container is held offsite at the Branston
-   * warehouse with no internal location id. Any other container with an internal location id is held
-   * at that internal prison location. A container with neither has no recorded location (null).
+   * Resolves the storage location. An internal location id, when present, always wins: the container is
+   * held at that internal prison location - including a 'Branston Storage' (EXCESS) container, which may be
+   * held offsite *or* at a prison location (the type and the location are independent). A 'Branston Storage'
+   * container with no internal location id is held offsite at the Branston warehouse. A container with
+   * neither has no recorded location (null).
    */
   fun resolveLocation(request: SyncPropertyContainerRequest): ResolvedLocation? = when {
-    request.containerCode == NomisContainerCode.BRANSTON_STORAGE -> ResolvedLocation(StorageLocationType.BRANSTON, null)
     request.internalLocationId != null -> ResolvedLocation(StorageLocationType.INTERNAL, request.internalLocationId)
+    request.containerCode == NomisContainerCode.BRANSTON_STORAGE -> ResolvedLocation(StorageLocationType.BRANSTON, null)
     else -> null
   }
 
