@@ -54,6 +54,15 @@ class NomisContainerTransformerTest {
   }
 
   @Test
+  fun `resolves an internal location for a Branston Storage container held at a prison location`() {
+    // Excess property may be held at a prison location as well as offsite: an internal location wins over Branston.
+    val location = transformer.resolveLocation(request(NomisContainerCode.BRANSTON_STORAGE, internalLocationId = INTERNAL_LOCATION))
+
+    assertThat(location?.type).isEqualTo(StorageLocationType.INTERNAL)
+    assertThat(location?.internalLocationId).isEqualTo(INTERNAL_LOCATION)
+  }
+
+  @Test
   fun `resolves no location when a non-Branston container has no internal location`() {
     assertThat(transformer.resolveLocation(request(NomisContainerCode.BULK, internalLocationId = null))).isNull()
   }

@@ -125,6 +125,7 @@ NOMIS sync services above.
 | [Architecture](docs/architecture.md) | The whole service — both repos, diagrams, messaging, domain model. |
 | [Technical implementation](docs/technical-implementation.md) | This API's internals: packages, patterns, dependencies. |
 | [Establishment summary counts](docs/establishment-summary-counts.md) | How the summary tiles are counted. |
+| [Operational runbooks](docs/runbook.md) | One-off/coordinated operational procedures (migrations, backfills). |
 | [Property returned or transferred tab](docs/property-returned-or-transferred-tab.md) | Roadmap item — not built. |
 
 ## Tech stack

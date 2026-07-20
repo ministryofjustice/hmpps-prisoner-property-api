@@ -109,6 +109,20 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `deactivating a container with no expiry date dates the removal from the modify time`() {
+    val created = upsert(request())
+
+    // NOMIS often leaves EXPIRY_DATE null on inactive rows, so the removal date falls back to MODIFY_DATETIME.
+    upsert(request(dpsId = created.dpsId, active = false, expiryDate = null))
+
+    getById(created.dpsId)
+      .jsonPath("$.currentStatus").isEqualTo("REMOVED")
+      .jsonPath("$.removalOutcome").isEqualTo("REMOVED")
+      .jsonPath("$.removalDate").isEqualTo("2026-02-01")
+      .jsonPath("$.currentLocation").doesNotExist()
+  }
+
+  @Test
   fun `reactivating a removed container restores it to stored and records the history`() {
     val created = upsert(request())
     upsert(request(dpsId = created.dpsId, active = false, expiryDate = LocalDate.parse("2026-09-15")))

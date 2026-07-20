@@ -55,16 +55,22 @@ class SyncPropertyContainerService(
       createDateTime = request.createDateTime,
       proposedDisposalDate = request.proposedDisposalDate,
     )
+    val disposalTime = request.modifyDateTime ?: request.createDateTime
     // NOMIS ACTIVE_FLAG='N' means the container has left the establishment, reason unknown: model it as REMOVED
-    // (a reversible removal), dated by EXPIRY_DATE. An active container is never removed, even if NOMIS carries a
-    // (possibly future) EXPIRY_DATE - that only drives the disposal-due date below.
+    // (a reversible removal). The removal date is EXPIRY_DATE when set, but that is often absent on inactive
+    // NOMIS rows, so fall back to the modify time (which matches EXPIRY_DATE on rows that carry both). An active
+    // container is never removed, even if NOMIS carries a (possibly future) EXPIRY_DATE - that only drives the
+    // disposal-due date below.
+    val removalDate = request.expiryDate ?: disposalTime.toLocalDate()
     if (!request.active) {
       container.removalOutcome = RemovalOutcome.REMOVED
-      container.removalDate = request.expiryDate
+      container.removalDate = removalDate
     }
-    val disposalTime = request.modifyDateTime ?: request.createDateTime
 
-    val location = transformer.resolveLocation(request)
+    // A removed container has left the establishment, so ignore any (often stale) NOMIS location: it must not
+    // occupy a storage slot, and a later reactivation is re-allocated a fresh location rather than silently
+    // re-deriving this one.
+    val location = if (request.active) transformer.resolveLocation(request) else null
     val seal = transformer.resolveSeal(request.nomisPropertyContainerId, request.sealMark)
     container.currentSealNumber = seal
     container.events.add(
@@ -83,7 +89,7 @@ class SyncPropertyContainerService(
       container.events.add(disposalRequiredEvent(container, request.proposedDisposalDate, disposalTime, request.createUsername))
     }
     if (!request.active) {
-      container.events.add(removedEvent(container, request.expiryDate, disposalTime, request.createUsername))
+      container.events.add(removedEvent(container, removalDate, disposalTime, request.createUsername))
     }
 
     container.refreshDerivedState()
@@ -118,7 +124,10 @@ class SyncPropertyContainerService(
       changed += "containerType"
     }
 
-    val incomingLocation = transformer.resolveLocation(request)
+    // Ignore the NOMIS location while the container is inactive (removed) - it must not occupy a storage slot.
+    // On reactivation the snapshot is active again, so the new location is applied here before the removal is
+    // cleared below.
+    val incomingLocation = if (request.active) transformer.resolveLocation(request) else null
     if (incomingLocation != null &&
       (incomingLocation.type != existing.currentLocationType() || incomingLocation.internalLocationId != existing.currentLocation())
     ) {
@@ -144,24 +153,26 @@ class SyncPropertyContainerService(
       changed += "proposedDisposalDate"
     }
 
-    // Removal follows NOMIS ACTIVE_FLAG: inactive -> removed (dated by EXPIRY_DATE); reactivation clears the
-    // removal and records a REACTIVATED event so the history shows the container coming back to life (its
-    // location re-derives from the last location event, or a MOVED event NOMIS sends alongside reactivation).
+    // Removal follows NOMIS ACTIVE_FLAG: inactive -> removed (dated by EXPIRY_DATE, or the modify time when
+    // EXPIRY_DATE is absent); reactivation clears the removal and records a REACTIVATED event so the history
+    // shows the container coming back to life (its location comes from the MOVED event NOMIS sends alongside
+    // reactivation, or the last location event if it had one before removal).
+    val resolvedRemovalDate = request.expiryDate ?: now.toLocalDate()
     val wasRemoved = existing.removalOutcome == RemovalOutcome.REMOVED
     if (!request.active) {
-      if (!wasRemoved || existing.removalDate != request.expiryDate) {
+      if (!wasRemoved || existing.removalDate != resolvedRemovalDate) {
         if (!wasRemoved) {
-          existing.events.add(removedEvent(existing, request.expiryDate, now, user))
+          existing.events.add(removedEvent(existing, resolvedRemovalDate, now, user))
         }
         existing.removalOutcome = RemovalOutcome.REMOVED
-        existing.removalDate = request.expiryDate
-        changed += "removed"
+        existing.removalDate = resolvedRemovalDate
+        changed += "removalOutcome"
       }
     } else if (wasRemoved) {
       existing.removalOutcome = null
       existing.removalDate = null
       existing.events.add(PropertyEvent(existing, PropertyEventType.REACTIVATED, now, user))
-      changed += "removed"
+      changed += "removalOutcome"
     }
 
     var event: HmppsDomainEvent? = null

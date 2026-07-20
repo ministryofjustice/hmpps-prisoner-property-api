@@ -41,7 +41,9 @@ data class SyncPropertyContainerRequest(
 
   @Schema(
     description = "DPS locations-inside-prison-api location UUID for NOMIS INTERNAL_LOCATION_ID, resolved by the caller. " +
-      "Null if NOMIS had no location, or for 'Branston Storage' containers which are held offsite with no internal location.",
+      "Null if NOMIS had no location. Send it whenever NOMIS has one, including for 'Branston Storage' containers: " +
+      "they are excess property that may be held at a prison location as well as offsite, so a non-null value places " +
+      "them at that internal location and a null value leaves them offsite at Branston.",
     example = "11111111-1111-1111-1111-111111111111",
     nullable = true,
   )
@@ -54,9 +56,10 @@ data class SyncPropertyContainerRequest(
   val proposedDisposalDate: LocalDate? = null,
 
   @Schema(
-    description = "NOMIS EXPIRY_DATE - the date the container became inactive. Used as the disposal/removal date " +
-      "only when the container is inactive (active=false); it may be a future planned date while still active, " +
-      "in which case it does not dispose the container.",
+    description = "NOMIS EXPIRY_DATE - the date the container became inactive. Used as the removal date only " +
+      "when the container is inactive (active=false), falling back to MODIFY_DATETIME's date when EXPIRY_DATE " +
+      "is absent (it is often null on inactive rows). While the container is active it may be a future planned " +
+      "date, in which case it does not remove the container.",
     example = "2026-09-15",
     nullable = true,
   )
@@ -76,8 +79,10 @@ data class SyncPropertyContainerRequest(
   val modifyUsername: String? = null,
 
   @Schema(
-    description = "NOMIS ACTIVE_FLAG. False (inactive) means the container has left storage and is recorded as " +
-      "disposed (dated by EXPIRY_DATE); it remains visible with a disposed status.",
+    description = "NOMIS ACTIVE_FLAG. False (inactive) means the container has left the establishment, reason " +
+      "unknown, and is recorded as removed (a reversible outcome, dated by EXPIRY_DATE or the modify date); its " +
+      "location is cleared and it remains visible with a removed status. Reactivating it (active=true) clears " +
+      "the removal.",
     example = "true",
     defaultValue = "true",
   )
