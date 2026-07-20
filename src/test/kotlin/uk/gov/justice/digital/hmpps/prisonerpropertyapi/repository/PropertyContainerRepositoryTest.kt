@@ -129,8 +129,14 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `includeRemoved surfaces returned and disposed containers alongside active ones`() {
+  fun `includeRemoved surfaces removed, returned and disposed containers alongside active ones`() {
     saveActive("A0001AA", "ACTIVE")
+    saveActive("A0001AA", "GONE-REMOVED").apply {
+      removalOutcome = RemovalOutcome.REMOVED
+      removalDate = LocalDate.parse("2026-02-01")
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
     saveActive("A0001AA", "GONE-DISPOSED").apply {
       removalOutcome = RemovalOutcome.DISPOSED
       removalDate = LocalDate.parse("2026-02-01")
@@ -156,12 +162,14 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
       containerRepository.save(this)
     }
 
-    // Default hides everything removed; includeRemoved brings back returned/disposed only
-    // (not transferred, and never created-in-error which lives only in the person-view history).
+    // Default hides everything that has left active storage; includeRemoved brings back the property still
+    // accounted for here - removed/returned/disposed - but not transferred (now another prison's property)
+    // and never created-in-error, which lives only in the person-view history.
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(), listOf("A0001AA")))
       .extracting<String> { it.currentSealNumber }.containsExactly("ACTIVE")
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(includeRemoved = true), listOf("A0001AA")))
-      .extracting<String> { it.currentSealNumber }.containsExactlyInAnyOrder("ACTIVE", "GONE-DISPOSED", "GONE-RETURNED")
+      .extracting<String> { it.currentSealNumber }
+      .containsExactlyInAnyOrder("ACTIVE", "GONE-REMOVED", "GONE-DISPOSED", "GONE-RETURNED")
   }
 
   @Test

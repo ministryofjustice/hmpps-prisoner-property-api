@@ -9,8 +9,10 @@ import java.util.UUID
  * @param containerTypes when set, matches any of these container types; empty leaves the type unfiltered.
  * @param statuses when empty the list hides containers that have left active storage (removed); when set
  *   it matches exactly those statuses, so a removed status can be requested explicitly.
- * @param includeRemoved when true, returned/disposed containers are also included (in addition to
- *   whatever [statuses] selects). When false, removed containers are hidden as before.
+ * @param includeRemoved when true, removed/returned/disposed containers are also included (in addition to
+ *   whatever [statuses] selects). Transferred, combined and created-in-error are deliberately left out:
+ *   they are no longer this establishment's property or are bookkeeping rows. When false, containers that
+ *   have left active storage are hidden.
  * @param locationIds the internal location ids a searched storage-location code resolved to. Null means no
  *   location filter; an empty list means the code matched no location, so nothing should be returned.
  * @param branstonOnly restrict to containers held offsite at Branston (takes precedence over [locationIds]).

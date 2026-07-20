@@ -215,7 +215,7 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `includeRemoved surfaces returned and disposed containers alongside active ones`() {
+  fun `includeRemoved surfaces removed, returned and disposed containers alongside active ones`() {
     hmppsAuth.stubGrantToken()
     prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
     prisonRegister.stubGetPrisons()
@@ -226,8 +226,14 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
         removalDate = baseTime.toLocalDate()
       },
     )
+    repository.save(
+      containerWithStatus("SEAL-REMOVED") {
+        removalOutcome = RemovalOutcome.REMOVED
+        removalDate = baseTime.toLocalDate()
+      },
+    )
 
-    // default hides the disposed container
+    // default hides the disposed and removed containers
     webTestClient.get().uri("/property-containers/prison/LEI")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
@@ -235,13 +241,14 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .expectBody()
       .jsonPath("$.content[0].containers.length()").isEqualTo(1)
 
-    // includeRemoved brings it back alongside the active one
+    // includeRemoved brings them both back alongside the active one
     webTestClient.get().uri("/property-containers/prison/LEI?includeRemoved=true")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$.content[0].containers.length()").isEqualTo(2)
+      .jsonPath("$.content[0].containers.length()").isEqualTo(3)
+      .jsonPath("$.content[0].containers[?(@.currentSealNumber == 'SEAL-REMOVED')].currentStatus").isEqualTo("REMOVED")
   }
 
   @Test
