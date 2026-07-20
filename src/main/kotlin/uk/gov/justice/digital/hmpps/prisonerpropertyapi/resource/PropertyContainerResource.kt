@@ -148,7 +148,7 @@ class PropertyContainerResource(
       "(locations-inside-prison-api). Optionally filtered by a free-text query (prisoner number, seal number or " +
       "storage location), prisoner number, seal number, container type(s), status and storage location. With no " +
       "status filter, containers that have left active storage (disposed, returned, transferred, combined) are " +
-      "hidden; pass a status filter, or includeRemoved=true to also surface returned/disposed containers. Set " +
+      "hidden; pass a status filter, or includeRemoved=true to also surface removed/returned/disposed containers. Set " +
       "dueForTransferIn=true to additionally surface property held at another prison that is due to be " +
       "transferred in to this establishment (its owner was received here). Use the standard page, size and sort " +
       "query parameters for pagination.",
@@ -182,7 +182,7 @@ class PropertyContainerResource(
     @Parameter(description = "Filter to a storage location code (e.g. PB5638), or BRANSTON for offsite storage", example = "PB5638")
     @RequestParam(required = false)
     storageLocation: String?,
-    @Parameter(description = "Also include containers that have been returned or disposed of", example = "false")
+    @Parameter(description = "Also include containers that have been removed, returned or disposed of", example = "false")
     @RequestParam(required = false, defaultValue = "false")
     includeRemoved: Boolean,
     @Parameter(description = "Filter by where the property's owner currently is: IN_ESTABLISHMENT (people held here) or LEFT_ESTABLISHMENT (people no longer here). Resolved from prisoner-search.", example = "IN_ESTABLISHMENT")

@@ -100,14 +100,16 @@ class PropertyContainerRepositoryImpl(
   /**
    * Predicate for containers physically held at [prisonId], with the status and storage-location filters
    * applied. No status filter hides containers that have left active storage; an explicit filter matches
-   * exactly. includeRemoved additionally surfaces returned/disposed containers alongside either selection.
+   * exactly. includeRemoved additionally surfaces removed/returned/disposed containers alongside either
+   * selection (transferred, combined and created-in-error stay hidden - they live in the person view).
    * DISPOSAL_REQUIRED is time-based (not held in the denormalised column), so it matches on the proposed
    * disposal date having arisen rather than on currentStatusValue.
    */
   private fun heldHereScope(cb: CriteriaBuilder, root: Root<PropertyContainer>, prisonId: String, filter: PrisonPropertyFilter): Predicate {
     val parts = mutableListOf<Predicate>(cb.equal(root.get<String>("prisonId"), prisonId))
 
-    val returnedOrDisposed = root.get<RemovalOutcome>("removalOutcome").`in`(RemovalOutcome.RETURNED, RemovalOutcome.DISPOSED)
+    val noLongerHeld = root.get<RemovalOutcome>("removalOutcome")
+      .`in`(RemovalOutcome.REMOVED, RemovalOutcome.RETURNED, RemovalOutcome.DISPOSED)
     val statusPredicate = if (filter.statuses.isEmpty()) {
       cb.isNull(root.get<RemovalOutcome>("removalOutcome"))
     } else {
@@ -122,7 +124,7 @@ class PropertyContainerRepositoryImpl(
       }
       cb.or(*statusParts.toTypedArray())
     }
-    parts += if (filter.includeRemoved) cb.or(statusPredicate, returnedOrDisposed) else statusPredicate
+    parts += if (filter.includeRemoved) cb.or(statusPredicate, noLongerHeld) else statusPredicate
 
     when {
       filter.branstonOnly -> parts += cb.equal(root.get<StorageLocationType>("currentStorageLocationType"), StorageLocationType.BRANSTON)
