@@ -111,6 +111,9 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
 
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(sealNumber = "SEAL-X"), listOf("A0001AA")))
       .singleElement().extracting { it.id }.isEqualTo(a.id)
+    // Seal-number matching is case-insensitive.
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(sealNumber = "seal-x"), listOf("A0001AA")))
+      .singleElement().extracting { it.id }.isEqualTo(a.id)
     // A single type matches only that type; multiple types match any of them.
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(containerTypes = listOf(ContainerType.VALUABLES)), listOf("A0001AA")))
       .singleElement().extracting { it.id }.isEqualTo(a.id)
@@ -233,6 +236,9 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
     val prisoners = listOf("A0001AA")
 
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(search = "SN-FIND-ME"), prisoners))
+      .singleElement().extracting { it.id }.isEqualTo(bySeal.id)
+    // seal-number match is case-insensitive.
+    assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(search = "sn-find-me"), prisoners))
       .singleElement().extracting { it.id }.isEqualTo(bySeal.id)
     // prisoner-number match is case-insensitive (the term is upper-cased before comparison).
     assertThat(containerRepository.findContainers("LEI", PrisonPropertyFilter(search = "a0001aa"), prisoners))

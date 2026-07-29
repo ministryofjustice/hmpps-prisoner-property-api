@@ -71,14 +71,15 @@ class PropertyContainerRepositoryImpl(
     // Filters that apply to every row regardless of scope (held here vs due to transfer in).
     val predicates = mutableListOf<Predicate>()
     filter.prisonerNumber?.let { predicates += cb.equal(root.get<String>("prisonerNumber"), it) }
-    filter.sealNumber?.let { predicates += cb.equal(root.get<String>("currentSealNumber"), it) }
+    // Seal numbers are matched case-insensitively (staff shouldn't have to reproduce the exact case).
+    filter.sealNumber?.let { predicates += cb.equal(cb.lower(root.get<String>("currentSealNumber")), it.lowercase()) }
     if (filter.containerTypes.isNotEmpty()) predicates += root.get<ContainerType>("containerType").`in`(filter.containerTypes)
 
     // Free-text search matches (OR) prisoner number, seal number, or the term's resolved storage location.
     filter.search?.let { term ->
       val matches = mutableListOf(
         cb.equal(root.get<String>("prisonerNumber"), term.uppercase()),
-        cb.equal(root.get<String>("currentSealNumber"), term),
+        cb.equal(cb.lower(root.get<String>("currentSealNumber")), term.lowercase()),
       )
       if (filter.searchBranston) matches += cb.equal(root.get<StorageLocationType>("currentStorageLocationType"), StorageLocationType.BRANSTON)
       if (filter.searchLocationIds.isNotEmpty()) matches += root.get<UUID>("currentInternalLocationId").`in`(filter.searchLocationIds)
