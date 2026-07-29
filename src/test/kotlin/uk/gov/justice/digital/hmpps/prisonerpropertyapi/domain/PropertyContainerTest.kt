@@ -4,6 +4,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.util.UUID
 
 class PropertyContainerTest {
 
@@ -82,7 +83,7 @@ class PropertyContainerTest {
   }
 
   @Test
-  fun `receiving prison is the destination while due for transfer out, cleared once transferred`() {
+  fun `receiving prison is the destination while incoming, cleared once reconciled`() {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
       prisonId = "LEI",
@@ -103,9 +104,18 @@ class PropertyContainerTest {
     assertThat(container.receivingPrison()).isEqualTo("MDI")
     assertThat(container.receivingPrisonId).isEqualTo("MDI")
 
-    // Transferred out to MDI: no longer due for transfer, so the receiving prison is cleared.
-    container.events.add(PropertyEvent(container, PropertyEventType.TRANSFERRED, BASE_TIME.plusDays(2), "USER1", fromPrisonId = "LEI", toPrisonId = "MDI"))
-    container.prisonId = "MDI"
+    // Transferred out to MDI (two-record model): removed as TRANSFERRED, prison unchanged. Still incoming
+    // and awaiting at MDI until the receiving prison logs its arrival.
+    val transfer = PropertyEvent(container, PropertyEventType.TRANSFERRED, BASE_TIME.plusDays(2), "USER1", fromPrisonId = "LEI", toPrisonId = "MDI")
+    container.events.add(transfer)
+    container.removalOutcome = RemovalOutcome.TRANSFERRED
+    container.refreshDerivedState()
+    assertThat(container.prisonId).isEqualTo("LEI")
+    assertThat(container.receivingPrison()).isEqualTo("MDI")
+    assertThat(container.receivingPrisonId).isEqualTo("MDI")
+
+    // Reconciled once the receiving prison creates the destination record (the transfer event is linked).
+    transfer.relatedContainerId = UUID.randomUUID()
     container.refreshDerivedState()
     assertThat(container.receivingPrison()).isNull()
     assertThat(container.receivingPrisonId).isNull()

@@ -316,7 +316,7 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `transferring reassigns a container to the receiving prison and keeps it active`() {
+  fun `transferring marks a container transferred out without reassigning its prison`() {
     val id = repository.save(seedContainer()).id!!
 
     webTestClient.post().uri("/property-containers/{id}/remove", id)
@@ -325,17 +325,17 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$.prisonId").isEqualTo("MDI")
-      .jsonPath("$.currentStatus").isEqualTo("STORED")
-      .jsonPath("$.removalOutcome").doesNotExist()
+      .jsonPath("$.prisonId").isEqualTo("LEI")
+      .jsonPath("$.currentStatus").isEqualTo("TRANSFER")
+      .jsonPath("$.removalOutcome").isEqualTo("TRANSFERRED")
       .jsonPath("$.currentLocation").doesNotExist()
 
-    // reassigned to the receiving prison, still active, location cleared
+    // removed as transferred at the sending prison; prison unchanged, still awaiting reconciliation at MDI
     val transferred = repository.findById(id).get()
-    assertThat(transferred.prisonId).isEqualTo("MDI")
-    assertThat(transferred.removalOutcome).isNull()
-    assertThat(transferred.currentStatusValue).isEqualTo(ContainerStatus.STORED)
-    assertThat(transferred.currentInternalLocationId).isNull()
+    assertThat(transferred.prisonId).isEqualTo("LEI")
+    assertThat(transferred.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+    assertThat(transferred.currentStatusValue).isEqualTo(ContainerStatus.TRANSFER)
+    assertThat(transferred.receivingPrisonId).isEqualTo("MDI")
     assertThat(transferred.events.last().eventType).isEqualTo(PropertyEventType.TRANSFERRED)
   }
 

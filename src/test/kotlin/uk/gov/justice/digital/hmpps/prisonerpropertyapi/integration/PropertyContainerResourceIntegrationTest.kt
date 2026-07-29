@@ -1091,15 +1091,15 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   /**
-   * A second container for A1234BC that has been transferred out via the remove endpoint: created and sealed at
-   * Leeds, flagged due for transfer out when the prisoner was received at Moorland, then transferred out to
-   * Moorland - so (like the real transferTo path) its current prisonId is now MDI, even though its earlier events
-   * happened at Leeds. Later-dated than [seedContainer] so its events sort to the top of the timeline.
+   * A second container for A1234BC transferred out via the remove endpoint (two-record model): created and
+   * sealed at Leeds, flagged due for transfer out when the prisoner was received at Moorland, then removed as
+   * TRANSFERRED to Moorland - its prisonId stays Leeds (the sending prison) and it is not yet reconciled.
+   * Later-dated than [seedContainer] so its events sort to the top of the timeline.
    */
   private fun transferredContainer(): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
-      prisonId = "MDI",
+      prisonId = "LEI",
       containerType = ContainerType.VALUABLES,
       createdByUserId = "USER1",
       currentSealNumber = "SN880032",
@@ -1113,6 +1113,8 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     container.events.add(
       PropertyEvent(container, PropertyEventType.TRANSFERRED, baseTime.plusDays(3), "USER2", eventDate = baseTime.plusDays(3).toLocalDate(), fromPrisonId = "LEI", toPrisonId = "MDI"),
     )
+    container.removalOutcome = RemovalOutcome.TRANSFERRED
+    container.removalDate = baseTime.plusDays(3).toLocalDate()
     container.refreshDerivedState()
     return container
   }

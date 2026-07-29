@@ -99,8 +99,8 @@ class PropertyContainer(
    * The current status. A removal outcome takes precedence over the latest event so that a later
    * correction (e.g. a seal fix) does not "un-remove" the container; otherwise DISPOSAL_REQUIRED once
    * the proposed disposal date has arisen (see [isDisposalDue]), else it derives from the most recent
-   * event (defaulting to STORED before any event). A live (non-removed) container never shows TRANSFER:
-   * after a transfer-out reassigns its holding prison, it is active and STORED at the receiving prison.
+   * event (defaulting to STORED before any event). A live (non-removed) container never shows TRANSFER;
+   * a transfer-out removes the container (outcome TRANSFERRED) and the receiving prison holds a separate record.
    */
   fun currentStatus(): ContainerStatus = when {
     removalOutcome != null -> removalOutcome!!.status
@@ -127,15 +127,26 @@ class PropertyContainer(
     ?.eventType?.status?.takeUnless { it == ContainerStatus.TRANSFER } ?: ContainerStatus.STORED
 
   /**
-   * The prison this container is due to be transferred in to, when it is currently due for transfer out:
-   * the destination recorded on the latest event (the PRISONER_RECEIVED that flagged it). Null for any
-   * container not due for transfer out. Denormalised into [receivingPrisonId] for the establishment list.
+   * The prison this container is due to be transferred in to (denormalised into [receivingPrisonId] for
+   * the establishment list), or null when it is not incoming anywhere. Two cases carry a destination:
+   *  - due for transfer out: the owner has moved but the property is still here - the destination is on
+   *    the latest event (the PRISONER_RECEIVED that flagged it);
+   *  - transferred out but not yet reconciled: the sending prison has marked it TRANSFERRED, but the
+   *    receiving prison has not yet logged the arrival (the TRANSFERRED event has no related container) -
+   *    the destination is on that TRANSFERRED event, so it still shows as awaiting at the receiving prison.
+   * Once reconciled (the TRANSFERRED event gains a related container id) it is null again.
    */
-  fun receivingPrison(): String? = if (baseStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT) {
-    events.maxByOrNull { it.eventDateTime }?.toPrisonId
-  } else {
-    null
+  fun receivingPrison(): String? = when {
+    baseStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT -> events.maxByOrNull { it.eventDateTime }?.toPrisonId
+    removalOutcome == RemovalOutcome.TRANSFERRED ->
+      latestTransferEvent()?.takeIf { it.relatedContainerId == null }?.toPrisonId
+    else -> null
   }
+
+  /** The most recent TRANSFERRED event, used to derive the destination and reconciled state of a transfer. */
+  fun latestTransferEvent(): PropertyEvent? = events
+    .filter { it.eventType == PropertyEventType.TRANSFERRED }
+    .maxByOrNull { it.eventDateTime }
 
   /**
    * The current internal location id, from the most recent location-affecting event. Null when the

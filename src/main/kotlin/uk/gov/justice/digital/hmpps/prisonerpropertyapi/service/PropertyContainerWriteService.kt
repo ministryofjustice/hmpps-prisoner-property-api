@@ -90,12 +90,17 @@ class PropertyContainerWriteService(
     // an internalLocationId; a null type with no location is left unset (unknown location).
     val locationType = resolveLocationType(request.locationType, request.internalLocationId)
 
+    // The property physically arriving here on transfer: the prisoner's container at another prison with
+    // this previous seal that is either still due for transfer out, or already transferred out to here by
+    // the sending prison but not yet reconciled (so this add is what reconciles it).
     val source = request.previousSealNumber?.let { previousSeal ->
-      repository.findByPrisonerNumber(request.prisonerNumber).firstOrNull {
-        !it.isRemoved() &&
-          it.prisonId != request.prisonId &&
-          it.currentSealNumber == previousSeal &&
-          it.currentStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT
+      repository.findByPrisonerNumber(request.prisonerNumber).firstOrNull { candidate ->
+        candidate.prisonId != request.prisonId &&
+          candidate.currentSealNumber == previousSeal &&
+          (
+            (!candidate.isRemoved() && candidate.currentStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT) ||
+              (candidate.removalOutcome == RemovalOutcome.TRANSFERRED && candidate.receivingPrison() == request.prisonId)
+            )
       }
     }
 
@@ -141,13 +146,23 @@ class PropertyContainerWriteService(
     )
 
     source?.let {
-      it.events.add(
-        PropertyEvent(it, PropertyEventType.TRANSFERRED, now, username, eventDate = LocalDate.now(), fromPrisonId = it.prisonId, toPrisonId = request.prisonId, relatedContainerId = saved.id),
-      )
-      it.removalOutcome = RemovalOutcome.TRANSFERRED
-      it.removalDate = LocalDate.now()
-      it.refreshDerivedState()
-      events += PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, it.id!!, it.prisonerNumber, listOf("removalOutcome"))
+      val changedField = if (it.isRemoved()) {
+        // Already transferred out by the sending prison: reconcile by linking its TRANSFERRED event to this
+        // new record, so it stops surfacing as awaiting at this prison. It is already removed - don't re-remove.
+        it.latestTransferEvent()?.relatedContainerId = saved.id
+        it.refreshDerivedState()
+        "receivingPrisonId"
+      } else {
+        // Still due for transfer out: mark it transferred out and linked to this new record in one step.
+        it.events.add(
+          PropertyEvent(it, PropertyEventType.TRANSFERRED, now, username, eventDate = LocalDate.now(), fromPrisonId = it.prisonId, toPrisonId = request.prisonId, relatedContainerId = saved.id),
+        )
+        it.removalOutcome = RemovalOutcome.TRANSFERRED
+        it.removalDate = LocalDate.now()
+        it.refreshDerivedState()
+        "removalOutcome"
+      }
+      events += PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, it.id!!, it.prisonerNumber, listOf(changedField))
     }
 
     return CreateResult(PropertyContainerDto.from(saved), events)
@@ -249,9 +264,9 @@ class PropertyContainerWriteService(
   /**
    * Remove a container from active storage for a given [RemovalOutcome.RETURNED], [RemovalOutcome.DISPOSED],
    * [RemovalOutcome.CREATED_IN_ERROR], or [RemovalOutcome.TRANSFERRED]. Returned/disposed/created-in-error are
-   * terminal (the container leaves active storage and its location and seal are freed). Transferred is a
-   * hand-off: the container stays active but its holding prison is reassigned to the receiving prison
-   * (see [transferTo]) so responsibility moves with the property. COMBINED is not accepted here - use combine.
+   * terminal (the container leaves active storage and its location and seal are freed). Transferred also
+   * removes it from the sending prison (see [transferTo]) but records the destination and is later
+   * reconciled against the record the receiving prison creates. COMBINED is not accepted here - use combine.
    */
   @Transactional
   fun remove(id: UUID, request: RemoveContainerRequest, username: String): WriteResult {
@@ -448,18 +463,22 @@ class PropertyContainerWriteService(
   }
 
   /**
-   * Transfer a container to the prisoner's new establishment. The container stays active (not removed):
-   * its holding prison is reassigned to [toPrisonId] and its storage location is cleared (the receiving
-   * prison assigns its own), recorded by a [PropertyEventType.TRANSFERRED] event. It then leaves the
-   * sending prison's list and appears - active and editable - in the receiving prison's list.
+   * Transfer a container out to the prisoner's new establishment (two-record model). The container is
+   * marked removed with outcome [RemovalOutcome.TRANSFERRED] at the sending prison - its prison is NOT
+   * reassigned - so it leaves the sending list and shows in the person's returned/transferred history.
+   * The receiving prison creates the destination record when it logs the arrival (add + seal-match, see
+   * [create]), which reconciles this one by linking it. Until then the TRANSFERRED event carries no
+   * related container, so this container still surfaces as awaiting at [toPrisonId] (see
+   * [PropertyContainer.receivingPrison]).
    */
   private fun PropertyContainer.transferTo(toPrisonId: String, username: String, date: LocalDate): WriteResult {
     events.add(
       PropertyEvent(this, PropertyEventType.TRANSFERRED, LocalDateTime.now(), username, eventDate = date, fromPrisonId = prisonId, toPrisonId = toPrisonId),
     )
-    prisonId = toPrisonId
+    removalOutcome = RemovalOutcome.TRANSFERRED
+    removalDate = date
     refreshDerivedState()
-    val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, listOf("prisonId", "location"))
+    val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, listOf("removalOutcome"))
     return WriteResult(PropertyContainerDto.from(this), event)
   }
 
