@@ -1,6 +1,7 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.repository
 
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.entry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -190,6 +191,35 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
     }
 
     assertThat(containerRepository.countDueForDisposal("LEI", LocalDate.now())).isEqualTo(2)
+  }
+
+  @Test
+  fun `countStoredByPrisoner groups stored containers by prisoner, excluding removed and disposal-due ones`() {
+    saveActive("A0001AA", "S1")
+    saveActive("A0001AA", "S2")
+    saveActive("B0002BB", "S3")
+    // A future disposal date is not yet due, so the container still counts as stored.
+    saveWithDisposalDate("A0001AA", "FUTURE", LocalDate.now().plusDays(5))
+    // Disposal due takes precedence over due for return, so this one is excluded.
+    saveWithDisposalDate("A0001AA", "DUE", LocalDate.now().minusDays(1))
+    // Removed property has left storage entirely.
+    saveActive("A0001AA", "GONE").apply {
+      removalOutcome = RemovalOutcome.RETURNED
+      removalDate = LocalDate.now()
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+    // Property for a prisoner who has moved on is due for transfer out, not stored.
+    saveActive("C0003CC", "MOVED").apply {
+      events.add(PropertyEvent(this, PropertyEventType.PRISONER_RECEIVED, baseTime.plusDays(1), "USER1", fromPrisonId = "LEI", toPrisonId = "MDI"))
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+
+    val counts = containerRepository.countStoredByPrisoner("LEI", LocalDate.now())
+      .associate { it.prisonerNumber to it.count }
+
+    assertThat(counts).containsOnly(entry("A0001AA", 3L), entry("B0002BB", 1L))
   }
 
   @Test

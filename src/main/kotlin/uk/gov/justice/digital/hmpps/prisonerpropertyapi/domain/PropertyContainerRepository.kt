@@ -59,6 +59,23 @@ interface PropertyContainerRepository :
   fun countContainersByStatus(@Param("prisonId") prisonId: String): List<StatusContainerCount>
 
   /**
+   * How many *stored* containers a prison holds for each prisoner, excluding any whose proposed disposal
+   * date has arisen (those show as due for disposal, which takes precedence over due for return). These are
+   * exactly the containers eligible to be surfaced as due for return ahead of their owner's release, so the
+   * summary can reclassify them once the prisoners' release dates are known - see
+   * PropertyContainerService.getPrisonPropertySummary.
+   */
+  @Query(
+    "select c.prisonerNumber as prisonerNumber, count(c) as count " +
+      "from PropertyContainer c " +
+      "where c.prisonId = :prisonId and c.removalOutcome is null " +
+      "and c.currentStatusValue = uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus.STORED " +
+      "and (c.proposedDisposalDate is null or c.proposedDisposalDate > :today) " +
+      "group by c.prisonerNumber",
+  )
+  fun countStoredByPrisoner(@Param("prisonId") prisonId: String, @Param("today") today: LocalDate): List<PrisonerContainerCount>
+
+  /**
    * How many active (not removed) containers a prison holds whose proposed disposal date has now arisen
    * (today or earlier) - i.e. are due for disposal. Disposal is time-based, so this is queried on the date
    * rather than the denormalised status.
@@ -86,5 +103,11 @@ interface LocationContainerCount {
 /** Projection for [PropertyContainerRepository.countContainersByStatus]: a container status and its container count. */
 interface StatusContainerCount {
   val status: ContainerStatus
+  val count: Long
+}
+
+/** Projection for [PropertyContainerRepository.countStoredByPrisoner]: a prisoner and their stored-container count. */
+interface PrisonerContainerCount {
+  val prisonerNumber: String
   val count: Long
 }
