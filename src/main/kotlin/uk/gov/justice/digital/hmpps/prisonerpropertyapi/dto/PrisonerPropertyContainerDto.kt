@@ -43,6 +43,9 @@ data class PrisonerPropertyContainerDto(
   @Schema(description = "Whether the container is currently held in the prisoner's current prison. False flags property left behind at a prison the prisoner has moved on from", example = "true")
   val inPrisonersCurrentPrison: Boolean,
 
+  @Schema(description = "Id of the prison this container is due to arrive at, when it is incoming there: either due for transfer out (owner has moved but property is still at its holding prison) or transferred out but not yet logged at the destination (awaiting). Null once reconciled or when not incoming", example = "MDI", nullable = true)
+  val receivingPrisonId: String?,
+
   @Schema(description = "Type of container", example = "STANDARD")
   val containerType: ContainerType,
 
@@ -96,6 +99,7 @@ data class PrisonerPropertyContainerDto(
       prisonerCurrentPrisonName = prisonerCurrentPrisonName,
       prisonerMovementStatus = prisonerMovementStatus,
       inPrisonersCurrentPrison = inPrisonersCurrentPrison,
+      receivingPrisonId = container.receivingPrison(),
       containerType = container.containerType,
       currentSealNumber = container.currentSealNumber,
       currentStatus = container.currentStatus(),
@@ -132,6 +136,7 @@ data class PrisonerPropertyContainerDto(
       prisonerCurrentPrisonName = prisonerCurrentPrisonName,
       prisonerMovementStatus = prisonerMovementStatus,
       inPrisonersCurrentPrison = inPrisonersCurrentPrison,
+      receivingPrisonId = container.receivingPrisonId,
       containerType = container.containerType,
       currentSealNumber = container.currentSealNumber,
       // The denormalised column holds the time-stable base status; overlay DISPOSAL_REQUIRED once the

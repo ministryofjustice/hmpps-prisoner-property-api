@@ -54,8 +54,11 @@ class PropertyEvent(
   @Column(name = "event_date")
   val eventDate: LocalDate? = null,
 
+  // Mutable so a later reconcile can record the link: when a container is transferred out before the
+  // receiving prison logs its arrival, this is filled in on the TRANSFERRED event once the destination
+  // record is created (see PropertyContainerWriteService.create seal-match).
   @Column(name = "related_container_id")
-  val relatedContainerId: UUID? = null,
+  var relatedContainerId: UUID? = null,
 
   // The seal number of the related (combined-into) container as at this event, snapshotted so the history
   // names it by the seal it had at combine time rather than any later reseal.

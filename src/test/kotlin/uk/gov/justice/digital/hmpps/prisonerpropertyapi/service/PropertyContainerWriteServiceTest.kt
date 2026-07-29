@@ -370,23 +370,49 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
-  fun `remove transferring reassigns the container to the receiving prison and keeps it active`() {
+  fun `remove transferring marks the container transferred out without reassigning its prison`() {
     val existing = existingContainer()
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.TRANSFERRED, toPrisonId = "MDI"), "A_USER")
 
-    // reassigned to the receiving prison, still active, with its location cleared
-    assertThat(existing.prisonId).isEqualTo("MDI")
-    assertThat(existing.removalOutcome).isNull()
-    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.STORED)
-    assertThat(existing.currentLocation()).isNull()
+    // removed as transferred at the sending prison; its prison is unchanged (two-record model)
+    assertThat(existing.prisonId).isEqualTo("LEI")
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+    assertThat(existing.removalDate).isEqualTo(LocalDate.now())
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.TRANSFER)
     val event = existing.events.last()
     assertThat(event.eventType).isEqualTo(PropertyEventType.TRANSFERRED)
     assertThat(event.fromPrisonId).isEqualTo("LEI")
     assertThat(event.toPrisonId).isEqualTo("MDI")
+    // not yet reconciled, so it still surfaces as awaiting at the destination
+    assertThat(event.relatedContainerId).isNull()
+    assertThat(existing.receivingPrison()).isEqualTo("MDI")
     assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
-    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("prisonId", "location"))
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("removalOutcome"))
+  }
+
+  @Test
+  fun `create reconciles a container already transferred out to this prison by linking it`() {
+    stubSaveAssigningId()
+    val source = transferredOut("LEI", "OLDSEAL", toPrisonId = "MDI")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+
+    val result = service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
+
+    val captor = argumentCaptor<PropertyContainer>()
+    verify(repository).save(captor.capture())
+    val newContainer = captor.allValues.first { it.prisonId == "MDI" }
+    assertThat(newContainer.events.single { it.eventType == PropertyEventType.CREATED_SEALED }.relatedContainerId).isEqualTo(source.id)
+
+    // the source keeps its single TRANSFERRED event, now linked to the new record - it is not re-removed
+    assertThat(source.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+    val transfers = source.events.filter { it.eventType == PropertyEventType.TRANSFERRED }
+    assertThat(transfers).singleElement().extracting { it.relatedContainerId }.isEqualTo(newContainer.id)
+    // reconciled, so it no longer surfaces as awaiting at the destination
+    assertThat(source.receivingPrison()).isNull()
+    assertThat(result.events.map { it.eventType })
+      .containsExactly("prison-property.container.created", "prison-property.container.updated")
   }
 
   @Test
@@ -699,6 +725,18 @@ class PropertyContainerWriteServiceTest {
     container.events.add(
       PropertyEvent(container, PropertyEventType.PRISONER_RECEIVED, LocalDateTime.parse("2026-02-01T09:00:00"), "PRISONER_PROPERTY_API", fromPrisonId = prisonId, toPrisonId = toPrisonId),
     )
+    return container
+  }
+
+  /** A container removed as transferred out from [prisonId] to [toPrisonId], not yet reconciled by the receiving prison. */
+  private fun transferredOut(prisonId: String, seal: String, toPrisonId: String): PropertyContainer {
+    val container = containerAt(prisonId, seal)
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.TRANSFERRED, LocalDateTime.parse("2026-02-01T09:00:00"), "A_USER", fromPrisonId = prisonId, toPrisonId = toPrisonId),
+    )
+    container.removalOutcome = RemovalOutcome.TRANSFERRED
+    container.removalDate = LocalDate.parse("2026-02-01")
+    container.refreshDerivedState()
     return container
   }
 
