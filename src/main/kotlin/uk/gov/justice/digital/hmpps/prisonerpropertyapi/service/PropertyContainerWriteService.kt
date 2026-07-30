@@ -75,6 +75,28 @@ class PropertyContainerWriteService(
   }
 
   /**
+   * Whether two prison ids name the same establishment. Compared trimmed and case-insensitively because prison
+   * ids reach us unnormalised - RemoveContainerRequest.toPrisonId is only checked for blankness, so a stray
+   * " MDI" or "mdi" is stored verbatim on the transfer event and would otherwise never match again.
+   */
+  private fun String?.equalsPrisonId(other: String?): Boolean = this?.trim().equals(other?.trim(), ignoreCase = true)
+
+  /**
+   * Whether this container has been transferred out but not yet logged anywhere - i.e. it is somewhere between
+   * two establishments and still needs a record making at whichever one it turns up at.
+   *
+   * Deliberately does *not* require the arrival to be at the destination the sending prison named. That
+   * destination is the sender's expectation, recorded when they marked it transferred out; the person may have
+   * moved on again since, or it may simply have been wrong. Staff standing over the box are the better
+   * evidence. Requiring it meant a box sent to one prison and arriving at another could not be logged at all,
+   * while the sender's record showed it in transit indefinitely.
+   *
+   * Still requires the transfer to be unreconciled: once its event names a related container, the arrival has
+   * been logged and the box must not be matched a second time.
+   */
+  private fun PropertyContainer.isAwaitingArrival(): Boolean = removalOutcome == RemovalOutcome.TRANSFERRED && latestTransferEvent()?.relatedContainerId == null
+
+  /**
    * Create a new sealed container. When [CreatePropertyContainerRequest.previousSealNumber] is supplied it names
    * the record the property was held under at the prison it has come from: that container is the same physical
    * property, so it is linked to this new record and deactivated (TRANSFERRED), freeing its seal and location
@@ -99,18 +121,15 @@ class PropertyContainerWriteService(
     // the previous seal. Any container still in storage there qualifies - plenty of prisons never record the
     // transfer out, so requiring them to have flagged it first meant the common case never matched and a second
     // record was created for the same box. Staff typing that seal are asserting the property arrived here, so
-    // deactivating the sending record is the intent. A container already transferred out to here also matches:
-    // this add is what reconciles it.
+    // deactivating the sending record is the intent. A container already transferred out but not yet logged
+    // anywhere also matches: this add is what reconciles it.
     val source = request.previousSealNumber?.trim()?.takeIf { it.isNotEmpty() }?.let { previousSeal ->
       repository.findByPrisonerNumber(request.prisonerNumber).firstOrNull { candidate ->
-        candidate.prisonId != request.prisonId &&
+        !candidate.prisonId.equalsPrisonId(request.prisonId) &&
           // Case- and whitespace-insensitive, like the establishment seal search: staff should not have to
           // reproduce the exact form the sending prison recorded.
           candidate.currentSealNumber?.trim().equals(previousSeal, ignoreCase = true) &&
-          (
-            !candidate.isRemoved() ||
-              (candidate.removalOutcome == RemovalOutcome.TRANSFERRED && candidate.receivingPrison() == request.prisonId)
-            )
+          (!candidate.isRemoved() || candidate.isAwaitingArrival())
       } ?: throw PreviousSealNumberNotFoundException(previousSeal)
     }
 

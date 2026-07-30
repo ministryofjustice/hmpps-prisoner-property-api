@@ -21,6 +21,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContai
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
+import java.time.LocalDate
 import java.time.LocalDateTime
 
 /**
@@ -115,6 +116,68 @@ class PropertyTransferInIntegrationTest : IntegrationTestBase() {
     assertThat(createdEvent.relatedContainerSealNumber).isEqualTo("124744")
   }
 
+  /**
+   * The "In transit" case: the sending prison has already marked the box transferred out, so it is nobody's
+   * live stock and shows as incoming at the destination. Logging its arrival must reconcile it - this had no
+   * coverage at all, which is how the UI came to reject it while the API would have accepted it.
+   */
+  @Test
+  fun `adding a container matches a previous seal held by property already transferred out`() {
+    val source = repository.save(transferredOut("OLDSEAL", heldAt = "LEI", toPrisonId = "MDI")).id!!
+
+    val created = webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "RECEPTION", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(
+        CreatePropertyContainerRequest(
+          prisonerNumber = "A1234BC",
+          prisonId = "MDI",
+          containerType = ContainerType.STANDARD,
+          sealNumber = "NEWSEAL",
+          previousSealNumber = "OLDSEAL",
+        ),
+      )
+      .exchange()
+      .expectStatus().isCreated
+      .expectBody(PropertyContainerDto::class.java)
+      .returnResult().responseBody!!
+
+    val reconciled = repository.findById(source).orElseThrow()
+    // Still transferred - it was already removed, so it is linked rather than removed again, and its original
+    // transfer date survives.
+    assertThat(reconciled.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+    assertThat(reconciled.receivingPrison()).isNull() // reconciled, so it drops off the incoming list
+    assertThat(reconciled.latestTransferEvent()?.relatedContainerId).isEqualTo(created.id)
+    assertThat(reconciled.latestTransferEvent()?.relatedContainerSealNumber).isEqualTo("NEWSEAL")
+  }
+
+  /**
+   * A box sent to one prison but arriving at another - the person moved on again, or the destination was
+   * simply wrong. The prison holding it must still be able to log it, or the sending prison's record shows it
+   * in transit forever and a duplicate gets created here.
+   */
+  @Test
+  fun `adding a container matches a transfer that named a different destination`() {
+    val source = repository.save(transferredOut("OLDSEAL", heldAt = "LEI", toPrisonId = "MDI")).id!!
+
+    webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "RECEPTION", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(
+        CreatePropertyContainerRequest(
+          prisonerNumber = "A1234BC",
+          prisonId = "IWI",
+          containerType = ContainerType.STANDARD,
+          sealNumber = "NEWSEAL",
+          previousSealNumber = "OLDSEAL",
+        ),
+      )
+      .exchange()
+      .expectStatus().isCreated
+
+    val reconciled = repository.findById(source).orElseThrow()
+    assertThat(reconciled.receivingPrison()).isNull()
+    assertThat(reconciled.latestTransferEvent()?.relatedContainerSealNumber).isEqualTo("NEWSEAL")
+  }
+
   @Test
   fun `adding a container with an unmatched previous seal is rejected rather than creating a duplicate`() {
     webTestClient.post().uri("/property-containers")
@@ -137,6 +200,18 @@ class PropertyTransferInIntegrationTest : IntegrationTestBase() {
 
     assertThat(repository.findByPrisonerNumber("A1234BC")).isEmpty()
     verify(domainEventPublisher, never()).publish(any())
+  }
+
+  /** A container the sending prison has already marked transferred out, awaiting logging at its destination. */
+  private fun transferredOut(seal: String, heldAt: String, toPrisonId: String): PropertyContainer {
+    val container = storedAt(heldAt, seal)
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.TRANSFERRED, LocalDateTime.parse("2026-02-01T09:00:00"), "A_USER", eventDate = LocalDate.parse("2026-02-01"), fromPrisonId = heldAt, toPrisonId = toPrisonId),
+    )
+    container.removalOutcome = RemovalOutcome.TRANSFERRED
+    container.removalDate = LocalDate.parse("2026-02-01")
+    container.refreshDerivedState()
+    return container
   }
 
   private fun storedAt(prisonId: String, seal: String): PropertyContainer {
