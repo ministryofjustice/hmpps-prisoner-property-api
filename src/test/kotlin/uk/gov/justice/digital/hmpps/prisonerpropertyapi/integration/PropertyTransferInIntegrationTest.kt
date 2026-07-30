@@ -3,8 +3,9 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
-import org.mockito.kotlin.check
+import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
@@ -23,9 +24,9 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import java.time.LocalDateTime
 
 /**
- * The receiving establishment's "transfer in" flow: adding a container with a `previousSealNumber` that
- * matches the prisoner's due-for-transfer-out record at the sending prison reconciles the two - the new
- * record is created here and the sending prison's container is deactivated (transferred).
+ * The receiving establishment's "transfer in" flow: adding a container with a `previousSealNumber` that matches
+ * property the prisoner still has in storage at another prison reconciles the two - the new record is created
+ * here and the sending prison's container is deactivated (transferred), leaving one record for one box.
  */
 class PropertyTransferInIntegrationTest : IntegrationTestBase() {
 
@@ -76,9 +77,47 @@ class PropertyTransferInIntegrationTest : IntegrationTestBase() {
       .containsExactly("prison-property.container.created", "prison-property.container.updated")
   }
 
+  /**
+   * The reported bug (G0442GA): property held at Whitemoor was added at Belmarsh quoting the old seal, and a
+   * second record was created because Whitemoor had never marked the transfer out. Most prisons never do.
+   */
   @Test
-  fun `adding a container with an unmatched previous seal still creates the container`() {
+  fun `adding a container matches a previous seal held by ordinary stored property at another prison`() {
+    val source = repository.save(storedAt(prisonId = "LEI", seal = "124744")).id!!
+
     val created = webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "RECEPTION", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(
+        CreatePropertyContainerRequest(
+          prisonerNumber = "A1234BC",
+          prisonId = "MDI",
+          containerType = ContainerType.STANDARD,
+          sealNumber = "124744/2",
+          // As staff typed it: a different case and some stray whitespace must not defeat the match.
+          previousSealNumber = " 124744 ",
+        ),
+      )
+      .exchange()
+      .expectStatus().isCreated
+      .expectBody(PropertyContainerDto::class.java)
+      .returnResult().responseBody!!
+
+    // One record for one box: the sending prison's is deactivated and no longer awaiting arrival here.
+    val reconciled = repository.findById(source).orElseThrow()
+    assertThat(reconciled.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+    assertThat(reconciled.receivingPrison()).isNull()
+
+    // Each history names the seal it was matched to, so staff can see the two records were joined up.
+    assertThat(reconciled.events.last().relatedContainerSealNumber).isEqualTo("124744/2")
+    val arriving = repository.findById(created.id).orElseThrow()
+    val createdEvent = arriving.events.single { it.eventType == PropertyEventType.CREATED_SEALED }
+    assertThat(createdEvent.relatedContainerId).isEqualTo(source)
+    assertThat(createdEvent.relatedContainerSealNumber).isEqualTo("124744")
+  }
+
+  @Test
+  fun `adding a container with an unmatched previous seal is rejected rather than creating a duplicate`() {
+    webTestClient.post().uri("/property-containers")
       .headers(setAuthorisation(username = "RECEPTION", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
       .bodyValue(
         CreatePropertyContainerRequest(
@@ -90,15 +129,30 @@ class PropertyTransferInIntegrationTest : IntegrationTestBase() {
         ),
       )
       .exchange()
-      .expectStatus().isCreated
-      .expectBody(PropertyContainerDto::class.java)
-      .returnResult().responseBody!!
+      .expectStatus().isBadRequest
+      .expectBody()
+      // A code, so the front end can put the error against the field the user typed into.
+      .jsonPath("$.errorCode").isEqualTo("PREVIOUS_SEAL_NUMBER_NOT_FOUND")
+      .jsonPath("$.userMessage").value<String> { assertThat(it).contains("NOTHING_MATCHES") }
 
-    assertThat(created.prisonId).isEqualTo("MDI")
-    assertThat(created.currentSealNumber).isEqualTo("NEWSEAL")
-    verify(domainEventPublisher, times(1)).publish(
-      check { assertThat(it.eventType).isEqualTo("prison-property.container.created") },
+    assertThat(repository.findByPrisonerNumber("A1234BC")).isEmpty()
+    verify(domainEventPublisher, never()).publish(any())
+  }
+
+  private fun storedAt(prisonId: String, seal: String): PropertyContainer {
+    val container = PropertyContainer(
+      prisonerNumber = "A1234BC",
+      prisonId = prisonId,
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "A_USER",
+      createDateTime = LocalDateTime.parse("2026-01-01T09:00:00"),
+      currentSealNumber = seal,
     )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, LocalDateTime.parse("2026-01-01T09:00:00"), "A_USER", sealNumber = seal, toPrisonId = prisonId),
+    )
+    container.refreshDerivedState()
+    return container
   }
 
   private fun dueForTransferOut(prisonId: String, seal: String, toPrisonId: String): PropertyContainer {

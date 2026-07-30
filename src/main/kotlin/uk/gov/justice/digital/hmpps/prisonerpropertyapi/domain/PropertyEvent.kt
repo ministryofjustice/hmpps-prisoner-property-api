@@ -60,10 +60,13 @@ class PropertyEvent(
   @Column(name = "related_container_id")
   var relatedContainerId: UUID? = null,
 
-  // The seal number of the related (combined-into) container as at this event, snapshotted so the history
-  // names it by the seal it had at combine time rather than any later reseal.
+  // The seal number of the related container as at this event, snapshotted so the history names it by the seal
+  // it had at the time rather than any later reseal. Set on a combine (the container this one was combined
+  // into) and on both sides of a transfer-in match (the other record's seal, so each history names the seal it
+  // was matched to). Mutable for the same reason as relatedContainerId - a transfer out recorded before the
+  // destination logged the arrival gains the new seal when it is reconciled.
   @Column(name = "related_container_seal_number")
-  val relatedContainerSealNumber: String? = null,
+  var relatedContainerSealNumber: String? = null,
 
   // Snapshot of the container's type at the moment of the event, so the history stays a self-contained,
   // audit-durable record. Defaulted from the container (Kotlin allows a default to reference an earlier

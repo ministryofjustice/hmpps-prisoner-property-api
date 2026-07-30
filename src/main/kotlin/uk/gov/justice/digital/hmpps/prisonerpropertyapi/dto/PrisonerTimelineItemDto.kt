@@ -92,10 +92,22 @@ data class PrisonerTimelineItemDto(
   @Schema(description = "The container's seal number as at the time of this event", example = "SN880032", nullable = true)
   val sealNumber: String?,
 
-  @Schema(description = "Id of a related container, for combine events", example = "33333333-3333-3333-3333-333333333333", nullable = true)
+  @Schema(
+    description = "Id of a container this event relates to: the container this one was combined into, or the " +
+      "matching record at the other establishment when property arriving on transfer was matched to its " +
+      "previous seal",
+    example = "33333333-3333-3333-3333-333333333333",
+    nullable = true,
+  )
   val relatedContainerId: UUID?,
 
-  @Schema(description = "Seal number of the related container, for combine events - the container this one was combined into", example = "SN991234", nullable = true)
+  @Schema(
+    description = "Seal number of the related container as at this event: the container this one was combined " +
+      "into, or - for property matched on arrival from another establishment - the seal the other record holds. " +
+      "On the arriving container that is the previous seal; on the sending container it is the new one",
+    example = "SN991234",
+    nullable = true,
+  )
   val relatedContainerSealNumber: String? = null,
 
   @Schema(description = "Id of the container this event belongs to; null for prisoner movements", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d", nullable = true)
