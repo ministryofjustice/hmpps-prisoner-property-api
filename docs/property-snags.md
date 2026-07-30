@@ -2,8 +2,8 @@
 
 Backlog for the **[MAPB-709](https://dsdmoj.atlassian.net/browse/MAPB-709) — Property snag issues**
 epic: bugs, an establishment-vs-prisoner view consistency gap, and a few enhancements found in testing
-and review. All ten items from the original batch are implemented; a second round of three (MAPB-725 to
-MAPB-727) came out of testing those. The notes below record the decisions taken along the way, so the
+and review. All ten items from the original batch are implemented; a second round (MAPB-725 to MAPB-727, plus
+MAPB-730) came out of testing those. The notes below record the decisions taken along the way, so the
 reasoning survives the tickets. Update **Status** and add PR links as the remaining items land.
 
 Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property-ui ·
@@ -26,9 +26,10 @@ Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property
 | [MAPB-719](https://dsdmoj.atlassian.net/browse/MAPB-719) | Story | S | UI | Reinstate a role-gated "Manage property locations" button on the establishment page | Merged (ui #54) |
 | [MAPB-720](https://dsdmoj.atlassian.net/browse/MAPB-720) | Story | M | LIP | Reactivate a removed property location when re-created with the same name | Dev review (lip #731) |
 | [MAPB-675](https://dsdmoj.atlassian.net/browse/MAPB-675) | Story | — | API + UI | Staff reactivate journey for Removed property containers (added to the epic later, not part of the original batch) | To do — investigated, see notes |
-| [MAPB-725](https://dsdmoj.atlassian.net/browse/MAPB-725) | Bug | L | API + UI | Show one property status on both the establishment and person views | In progress |
-| [MAPB-726](https://dsdmoj.atlassian.net/browse/MAPB-726) | Bug | M | API | Make the property status filters and summary tiles agree with the status shown | In progress |
-| [MAPB-727](https://dsdmoj.atlassian.net/browse/MAPB-727) | Bug | M | API + UI | Match old and new seal numbers when logging property that arrived on transfer | In progress |
+| [MAPB-725](https://dsdmoj.atlassian.net/browse/MAPB-725) | Bug | L | API + UI | Show one property status on both the establishment and person views | Merged (api #71, ui #57) |
+| [MAPB-726](https://dsdmoj.atlassian.net/browse/MAPB-726) | Bug | M | API | Make the property status filters and summary tiles agree with the status shown | Merged (api #71) |
+| [MAPB-727](https://dsdmoj.atlassian.net/browse/MAPB-727) | Bug | M | API + UI | Match old and new seal numbers when logging property that arrived on transfer | Merged (api #71, #72; ui #57, #58) |
+| [MAPB-730](https://dsdmoj.atlassian.net/browse/MAPB-730) | Story | M | UI | Remember the establishment list filters when navigating away and back | To do |
 
 ## Notes
 
@@ -106,6 +107,52 @@ container's status was being derived independently in four places, so they drift
   `errorCode` rather than silently ignored — ignoring it is how the duplicate was made. Both histories now
   name the seal they were matched to. Dropping the status check also fixed an unrelated trap: a source
   container past its disposal date read as `DISPOSAL_REQUIRED` and so could never be matched.
+  - **Follow-up found in testing (api #72, ui #58).** Matching then worked for property tagged *Due for
+    transfer out* but failed for *In transit*. Two separate causes. In the UI, the previous-seal pre-check
+    filtered on "not removed" — and *in transit* **is** a removal outcome of `TRANSFERRED` — so it rejected the
+    property most obviously on its way here, before the API was ever called; staff could see the container
+    listed and be told it did not exist. The membership rule for "Property due to be transferred in" now lives
+    in one place shared by the list and the check, so anything visible there can be quoted. In the API,
+    reconciling an already-transferred container required the sending prison's *stated destination* to equal
+    the prison logging the arrival, so a box sent to one prison and arriving at another could not be logged at
+    all. It now needs the transfer to be **unreconciled** rather than correctly addressed — staff holding the
+    box are better evidence than the sender's expectation — and prison ids are compared trimmed and
+    case-insensitively, so badly-cased local property is not mistaken for property elsewhere. The
+    already-transferred path had no test coverage at all, which is why this survived the first fix.
+- **MAPB-730** (remember the establishment list filters) came out of the same testing but is not started.
+  Recommended shape is on the ticket: store the filters, search term and page in session, falling back to them
+  only when the URL has no query string, following `hmpps-incident-reporting`'s `dashboardFilters`. Two traps
+  are recorded there — "Clear search"/"Clear filters" are plain links to `/` and would silently re-apply the
+  remembered state unless given an explicit clear parameter, and remembered filters must be scoped to the
+  active caseload so switching establishment does not inherit them.
+
+## Deploys: the `node-fetch` replica conflict
+
+Preprod deploys failed for about ten days from ~20 July with
+`conflict with "node-fetch" with subresource "scale" using apps/v1: .spec.replicas`, and the automatic
+rollback failed on the same conflict. Nothing to do with the application code — the failing run happened to be
+a property release, which is only how it was noticed.
+
+A Node.js Kubernetes client had taken ownership of `.spec.replicas` via the `/scale` subresource and left
+preprod on 4 replicas while the chart says 2. Helm 4 uses server-side apply, which reports a conflict when
+another manager owns a field **and the values differ** — so dev, carrying the identical claim but sitting on
+the value helm wanted, kept deploying happily and hid the problem.
+
+Fixed by removing that manager's entry so helm reclaims the field (dev and preprod both cleared; prod was
+never affected):
+
+```
+kubectl get deploy <name> -n <ns> --show-managed-fields -o json   # find the node-fetch/scale entry index
+kubectl patch deployment <name> -n <ns> --type=json -p='[{"op":"remove","path":"/metadata/managedFields/<i>"}]'
+```
+
+The same manager also set `kubectl.kubernetes.io/restartedAt` (a rollout restart) on 14 July, and touched
+**only** the property API — not the property UI, not the locations apps, which carry different managers
+(`Go-http-client`, `kubectl/scale`, `HashiCorp`). That pattern reads as a one-off human action through a
+Node-based Kubernetes GUI or script rather than scheduled platform tooling; `node-fetch` is just the default
+field-manager name taken from the HTTP user-agent. **Not conclusively attributed** — worth asking Cloud
+Platform if it recurs. Do *not* "fix" it by setting `replicaCount` to whatever the cluster holds: that makes
+the cluster the source of truth instead of the chart, and it will drift again.
 
 ## Outstanding
 
