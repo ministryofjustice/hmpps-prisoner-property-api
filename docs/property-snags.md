@@ -2,9 +2,9 @@
 
 Backlog for the **[MAPB-709](https://dsdmoj.atlassian.net/browse/MAPB-709) — Property snag issues**
 epic: bugs, an establishment-vs-prisoner view consistency gap, and a few enhancements found in testing
-and review. All ten items from the original batch are now implemented — the notes below record the decisions
-taken along the way, so the reasoning survives the tickets. Update **Status** and add PR links as the
-remaining items land.
+and review. All ten items from the original batch are implemented; a second round of three (MAPB-725 to
+MAPB-727) came out of testing those. The notes below record the decisions taken along the way, so the
+reasoning survives the tickets. Update **Status** and add PR links as the remaining items land.
 
 Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property-ui ·
 **LIP** = hmpps-locations-inside-prison-api.
@@ -26,6 +26,9 @@ Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property
 | [MAPB-719](https://dsdmoj.atlassian.net/browse/MAPB-719) | Story | S | UI | Reinstate a role-gated "Manage property locations" button on the establishment page | Merged (ui #54) |
 | [MAPB-720](https://dsdmoj.atlassian.net/browse/MAPB-720) | Story | M | LIP | Reactivate a removed property location when re-created with the same name | Dev review (lip #731) |
 | [MAPB-675](https://dsdmoj.atlassian.net/browse/MAPB-675) | Story | — | API + UI | Staff reactivate journey for Removed property containers (added to the epic later, not part of the original batch) | To do — investigated, see notes |
+| [MAPB-725](https://dsdmoj.atlassian.net/browse/MAPB-725) | Bug | L | API + UI | Show one property status on both the establishment and person views | In progress |
+| [MAPB-726](https://dsdmoj.atlassian.net/browse/MAPB-726) | Bug | M | API | Make the property status filters and summary tiles agree with the status shown | In progress |
+| [MAPB-727](https://dsdmoj.atlassian.net/browse/MAPB-727) | Bug | M | API + UI | Match old and new seal numbers when logging property that arrived on transfer | In progress |
 
 ## Notes
 
@@ -70,12 +73,58 @@ Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property
   without a seal check could leave two active containers sharing a seal. No existing path covers this, because
   nothing else un-removes a container.
 
+## Second round (found in testing after the first batch shipped)
+
+Three more defects, all traced to the same structural fault the first batch only partly addressed: a
+container's status was being derived independently in four places, so they drifted.
+
+- **MAPB-725 and MAPB-726** are one mechanism and shipped as one API change, with the UI following.
+  `ContainerStatusResolver` is now the single rule — removal outcome, then a disposal date that has arisen,
+  then where the owner now is, then the container's own status. That last step is the fix: the persisted
+  status is only as good as the movement events that reached us, and NOMIS-migrated property often has none,
+  which is why a released prisoner's property read "Stored" on the establishment list and "Due for transfer
+  out" on the person page (G0003GT). `OwnerLocation` holds the owner-to-status mapping **and its inverse**,
+  so the establishment list's status filter matches on the same rule the rows display; `StatusOverlay`
+  classifies a prison's owners once and binds the result as prisoner-number sets, keeping paging in the
+  database. The summary tiles now count by the status shown, from one grouped query that also supplies the
+  owners to classify — which fixed a double count on the way (a container past its disposal date was counted
+  both in "due to be disposed" and in one of the other two tiles).
+  - **Decided:** an owner showing as present clears a stale "follow the person" flag but does **not** clear a
+    due-for-return recorded by a real release or death event. prisoner-search is fed by the same NOMIS
+    movements and can lag; wrongly showing "stored" for someone released is the miss the rule exists to
+    prevent, whereas showing "due for return" for someone still here is merely something staff check.
+  - **Decided:** in transit (`TRN`) counts as elsewhere, and release beats transfer-out — property at LEI for
+    someone now at MDI releasing tomorrow reads "due for return". Easy to invert if product prefers, but it
+    does hide "needs sending to MDI" from LEI staff.
+  - **Warn before release:** on migrated prisons the "due to transfer out" and "due to be returned" counts
+    will *jump*. That is the bug being fixed, not a new one — worth before/after counts on preprod.
+- **MAPB-727** — the seal match on arrival only reconciled the sending prison's record if that prison had
+  already marked the container due for transfer out. Many never do, so the commonest case matched nothing:
+  a second record was created and the sending prison's container kept showing as due to be transferred in
+  (G0442GA, one box recorded twice). Any container the person still has in storage at another prison now
+  matches, ignoring case and whitespace. An unmatched previous seal is **rejected with 400** carrying an
+  `errorCode` rather than silently ignored — ignoring it is how the duplicate was made. Both histories now
+  name the seal they were matched to. Dropping the status check also fixed an unrelated trap: a source
+  container past its disposal date read as `DISPOSAL_REQUIRED` and so could never be matched.
+
 ## Outstanding
 
-- **MAPB-711 performance measurement.** The ticket shipped on the agreed basis of "make the views consistent
-  first, then measure". The summary count can no longer be a pure SQL aggregate (the release date lives in
-  prisoner-search), so it groups eligible stored containers by prisoner and resolves them in one chunked bulk
-  lookup — scaling with prisoners holding stored property rather than container count. Worth timing the
-  establishment page on dev for a prison with a lot of stored property. If it degrades badly, the agreed
-  fallback is prisoner-search's `/attribute-search` (`prisonId` + `confirmedReleaseDate` in a single call),
-  noting it is scoped to the prisoner's *current* prison so it misses property left behind elsewhere.
+- **Performance measurement (MAPB-711, now also MAPB-726).** Both shipped on the agreed basis of "make the
+  views consistent first, then measure". The counts can no longer be a pure SQL aggregate (the owner's
+  location lives in prisoner-search), so they group by prisoner and resolve them in one chunked bulk lookup —
+  scaling with prisoners holding property rather than container count. The summary endpoint got *cheaper*
+  (two queries became one); the new cost is on the establishment list **only when a status filter is
+  applied**. Worth timing that page on dev for a prison with a lot of stored property. Escape hatches in
+  order: parallelise the chunk fan-out, then a short-TTL cache on `PrisonStatusOverlayFactory` (the single
+  seam), then prisoner-search's `/attribute-search` — noting the last is scoped to the prisoner's *current*
+  prison so it misses property left behind elsewhere.
+- **Incoming-property filter gap.** `?dueForTransferIn=true` still keys on the persisted `receivingPrisonId`,
+  so migrated property left at LEI for someone now at MDI will not appear in MDI's incoming list even though
+  it now reads "due for transfer out" at LEI. The owner-classification trick cannot fix it: that needs "which
+  prisoners are currently at MDI", which the property database does not know. Needs its own ticket.
+- **`getById` / `PropertyContainerDto` has no owner context**, so the remove and change journeys tag from the
+  container's own status. Fixing it means a prisoner-search call on a DTO that is also the write-endpoint
+  response. Deliberately deferred.
+- **Profile tile semantics.** `PrisonerPropertySummaryDto.overdueForReturn` now uses the shared rule, but
+  `dueForTransferOut`/`dueForTransferIn` were left alone — that DTO feeds the prisoner-profile front end, not
+  this UI, so redefining them needs that team.

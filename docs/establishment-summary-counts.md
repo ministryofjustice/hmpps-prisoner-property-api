@@ -21,24 +21,49 @@ independent of any list paging, filtering or search on the property-list screen.
 
 Everything is assembled in `PropertyContainerService.getPrisonPropertySummary`
 (`service/PropertyContainerService.kt`), from three repository queries plus one live call to
-locations-inside-prison-api. The queries read **denormalised current-state columns** — not the event
-stream — so no container events are loaded to produce the tiles.
+locations-inside-prison-api and one bulk call to prisoner-search. The queries read **denormalised
+current-state columns** — not the event stream — so no container events are loaded to produce the tiles.
 
 ```kotlin
-val counts           = repository.countContainersByStatus(prisonId)      // group by current_status
+// One grouped query supplies both the per-bucket counts and the prisoners whose location decides them.
+val activeCounts = repository.countActiveByPrisonerAndStatus(prisonId, today)
+val overlay      = overlayFactory.overlayFor(prisonId, activeCounts.map { it.prisonerNumber }.distinct()).overlay
+
 val countsByLocation = repository.countContainersByLocation(prisonId)    // group by current_internal_location_id
 val storedOnSite     = countsByLocation.values.sum()
 val availableStorageSpaces = locationsClient.getPropertyLocations(prisonId).sumOf { location ->
   ((location.capacity ?: 0) - (countsByLocation[location.id] ?: 0)).coerceAtLeast(0)
 }
+
+fun tile(status: ContainerStatus) = activeCounts
+  .filter { (overlay?.effectiveStatusOf(it.prisonerNumber, it.status) ?: it.status) == status }
+  .sumOf { it.count }.toInt()
+
 PrisonPropertySummaryDto(
   availableStorageSpaces = availableStorageSpaces,
   storedOnSite           = storedOnSite,
-  dueToTransferOut       = counts.count(DUE_FOR_TRANSFER_OUT),
-  dueToBeReturned        = counts.count(DUE_FOR_RETURN),
-  dueToBeDisposed        = repository.countDueForDisposal(prisonId, LocalDate.now()).toInt(),
+  dueToTransferOut       = tile(DUE_FOR_TRANSFER_OUT),
+  dueToBeReturned        = tile(DUE_FOR_RETURN),
+  dueToBeDisposed        = repository.countDueForDisposal(prisonId, today).toInt(),
 )
 ```
+
+### Why the counts are not a pure SQL aggregate
+
+The two status tiles count containers by the status they are **shown** as, and for a container still in
+storage that depends on where its owner now is — which lives in prisoner-search, not the property database.
+See `ContainerStatusResolver` and `OwnerLocation` for the rule, and `StatusOverlay` for how it is applied to
+a whole prison at once.
+
+This matters because the tiles and the establishment list's status filter must agree: a tile that counts
+rows its own filter cannot return is worse than no tile. The filter binds the same classification as
+prisoner-number sets (`PrisonPropertyFilter.statusOverlay`), so clicking a tile reaches exactly the rows
+behind it.
+
+Cost is bounded by the number of *prisoners* holding live property at the prison, not the container count,
+and the lookup is chunked. If prisoner-search is unavailable the lookup degrades to no prisoners, every
+surface falls back to the persisted `current_status` together, and the page stays self-consistent rather
+than failing.
 
 ## Where the current-state columns come from
 
@@ -48,6 +73,9 @@ Four of the five tiles read denormalised mirrors on `property_container`:
 | --- | --- | --- |
 | `current_status` | `PropertyContainer.baseStatus()` | `refreshDerivedState()` on every write |
 | `current_internal_location_id` | `PropertyContainer.currentLocation()` | `refreshDerivedState()` on every write |
+
+`current_status` is the container's *own* record of its status. For a container still in storage that is
+the starting point rather than the answer — the owner's location can override it (see tiles 3 and 4).
 
 The domain is event-sourced: a container's status and location are *derived* from its latest relevant
 `PropertyEvent`. Rather than re-derive per read, every write path (create / update / dispose / remove /
@@ -94,22 +122,26 @@ or a removal.
 
 ### 3. Property containers due to transfer out (`dueToTransferOut`)
 
-`countContainersByStatus` grouped by `current_status`, taking the `DUE_FOR_TRANSFER_OUT` bucket.
+Containers still in storage here whose **owner is in another establishment**, or in transit to one — their
+property needs to follow them.
 
-A container reaches this status via a **`PRISONER_RECEIVED`** event — the person has been received at a
-*new* establishment while their property is still held here, so it needs sending on. The count drops when
-that container is transferred out (`TRANSFERRED`, which removes it from live stock) or otherwise removed.
+Usually the container also carries a **`PRISONER_RECEIVED`** event recording the move, but the owner's
+location is what decides: plenty of property (particularly NOMIS-migrated) has no such event, and before
+MAPB-725 it was miscounted as merely stored. Conversely a stale `PRISONER_RECEIVED` on property whose owner
+has since come *back* no longer counts here. The count drops when the container is transferred out
+(`TRANSFERRED`, which removes it from live stock) or otherwise removed.
 
 ### 4. Property containers due to be returned (`dueToBeReturned`)
 
-Same `countContainersByStatus`, taking the `DUE_FOR_RETURN` bucket.
+Containers still in storage here whose owner has been **released**, or is being released within a day
+(their confirmed release date only — the sentence-calculated one can move, so it is deliberately not used).
 
-Reached via a **`PRISONER_RELEASED`** or **`DIED_IN_CUSTODY`** event (both map to `DUE_FOR_RETURN` in
-`PropertyEventType`) — the person has left custody, so their property should be returned. The count drops
-when the container is returned (`RETURNED`) or otherwise removed.
-
-> Note: the `@Operation` description on the endpoint still says "'Due to be returned' is always 0 for now".
-> That is stale — the code counts `DUE_FOR_RETURN` as described here.
+Property flagged by a **`PRISONER_RELEASED`** or **`DIED_IN_CUSTODY`** event also counts and *keeps*
+counting even while prisoner-search still shows the person as present: the two feeds come from the same
+NOMIS movements and can lag each other, and quietly reverting such property to "stored" is exactly the miss
+this tile exists to prevent. The count drops when the container is returned (`RETURNED`) or otherwise
+removed, or if the person turns out to be back in custody elsewhere (their property then needs to follow
+them, so it moves to *due to transfer out*).
 
 ### 5. Property containers due to be disposed (`dueToBeDisposed`)
 
@@ -123,16 +155,25 @@ date it counts, until it is actually disposed (`DISPOSED`, which sets a removal 
 the query). This mirrors `PropertyContainer.isDisposalDue()`, which drives the same `DISPOSAL_REQUIRED`
 overlay wherever a container's status is shown.
 
+Disposal **takes precedence** over the two owner-driven statuses, so a container past its disposal date is
+counted here and *only* here. `countActiveByPrisonerAndStatus` excludes it for that reason; before MAPB-726
+it was counted twice, in this tile and in one of the other two.
+
 ## Summary of triggers
 
 | Tile | Source | Changes when |
 | --- | --- | --- |
 | Available storage spaces | live locations capacity − internal counts | container enters/leaves an internal box; location capacity edited upstream |
 | Stored on-site | count by internal location | `CREATED_SEALED`, `MOVED`, `TRANSFERRED`, any removal |
-| Due to transfer out | `current_status = DUE_FOR_TRANSFER_OUT` | `PRISONER_RECEIVED` sets it; `TRANSFERRED`/removal clears it |
-| Due to be returned | `current_status = DUE_FOR_RETURN` | `PRISONER_RELEASED` / `DIED_IN_CUSTODY` set it; `RETURNED`/removal clears it |
+| Due to transfer out | owner is in another establishment or in transit | the owner moves prison; `TRANSFERRED`/removal clears it |
+| Due to be returned | owner released, releasing within a day, or property flagged `PRISONER_RELEASED` / `DIED_IN_CUSTODY` | the owner is released or the release date arrives; `RETURNED`/removal clears it |
 | Due to be disposed | `proposed_disposal_date <= today` | proposed disposal date arrives (time-based); `DISPOSED` clears it |
 
-The status-driven tiles update the instant the triggering event's transaction commits (via
-`refreshDerivedState()`); the disposal tile also rolls forward each day as `today` advances; the storage
-tile additionally reflects live capacity changes made in locations-inside-prison-api.
+The four buckets are mutually exclusive, so a container is counted in at most one of them, and each tile
+matches the establishment list filter of the same name.
+
+The location-driven tiles update the instant the triggering event's transaction commits (via
+`refreshDerivedState()`). The two owner-driven tiles additionally change when the *person* moves, with no
+write against the property at all — property left behind at another prison is reclassified as soon as
+prisoner-search reflects the movement. The disposal tile rolls forward each day as `today` advances; the
+storage tile also reflects live capacity changes made in locations-inside-prison-api.
