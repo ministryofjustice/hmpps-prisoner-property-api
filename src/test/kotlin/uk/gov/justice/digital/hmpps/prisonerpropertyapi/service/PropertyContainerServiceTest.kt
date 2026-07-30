@@ -28,6 +28,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.LocationContainerCount
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PersonLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonPropertyFilter
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerContainerCount
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerMovementStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
@@ -226,6 +227,42 @@ class PropertyContainerServiceTest {
   }
 
   @Test
+  fun `getPrisonPropertySummary counts stored property for prisoners about to be released as due to be returned`() {
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(emptyList())
+    whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
+    // 4 containers already flagged due for return by a real release event.
+    whenever(repository.countContainersByStatus("LEI")).thenReturn(listOf(statusCount(ContainerStatus.DUE_FOR_RETURN, 4)))
+    // Stored property for three prisoners: one released tomorrow, one much later, one already released.
+    whenever(repository.countStoredByPrisoner(eq("LEI"), any())).thenReturn(
+      listOf(prisonerCount("A0001AA", 3), prisonerCount("B0002BB", 5), prisonerCount("C0003CC", 7)),
+    )
+    whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(
+      mapOf(
+        "A0001AA" to prisoner(prisonId = "LEI", confirmedReleaseDate = LocalDate.now().plusDays(1), prisonerNumber = "A0001AA"),
+        "B0002BB" to prisoner(prisonId = "LEI", confirmedReleaseDate = LocalDate.now().plusMonths(6), prisonerNumber = "B0002BB"),
+        // Already out: the release event has already flagged their property, so counting it again would double up.
+        "C0003CC" to prisoner(prisonId = "OUT", lastMovementTypeCode = "REL", confirmedReleaseDate = LocalDate.now(), prisonerNumber = "C0003CC"),
+      ),
+    )
+
+    // 4 already flagged + 3 for the prisoner releasing tomorrow.
+    assertThat(service.getPrisonPropertySummary("LEI").dueToBeReturned).isEqualTo(7)
+  }
+
+  @Test
+  fun `getPrisonPropertySummary does not look up prisoners when the prison holds no stored property`() {
+    whenever(repository.countContainersByStatus("LEI")).thenReturn(emptyList())
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
+    whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(emptyList())
+    whenever(repository.countStoredByPrisoner(eq("LEI"), any())).thenReturn(emptyList())
+
+    assertThat(service.getPrisonPropertySummary("LEI").dueToBeReturned).isEqualTo(0)
+    verify(prisonerSearchClient, never()).getPrisoners(any())
+  }
+
+  @Test
   fun `getPrisonPropertySummary floors a location's spaces at zero when it is over capacity`() {
     // Box 1 (capacity 10) is over capacity holding 30 -> contributes 0, not negative; Box 2 (capacity 5)
     // empty -> 5 spaces. So 5 spaces remain overall despite 30 stored.
@@ -290,6 +327,41 @@ class PropertyContainerServiceTest {
       assertThat(it.prisonerNumber).isEqualTo("B2345CD")
       assertThat(it.prisonerName).isEqualTo("Sam Jones")
       assertThat(it.containers).singleElement().satisfies({ c -> assertThat(c.inPrisonersCurrentPrison).isFalse() })
+    })
+  }
+
+  @Test
+  fun `getPrisonProperty shows stored property as due for return when the owner is about to be released`() {
+    // Same rule as the person view, so the establishment list and the prisoner page agree.
+    whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(
+      mapOf("A1234BC" to prisoner(prisonId = "LEI", confirmedReleaseDate = LocalDate.now().plusDays(1))),
+    )
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any()))
+      .thenReturn(PageImpl(listOf("A1234BC"), PAGE, 1))
+    whenever(repository.findContainers(eq("LEI"), any(), eq(listOf("A1234BC"))))
+      .thenReturn(listOf(containerAt("LEI", "SEALA", prisonerNumber = "A1234BC")))
+
+    val containers = service.getPrisonProperty("LEI", pageable = PAGE).content.single().containers
+
+    assertThat(containers).singleElement().satisfies({
+      assertThat(it.currentStatus).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+    })
+  }
+
+  @Test
+  fun `getPrisonProperty leaves stored property alone when release is not imminent`() {
+    whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(
+      mapOf("A1234BC" to prisoner(prisonId = "LEI", confirmedReleaseDate = LocalDate.now().plusMonths(6))),
+    )
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any()))
+      .thenReturn(PageImpl(listOf("A1234BC"), PAGE, 1))
+    whenever(repository.findContainers(eq("LEI"), any(), eq(listOf("A1234BC"))))
+      .thenReturn(listOf(containerAt("LEI", "SEALA", prisonerNumber = "A1234BC")))
+
+    val containers = service.getPrisonProperty("LEI", pageable = PAGE).content.single().containers
+
+    assertThat(containers).singleElement().satisfies({
+      assertThat(it.currentStatus).isEqualTo(ContainerStatus.STORED)
     })
   }
 
@@ -527,6 +599,11 @@ class PropertyContainerServiceTest {
     override val count = count
   }
 
+  private fun prisonerCount(prisonerNumber: String, count: Long): PrisonerContainerCount = object : PrisonerContainerCount {
+    override val prisonerNumber = prisonerNumber
+    override val count = count
+  }
+
   private fun locationCount(count: Long): LocationContainerCount = locationCount(UUID.randomUUID(), count)
 
   private fun locationCount(id: UUID, count: Long): LocationContainerCount = object : LocationContainerCount {
@@ -544,14 +621,20 @@ class PropertyContainerServiceTest {
     capacity = capacity,
   )
 
-  private fun prisoner(prisonId: String, lastMovementTypeCode: String? = null) = Prisoner(
-    prisonerNumber = "A1234BC",
+  private fun prisoner(
+    prisonId: String,
+    lastMovementTypeCode: String? = null,
+    confirmedReleaseDate: LocalDate? = null,
+    prisonerNumber: String = "A1234BC",
+  ) = Prisoner(
+    prisonerNumber = prisonerNumber,
     firstName = "John",
     lastName = "Smith",
     prisonId = prisonId,
     prisonName = "Leeds (HMP)",
     cellLocation = "A-1-001",
     lastMovementTypeCode = lastMovementTypeCode,
+    confirmedReleaseDate = confirmedReleaseDate,
   )
 
   private fun prisonerAt(number: String, prisonId: String) = Prisoner(

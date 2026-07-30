@@ -24,8 +24,19 @@ class PrisonerSearchClient(
     /** The batch endpoint accepts at most this many prisoner numbers per request. */
     private const val BATCH_SIZE = 1000
 
-    /** Only the fields the establishment list needs - name, current establishment and movement. */
-    private val LIST_RESPONSE_FIELDS = listOf("prisonerNumber", "firstName", "lastName", "prisonId", "lastMovementTypeCode").joinToString(",")
+    /**
+     * Only the fields the establishment views need - name, current establishment, movement, and the
+     * confirmed release date that decides whether stored property is surfaced as due for return ahead of
+     * release (the same rule the person view applies, so the two agree).
+     */
+    private val LIST_RESPONSE_FIELDS = listOf(
+      "prisonerNumber",
+      "firstName",
+      "lastName",
+      "prisonId",
+      "lastMovementTypeCode",
+      "confirmedReleaseDate",
+    ).joinToString(",")
   }
 
   /**
@@ -87,9 +98,9 @@ data class Prisoner(
   val cellLocation: String?,
   // The prisoner's last movement type. TRN when in transit (with prisonId TRN), REL when released (prisonId OUT).
   val lastMovementTypeCode: String?,
-  // Planned release dates from the sentence. The confirmed date (set by the establishment) is preferred when
-  // present; the conditional (sentence-calculated) date is the fallback. Only requested on the single-prisoner
-  // lookup (the full record), not the trimmed bulk list.
+  // Planned release dates from the sentence. Only the confirmed date (set by the establishment) drives the
+  // "due for return before release" rule - the conditional (sentence-calculated) date can move, so it is
+  // deliberately not used. Requested on both the single-prisoner lookup and the trimmed bulk list.
   val confirmedReleaseDate: LocalDate? = null,
   val conditionalReleaseDate: LocalDate? = null,
 )

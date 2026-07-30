@@ -66,14 +66,7 @@ class PropertyContainerService(
     val prisonNames = prisonRegisterClient.getPrisonNames()
     val locations = locationsClient.getLocations(containers.mapNotNull { it.currentLocation() })
 
-    // Surface stored property as due for return from a day before the prisoner's confirmed release date, so
-    // staff can prepare it ahead of release. Uses the confirmed date only (not the sentence-calculated one,
-    // which can move) and stops once actually released, when the real release event has already flagged it.
-    // A read-time display hint on this person view only - it does not change the stored status or the
-    // establishment list/summary counts.
-    val dueForReturnSoon = prisoner != null &&
-      prisoner.movementStatus() != PrisonerMovementStatus.RELEASED &&
-      prisoner.confirmedReleaseDate?.let { !it.isAfter(LocalDate.now().plusDays(1)) } == true
+    val dueForReturnSoon = prisoner.isDueForReturnSoon()
 
     return containers.map { container ->
       val dto = PrisonerPropertyContainerDto.from(
@@ -133,10 +126,13 @@ class PropertyContainerService(
    * minus the containers it currently holds (never negative), so a location with capacity 10 holding 8 leaves
    * 2 spaces. "Due to transfer out" comes from the denormalised status; "due to be disposed" is queried on the
    * proposed disposal date having arisen (disposal is time-based, not denormalised). "Due to be returned"
-   * counts containers flagged due for return after the prisoner's release.
+   * counts containers already flagged due for return (after the prisoner's release) *plus* stored containers
+   * whose owner is about to be released - see [storedDueForReturnSoon] - so the tile agrees with what the
+   * views show.
    */
   @Transactional(readOnly = true)
   fun getPrisonPropertySummary(prisonId: String): PrisonPropertySummaryDto {
+    val today = LocalDate.now()
     val counts = repository.countContainersByStatus(prisonId).associate { it.status to it.count }
     val countsByLocation = repository.countContainersByLocation(prisonId).associate { it.locationId to it.count.toInt() }
     val storedOnSite = countsByLocation.values.sum()
@@ -147,9 +143,30 @@ class PropertyContainerService(
       availableStorageSpaces = availableStorageSpaces,
       storedOnSite = storedOnSite,
       dueToTransferOut = counts.count(ContainerStatus.DUE_FOR_TRANSFER_OUT),
-      dueToBeReturned = counts.count(ContainerStatus.DUE_FOR_RETURN),
-      dueToBeDisposed = repository.countDueForDisposal(prisonId, LocalDate.now()).toInt(),
+      dueToBeReturned = counts.count(ContainerStatus.DUE_FOR_RETURN) + storedDueForReturnSoon(prisonId, today),
+      dueToBeDisposed = repository.countDueForDisposal(prisonId, today).toInt(),
     )
+  }
+
+  /**
+   * How many of the prison's *stored* containers belong to prisoners who are about to be released, and so are
+   * shown as due for return by the views (see [isDueForReturnSoon]). The release date lives in prisoner-search,
+   * not the property database, so this cannot be a pure SQL aggregate: it groups the eligible containers by
+   * prisoner (one query), resolves those prisoners in bulk (prisoner-search is a fast cache, and the trimmed
+   * response carries the confirmed release date), and sums the counts for the ones releasing imminently.
+   *
+   * Scales with the number of prisoners holding stored property at the prison rather than the container count,
+   * and the bulk lookup is chunked, so a whole establishment costs a small number of calls. A failed lookup
+   * degrades to no prisoners (the tile then reflects only the persisted statuses) rather than failing the read.
+   */
+  private fun storedDueForReturnSoon(prisonId: String, today: LocalDate): Int {
+    val storedByPrisoner = repository.countStoredByPrisoner(prisonId, today)
+    if (storedByPrisoner.isEmpty()) return 0
+    val prisoners = prisonerSearchClient.getPrisoners(storedByPrisoner.map { it.prisonerNumber })
+    return storedByPrisoner
+      .filter { prisoners[it.prisonerNumber].isDueForReturnSoon() }
+      .sumOf { it.count }
+      .toInt()
   }
 
   /**
@@ -233,6 +250,8 @@ class PropertyContainerService(
 
     val groups = pageNumbers.map { number ->
       val prisoner = prisoners[number]
+      // The same pre-release "due for return" rule the person view applies, so both views agree.
+      val dueForReturnSoon = prisoner.isDueForReturnSoon()
       PrisonerPropertyGroupDto(
         prisonerNumber = number,
         prisonerName = prisoner.fullName(),
@@ -240,7 +259,7 @@ class PropertyContainerService(
         prisonerCurrentPrisonName = prisoner?.prisonId?.let { prisonNames[it] },
         prisonerMovementStatus = prisoner.movementStatus(),
         containers = (containersByPrisoner[number] ?: emptyList()).map { container ->
-          PrisonerPropertyContainerDto.fromColumns(
+          val dto = PrisonerPropertyContainerDto.fromColumns(
             container = container,
             prisonerName = prisoner.fullName(),
             prisonName = prisonNames[container.prisonId],
@@ -250,6 +269,11 @@ class PropertyContainerService(
             locationDescription = container.currentInternalLocationId?.let { locations[it]?.displayName() },
             inPrisonersCurrentPrison = prisoner?.prisonId == container.prisonId,
           )
+          if (dueForReturnSoon && dto.currentStatus == ContainerStatus.STORED) {
+            dto.copy(currentStatus = ContainerStatus.DUE_FOR_RETURN)
+          } else {
+            dto
+          }
         },
       )
     }
@@ -447,6 +471,20 @@ class PropertyContainerService(
       else -> PrisonerMovementStatus.IN_ESTABLISHMENT
     }
   }
+
+  /**
+   * Whether this prisoner's stored property should be surfaced as due for return: from a day before their
+   * confirmed release date, so staff can prepare it ahead of release. Uses the confirmed date only (not the
+   * sentence-calculated one, which can move) and stops once actually released, when the real release event
+   * has already flagged the property and persisted the status.
+   *
+   * The single source of this rule: applied identically by the person view, the establishment list rows and
+   * the establishment summary counts, so a container never reads "due for return" on one view and "stored"
+   * on another.
+   */
+  private fun Prisoner?.isDueForReturnSoon(): Boolean = this != null &&
+    movementStatus() != PrisonerMovementStatus.RELEASED &&
+    confirmedReleaseDate?.let { !it.isAfter(LocalDate.now().plusDays(1)) } == true
 
   /** The count for a status from a [countContainersByStatus] map, as an Int (0 when absent). */
   private fun Map<ContainerStatus, Long>.count(status: ContainerStatus): Int = this[status]?.toInt() ?: 0

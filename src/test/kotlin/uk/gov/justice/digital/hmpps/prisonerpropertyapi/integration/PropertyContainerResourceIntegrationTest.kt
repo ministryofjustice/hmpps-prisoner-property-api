@@ -18,6 +18,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.Loc
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonApiExtension.Companion.prisonApi
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonerSearchApiExtension.Companion.prisonerSearch
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -116,6 +117,45 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.content[0].containers[0].currentLocation").isEqualTo(LOCATION_B.toString())
       .jsonPath("$.content[0].containers[0].locationDescription").isEqualTo("Reception Property Store")
       .jsonPath("$.content[0].containers[0].inPrisonersCurrentPrison").isEqualTo(false)
+  }
+
+  /**
+   * The regression this guards: the person view surfaced stored property as due for return ahead of release
+   * while the establishment list and summary still called it stored, so the same container read differently
+   * depending on which page you opened. All three must now agree.
+   */
+  @Test
+  fun `stored property reads due for return on the person view, the prison list and the summary before release`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PROP2", "Box Two")), capacity = 5)
+    val releasedTomorrow = LocalDate.now().plusDays(1).toString()
+    // The person view resolves the prisoner singly; the list and summary use the bulk lookup. Both carry the
+    // confirmed release date, so the same rule applies on every path.
+    prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "LEI", confirmedReleaseDate = releasedTomorrow)
+    prisonerSearch.stubFindByNumbersWithReleaseDate("A1234BC", "LEI", releasedTomorrow)
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$[0].currentStatus").isEqualTo("DUE_FOR_RETURN")
+
+    webTestClient.get().uri("/property-containers/prison/LEI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo("DUE_FOR_RETURN")
+
+    webTestClient.get().uri("/property-containers/prison/LEI/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.dueToBeReturned").isEqualTo(1)
   }
 
   @Test

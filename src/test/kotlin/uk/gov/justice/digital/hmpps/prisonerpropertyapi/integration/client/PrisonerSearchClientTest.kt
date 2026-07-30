@@ -52,9 +52,14 @@ class PrisonerSearchClientTest : IntegrationTestBase() {
 
     assertThat(prisoners.keys).containsExactlyInAnyOrder("A1234BC", "A1111AA")
     assertThat(prisoners["A1234BC"]?.prisonId).isEqualTo("MDI")
+    // The confirmed release date is requested too: the establishment list and summary need it to show
+    // stored property as due for return ahead of release, matching the person view.
     prisonerSearch.verify(
       postRequestedFor(urlPathEqualTo("/prisoner-search/prisoner-numbers"))
-        .withQueryParam("responseFields", equalTo("prisonerNumber,firstName,lastName,prisonId,lastMovementTypeCode")),
+        .withQueryParam(
+          "responseFields",
+          equalTo("prisonerNumber,firstName,lastName,prisonId,lastMovementTypeCode,confirmedReleaseDate"),
+        ),
     )
   }
 

@@ -16,7 +16,7 @@ data class PrisonPropertySummaryDto(
   @Schema(description = "Number of containers held here for people no longer at this establishment (status DUE_FOR_TRANSFER_OUT)", example = "80")
   val dueToTransferOut: Int,
 
-  @Schema(description = "Number of containers due to be returned (flagged after the prisoner's release)", example = "36")
+  @Schema(description = "Number of containers due to be returned: those flagged after the prisoner's release, plus stored containers whose owner has a confirmed release date within a day", example = "36")
   val dueToBeReturned: Int,
 
   @Schema(description = "Number of containers whose proposed disposal date has arisen (today or earlier)", example = "40")

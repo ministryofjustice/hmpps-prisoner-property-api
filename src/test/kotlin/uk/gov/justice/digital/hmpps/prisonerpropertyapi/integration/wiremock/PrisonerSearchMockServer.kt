@@ -70,6 +70,26 @@ class PrisonerSearchMockServer : WireMockServer(WIREMOCK_PORT) {
     *prisoners.map { (number, prison) -> Triple(number, prison, "ADM") }.toTypedArray(),
   )
 
+  /**
+   * Stub the bulk number lookup for a single prisoner carrying a confirmed release date - the field the
+   * establishment list and summary use to surface stored property as due for return before release.
+   */
+  fun stubFindByNumbersWithReleaseDate(
+    prisonerNumber: String,
+    prisonId: String,
+    confirmedReleaseDate: String,
+    lastMovementTypeCode: String = "ADM",
+  ) {
+    stubFor(
+      post(urlPathEqualTo("/prisoner-search/prisoner-numbers")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(200)
+          .withBody("[${prisonerJson(prisonerNumber, prisonId, lastMovementTypeCode, confirmedReleaseDate)}]"),
+      ),
+    )
+  }
+
   /** As [stubFindByNumbers] but each (prisonerNumber, prisonId, lastMovementTypeCode) triple controls the movement type. */
   fun stubFindByNumbersWithMovement(vararg prisoners: Triple<String, String, String>) {
     val body = prisoners.joinToString(prefix = "[", postfix = "]") { (number, prison, movement) ->
