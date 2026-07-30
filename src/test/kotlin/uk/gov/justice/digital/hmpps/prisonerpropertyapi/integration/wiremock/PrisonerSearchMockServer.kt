@@ -121,6 +121,53 @@ class PrisonerSearchMockServer : WireMockServer(WIREMOCK_PORT) {
     )
   }
 
+  /**
+   * Stub the prison roll - everyone currently at [prisonId]. The real endpoint returns a Spring page and only
+   * the requested responseFields are populated, so the stub carries the paging envelope with prisoner numbers
+   * alone. [totalAtPrison] defaults to the number supplied; pass a larger value to simulate a roll truncated
+   * by the page size.
+   */
+  fun stubFindByPrison(prisonId: String, vararg prisonerNumbers: String, totalAtPrison: Int = prisonerNumbers.size) {
+    val content = prisonerNumbers.joinToString(",") { """{"prisonerNumber":"$it"}""" }
+    stubFor(
+      get(urlPathEqualTo("/prisoner-search/prison/$prisonId")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(200)
+          .withBody(
+            """
+            {
+              "content": [$content],
+              "totalElements": $totalAtPrison,
+              "totalPages": 1,
+              "number": 0,
+              "size": 5000,
+              "numberOfElements": ${prisonerNumbers.size},
+              "first": true,
+              "last": true,
+              "empty": ${prisonerNumbers.isEmpty()}
+            }
+            """.trimIndent(),
+          ),
+      ),
+    )
+  }
+
+  /**
+   * Stub the prison roll failing. The client returns no roll rather than an error, so the establishment list
+   * falls back to the transfer destinations recorded on the containers themselves.
+   */
+  fun stubFindByPrisonFails(prisonId: String) {
+    stubFor(
+      get(urlPathEqualTo("/prisoner-search/prison/$prisonId")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(500)
+          .withBody("""{"status":500,"userMessage":"prisoner-search is unavailable"}"""),
+      ),
+    )
+  }
+
   private fun prisonerJson(
     prisonerNumber: String,
     prisonId: String,

@@ -20,6 +20,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationDetail
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonApiClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonRegisterClient
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonRoll
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.Prisoner
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PropertyLocation
@@ -54,6 +55,7 @@ class PropertyContainerServiceTest {
   // stubbing them would let the rows, counts and filter drift apart again - which is the bug being fixed.
   private val statusResolver = ContainerStatusResolver()
   private val overlayFactory = PrisonStatusOverlayFactory(prisonerSearchClient, statusResolver)
+  private val prisonRollFactory = PrisonRollFactory(prisonerSearchClient)
   private val service = PropertyContainerService(
     repository,
     prisonerSearchClient,
@@ -63,6 +65,7 @@ class PropertyContainerServiceTest {
     activeAgenciesService,
     statusResolver,
     overlayFactory,
+    prisonRollFactory,
   )
 
   @BeforeEach
@@ -494,6 +497,62 @@ class PropertyContainerServiceTest {
       assertThat(it.prisonerName).isEqualTo("Sam Jones")
       assertThat(it.containers).singleElement().satisfies({ c -> assertThat(c.inPrisonersCurrentPrison).isFalse() })
     })
+  }
+
+  @Test
+  fun `getPrisonProperty resolves who is at the prison when asked for incoming property`() {
+    whenever(prisonerSearchClient.getPrisonRoll("LEI")).thenReturn(PrisonRoll(setOf("A1234BC", "B2345CD"), 2))
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    service.getPrisonProperty("LEI", includeTransferIn = true, pageable = PAGE)
+
+    verify(repository).findPrisonerNumbersPage(
+      eq("LEI"),
+      check { assertThat(it.incomingPrisonerNumbers).containsExactlyInAnyOrder("A1234BC", "B2345CD") },
+      any(),
+    )
+  }
+
+  @Test
+  fun `getPrisonProperty does not resolve the prison roll unless incoming property is asked for`() {
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    service.getPrisonProperty("LEI", pageable = PAGE)
+
+    // The common unfiltered page must cost no more than it did before incoming property was owner-driven.
+    verify(prisonerSearchClient, never()).getPrisonRoll(any())
+  }
+
+  @Test
+  fun `getPrisonProperty leaves the roll unresolved when prisoner-search cannot supply it`() {
+    whenever(prisonerSearchClient.getPrisonRoll("LEI")).thenReturn(null)
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    service.getPrisonProperty("LEI", includeTransferIn = true, pageable = PAGE)
+
+    // Null rather than empty: the filter then matches only the destinations the containers record, instead of
+    // concluding that nobody is here and showing nothing.
+    verify(repository).findPrisonerNumbersPage(
+      eq("LEI"),
+      check { assertThat(it.incomingPrisonerNumbers).isNull() },
+      any(),
+    )
+  }
+
+  @Test
+  fun `getPrisonProperty does not use the prison roll to name prisoners on the page`() {
+    // The roll carries numbers only, so reusing it for enrichment would leave every incoming row nameless and
+    // its status mislabelled - the page's own lookup has to happen regardless.
+    whenever(prisonerSearchClient.getPrisonRoll("LEI")).thenReturn(PrisonRoll(setOf("A1234BC"), 1))
+    whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(mapOf("A1234BC" to prisoner(prisonId = "MDI")))
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(listOf("A1234BC"), PAGE, 1))
+    whenever(repository.findContainers(eq("LEI"), any(), eq(listOf("A1234BC"))))
+      .thenReturn(listOf(containerAt("LEI", "SEALA", prisonerNumber = "A1234BC")))
+
+    val group = service.getPrisonProperty("LEI", includeTransferIn = true, pageable = PAGE).content.single()
+
+    assertThat(group.prisonerName).isEqualTo("John Smith")
+    verify(prisonerSearchClient).getPrisoners(listOf("A1234BC"))
   }
 
   @Test

@@ -92,7 +92,7 @@ class PropertyContainerRepositoryImpl(
     val scopes = mutableListOf<Predicate>()
     val heldHereSelected = filter.statuses.isNotEmpty() || filter.includeRemoved || !filter.includeTransferIn
     if (heldHereSelected) scopes += heldHereScope(cb, root, prisonId, filter)
-    if (filter.includeTransferIn) scopes += cb.equal(root.get<String>("receivingPrisonId"), prisonId)
+    if (filter.includeTransferIn) scopes += incomingScope(cb, root, prisonId, filter)
     predicates += cb.or(*scopes.toTypedArray())
 
     return predicates
@@ -139,6 +139,41 @@ class PropertyContainerRepositoryImpl(
         parts += if (filter.locationIds.isEmpty()) cb.disjunction() else root.get<UUID>("currentInternalLocationId").`in`(filter.locationIds)
     }
     return cb.and(*parts.toTypedArray())
+  }
+
+  /**
+   * Predicate for property held elsewhere that is needed at [prisonId] - what the establishment's "due for
+   * transfer in" list shows. Two ways a container qualifies, OR'd:
+   *
+   *  - **the container says so**: its recorded destination is here, either because the owner's reception was
+   *    logged against it or because the sending prison has already transferred it out to us; or
+   *  - **its owner says so**: the property is still in storage at another prison and its owner is now on this
+   *    prison's roll, so it has to follow them.
+   *
+   * The second is the one that catches everything else. A container's recorded destination is only as good as
+   * the movement events that reached it - NOMIS-migrated property has none at all, and ordinary sync traffic
+   * (a move, a reseal) resets the derived status and clears the destination again. The owner's location does
+   * not decay, so it is the more reliable signal.
+   *
+   * This mirrors the person page, which lists any live container held at another establishment as incoming
+   * while its owner is here. The two must agree: the same box seen from a prisoner and from the establishment
+   * is still the same box.
+   *
+   * With no roll (prisoner-search unavailable) only the recorded destinations match, which is where this
+   * started - the list narrows rather than failing.
+   */
+  private fun incomingScope(cb: CriteriaBuilder, root: Root<PropertyContainer>, prisonId: String, filter: PrisonPropertyFilter): Predicate {
+    val parts = mutableListOf(cb.equal(root.get<String>("receivingPrisonId"), prisonId))
+    filter.incomingPrisonerNumbers?.takeIf { it.isNotEmpty() }?.let { roll ->
+      parts += cb.and(
+        cb.notEqual(root.get<String>("prisonId"), prisonId),
+        // Only property still in storage there. Removed property is not ours to receive - and the one removed
+        // case that is, an unreconciled transfer heading here, is already covered by the clause above.
+        cb.isNull(root.get<RemovalOutcome>("removalOutcome")),
+        root.get<String>("prisonerNumber").`in`(roll),
+      )
+    }
+    return cb.or(*parts.toTypedArray())
   }
 
   /** Still in storage and past its proposed disposal date - the time-based DISPOSAL_REQUIRED status. */
