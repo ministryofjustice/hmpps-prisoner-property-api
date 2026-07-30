@@ -30,6 +30,7 @@ Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property
 | [MAPB-726](https://dsdmoj.atlassian.net/browse/MAPB-726) | Bug | M | API | Make the property status filters and summary tiles agree with the status shown | Merged (api #71) |
 | [MAPB-727](https://dsdmoj.atlassian.net/browse/MAPB-727) | Bug | M | API + UI | Match old and new seal numbers when logging property that arrived on transfer | Merged (api #71, #72; ui #57, #58) |
 | [MAPB-730](https://dsdmoj.atlassian.net/browse/MAPB-730) | Story | M | UI | Remember the establishment list filters when navigating away and back | To do |
+| [MAPB-732](https://dsdmoj.atlassian.net/browse/MAPB-732) | Bug | M | API | Show property left at another establishment in the receiving prison's incoming list | To do |
 
 ## Notes
 
@@ -165,10 +166,17 @@ the cluster the source of truth instead of the chart, and it will drift again.
   order: parallelise the chunk fan-out, then a short-TTL cache on `PrisonStatusOverlayFactory` (the single
   seam), then prisoner-search's `/attribute-search` — noting the last is scoped to the prisoner's *current*
   prison so it misses property left behind elsewhere.
-- **Incoming-property filter gap.** `?dueForTransferIn=true` still keys on the persisted `receivingPrisonId`,
-  so migrated property left at LEI for someone now at MDI will not appear in MDI's incoming list even though
-  it now reads "due for transfer out" at LEI. The owner-classification trick cannot fix it: that needs "which
-  prisoners are currently at MDI", which the property database does not know. Needs its own ticket.
+- **Incoming-property filter gap — now [MAPB-732](https://dsdmoj.atlassian.net/browse/MAPB-732).**
+  `?dueForTransferIn=true` still keys on the persisted `receivingPrisonId`, so migrated property left at LEI
+  for someone now at MDI will not appear in MDI's incoming list even though it now reads "due for transfer
+  out" at LEI — and appears correctly on the person's own page, which needs no such column. This is the last
+  place the two views still disagree about the same container. The owner-classification trick cannot fix it:
+  `StatusOverlay` starts from the prisoners holding property *here* and resolves where they are, whereas this
+  needs the inverse — the prisoners currently *here* who hold property elsewhere — which the property database
+  cannot enumerate. The ticket proposes `GET /prisoner-search/prison/{prisonId}` (all prisoners in a prison,
+  `responseFields=prisonerNumber`, one large page rather than paging) unioned with the existing
+  `receiving_prison_id` clause, and flags the prerequisite to check first: that endpoint needs
+  `ROLE_GLOBAL_SEARCH` or `ROLE_PRISONER_SEARCH`, which the property API's client may not hold today.
 - **`getById` / `PropertyContainerDto` has no owner context**, so the remove and change journeys tag from the
   container's own status. Fixing it means a prisoner-search call on a DTO that is also the write-endpoint
   response. Deliberately deferred.
