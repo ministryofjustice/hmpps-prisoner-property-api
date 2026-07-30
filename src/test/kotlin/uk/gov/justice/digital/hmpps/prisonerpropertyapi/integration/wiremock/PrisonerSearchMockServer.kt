@@ -90,6 +90,22 @@ class PrisonerSearchMockServer : WireMockServer(WIREMOCK_PORT) {
     )
   }
 
+  /**
+   * Stub the bulk number lookup failing. The client degrades a failed chunk to no prisoners rather than an
+   * error, so this is how "prisoner-search unavailable" is exercised: statuses and counts then fall back to
+   * what each container itself records.
+   */
+  fun stubFindByNumbersFails() {
+    stubFor(
+      post(urlPathEqualTo("/prisoner-search/prisoner-numbers")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(500)
+          .withBody("""{"status":500,"userMessage":"prisoner-search is unavailable"}"""),
+      ),
+    )
+  }
+
   /** As [stubFindByNumbers] but each (prisonerNumber, prisonId, lastMovementTypeCode) triple controls the movement type. */
   fun stubFindByNumbersWithMovement(vararg prisoners: Triple<String, String, String>) {
     val body = prisoners.joinToString(prefix = "[", postfix = "]") { (number, prison, movement) ->

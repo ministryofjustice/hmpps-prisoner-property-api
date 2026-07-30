@@ -30,6 +30,8 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyEventDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertySystem
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.TimelineItemType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.ContainerStatusResolver.Companion.movementStatus
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.ContainerStatusResolver.Companion.realPrisonId
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -42,6 +44,8 @@ class PropertyContainerService(
   private val locationsClient: LocationsClient,
   private val prisonApiClient: PrisonApiClient,
   private val activeAgenciesService: ActiveAgenciesService,
+  private val statusResolver: ContainerStatusResolver,
+  private val overlayFactory: PrisonStatusOverlayFactory,
 ) {
 
   /**
@@ -55,21 +59,27 @@ class PropertyContainerService(
     statuses: List<ContainerStatus> = emptyList(),
     sortDirection: Sort.Direction = Sort.Direction.DESC,
   ): List<PrisonerPropertyContainerDto> {
-    val containers = repository.findByPrisonerNumber(prisonerNumber)
-      .filter { statuses.isEmpty() || it.currentStatus() in statuses }
+    val all = repository.findByPrisonerNumber(prisonerNumber)
+    if (all.isEmpty()) return emptyList()
+
+    // The prisoner is resolved before the status filter is applied, because a container's status depends on
+    // where its owner now is - filtering on the persisted status first would drop the very rows the filter asks
+    // for (property for a released prisoner reads DUE_FOR_RETURN but is persisted as STORED).
+    val prisoner = prisonerSearchClient.getPrisoner(prisonerNumber)
+
+    val containers = all
+      .filter { statuses.isEmpty() || statusResolver.effectiveStatus(it, prisoner) in statuses }
       .sortedWith(compareBy { it.lastUpdated() })
       .let { if (sortDirection.isDescending) it.reversed() else it }
 
     if (containers.isEmpty()) return emptyList()
 
-    val prisoner = prisonerSearchClient.getPrisoner(prisonerNumber)
     val prisonNames = prisonRegisterClient.getPrisonNames()
     val locations = locationsClient.getLocations(containers.mapNotNull { it.currentLocation() })
 
-    val dueForReturnSoon = prisoner.isDueForReturnSoon()
-
     return containers.map { container ->
-      val dto = PrisonerPropertyContainerDto.from(
+      val currentStatus = statusResolver.effectiveStatus(container, prisoner)
+      PrisonerPropertyContainerDto.from(
         container = container,
         prisonerName = prisoner.fullName(),
         prisonName = prisonNames[container.prisonId],
@@ -78,12 +88,9 @@ class PropertyContainerService(
         prisonerMovementStatus = prisoner.movementStatus(),
         locationDescription = container.currentLocation()?.let { locations[it]?.displayName() },
         inPrisonersCurrentPrison = prisoner?.prisonId == container.prisonId,
+        currentStatus = currentStatus,
+        receivingPrisonId = receivingPrisonId(container.receivingPrison(), currentStatus, prisoner),
       )
-      if (dueForReturnSoon && dto.currentStatus == ContainerStatus.STORED) {
-        dto.copy(currentStatus = ContainerStatus.DUE_FOR_RETURN)
-      } else {
-        dto
-      }
     }
   }
 
@@ -101,7 +108,7 @@ class PropertyContainerService(
     val prisoner = prisonerSearchClient.getPrisoner(prisonerNumber)
     // The prisoner's real establishment: prisoner-search reports TRN/OUT while in transit or released - treat
     // those as no current establishment, so all their property counts as held "in other establishments".
-    val currentEstablishmentId = prisoner?.prisonId?.takeUnless { it == TRANSIT_PRISON_ID || it == RELEASED_PRISON_ID }
+    val currentEstablishmentId = prisoner.realPrisonId()
 
     val active = containers.filterNot { it.isRemoved() }
     val (here, elsewhere) = active.partition { currentEstablishmentId != null && it.prisonId == currentEstablishmentId }
@@ -114,7 +121,9 @@ class PropertyContainerService(
       dueForTransferIn = elsewhere.count { currentEstablishmentId != null && it.receivingPrisonId == currentEstablishmentId },
       dueForTransferOut = here.count { it.currentStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT },
       overdueForDisposal = active.count { it.isDisposalDue() },
-      overdueForReturn = active.count { it.currentStatus() == ContainerStatus.DUE_FOR_RETURN },
+      // The status the person's property list shows, so the tile cannot read 0 while the list shows rows due
+      // for return. The two fields above are left on the container's own status deliberately - see the class doc.
+      overdueForReturn = active.count { statusResolver.effectiveStatus(it, prisoner) == ContainerStatus.DUE_FOR_RETURN },
       hasEverHadProperty = containers.isNotEmpty(),
     )
   }
@@ -124,49 +133,39 @@ class PropertyContainerService(
    * physically in an internal location here (summing the per-location counts); "available storage spaces" is
    * the remaining capacity across the prison's property locations - the sum over each location of its capacity
    * minus the containers it currently holds (never negative), so a location with capacity 10 holding 8 leaves
-   * 2 spaces. "Due to transfer out" comes from the denormalised status; "due to be disposed" is queried on the
-   * proposed disposal date having arisen (disposal is time-based, not denormalised). "Due to be returned"
-   * counts containers already flagged due for return (after the prisoner's release) *plus* stored containers
-   * whose owner is about to be released - see [storedDueForReturnSoon] - so the tile agrees with what the
-   * views show.
+   * 2 spaces. "Due to be disposed" is queried on the proposed disposal date having arisen, since disposal is
+   * time-based rather than denormalised.
+   *
+   * "Due to transfer out" and "due to be returned" count containers by the status they are *shown* as, which
+   * depends on where each owner now is - so a container counted here is one the matching status filter returns,
+   * and clicking a tile reaches the rows behind it. One grouped query supplies both the counts and the
+   * prisoners to classify; containers already due for disposal are excluded from it, so a container is never
+   * counted in two tiles at once.
    */
   @Transactional(readOnly = true)
   fun getPrisonPropertySummary(prisonId: String): PrisonPropertySummaryDto {
     val today = LocalDate.now()
-    val counts = repository.countContainersByStatus(prisonId).associate { it.status to it.count }
+    val activeCounts = repository.countActiveByPrisonerAndStatus(prisonId, today)
+    val overlay = overlayFactory.overlayFor(prisonId, activeCounts.map { it.prisonerNumber }.distinct()).overlay
+
     val countsByLocation = repository.countContainersByLocation(prisonId).associate { it.locationId to it.count.toInt() }
     val storedOnSite = countsByLocation.values.sum()
     val availableStorageSpaces = locationsClient.getPropertyLocations(prisonId).sumOf { location ->
       ((location.capacity ?: 0) - (countsByLocation[location.id] ?: 0)).coerceAtLeast(0)
     }
+
+    fun tile(status: ContainerStatus) = activeCounts
+      .filter { (overlay?.effectiveStatusOf(it.prisonerNumber, it.status) ?: it.status) == status }
+      .sumOf { it.count }
+      .toInt()
+
     return PrisonPropertySummaryDto(
       availableStorageSpaces = availableStorageSpaces,
       storedOnSite = storedOnSite,
-      dueToTransferOut = counts.count(ContainerStatus.DUE_FOR_TRANSFER_OUT),
-      dueToBeReturned = counts.count(ContainerStatus.DUE_FOR_RETURN) + storedDueForReturnSoon(prisonId, today),
+      dueToTransferOut = tile(ContainerStatus.DUE_FOR_TRANSFER_OUT),
+      dueToBeReturned = tile(ContainerStatus.DUE_FOR_RETURN),
       dueToBeDisposed = repository.countDueForDisposal(prisonId, today).toInt(),
     )
-  }
-
-  /**
-   * How many of the prison's *stored* containers belong to prisoners who are about to be released, and so are
-   * shown as due for return by the views (see [isDueForReturnSoon]). The release date lives in prisoner-search,
-   * not the property database, so this cannot be a pure SQL aggregate: it groups the eligible containers by
-   * prisoner (one query), resolves those prisoners in bulk (prisoner-search is a fast cache, and the trimmed
-   * response carries the confirmed release date), and sums the counts for the ones releasing imminently.
-   *
-   * Scales with the number of prisoners holding stored property at the prison rather than the container count,
-   * and the bulk lookup is chunked, so a whole establishment costs a small number of calls. A failed lookup
-   * degrades to no prisoners (the tile then reflects only the persisted statuses) rather than failing the read.
-   */
-  private fun storedDueForReturnSoon(prisonId: String, today: LocalDate): Int {
-    val storedByPrisoner = repository.countStoredByPrisoner(prisonId, today)
-    if (storedByPrisoner.isEmpty()) return 0
-    val prisoners = prisonerSearchClient.getPrisoners(storedByPrisoner.map { it.prisonerNumber })
-    return storedByPrisoner
-      .filter { prisoners[it.prisonerNumber].isDueForReturnSoon() }
-      .sumOf { it.count }
-      .toInt()
   }
 
   /**
@@ -198,7 +197,7 @@ class PropertyContainerService(
     val propertyLocations = if (needStorageLookup) locationsClient.getPropertyLocations(prisonId) else emptyList()
     val locationIds = if (storageLocation != null && !branstonOnly) resolveLocationIds(propertyLocations, storageLocation) else null
     val searchLocationIds = if (search != null && !searchBranston) resolveLocationIds(propertyLocations, search) else emptyList()
-    val filter = PrisonPropertyFilter(
+    val unresolvedFilter = PrisonPropertyFilter(
       prisonerNumber = prisonerNumber,
       sealNumber = sealNumber,
       containerTypes = containerTypes,
@@ -211,23 +210,49 @@ class PropertyContainerService(
       searchBranston = searchBranston,
       includeTransferIn = includeTransferIn,
     )
+    // A container in storage reads the status its owner's location dictates, so filtering by one of those
+    // statuses means resolving the establishment's owners before querying - otherwise the filter would match
+    // the persisted column and miss the very rows it is asked for. Only done when such a status is requested,
+    // so the unfiltered page (much the commonest) costs no more than it did.
+    val classification = if (unresolvedFilter.needsStatusOverlay()) {
+      overlayFactory.overlayFor(prisonId, repository.findActivePrisonerNumbers(prisonId))
+    } else {
+      OwnerClassification.NONE
+    }
+    val filter = unresolvedFilter.copy(statusOverlay = classification.overlay)
 
     if (personLocation == null) {
       // Common path: the property DB paginates by prisoner, and prisoner-search is only called for the page.
       val prisonerPage = repository.findPrisonerNumbersPage(prisonId, filter, pageable)
       if (prisonerPage.isEmpty) return PageImpl(emptyList(), pageable, prisonerPage.totalElements)
-      val prisoners = prisonerSearchClient.getPrisoners(prisonerPage.content)
-      return buildGroupsPage(prisonId, filter, prisonerPage.content, prisonerPage.totalElements, pageable, prisoners)
+      return buildGroupsPage(
+        prisonId,
+        filter,
+        prisonerPage.content,
+        prisonerPage.totalElements,
+        pageable,
+        classification.prisonersFor(prisonerPage.content),
+      )
     }
 
     // Person-location filter: a prisoner's current establishment comes from prisoner-search, not the DB, so
     // load every matching prisoner, bucket by current establishment, then paginate in memory.
     val allNumbers = repository.findPrisonerNumbers(prisonId, filter)
     if (allNumbers.isEmpty()) return PageImpl(emptyList(), pageable, 0)
-    val prisoners = prisonerSearchClient.getPrisoners(allNumbers)
+    val prisoners = classification.prisonersFor(allNumbers)
     val matching = allNumbers.filter { personLocation.matches(prisoners[it]?.prisonId, prisonId) }
     val pageNumbers = matching.drop(pageable.offset.toInt()).take(pageable.pageSize)
     return buildGroupsPage(prisonId, filter, pageNumbers, matching.size.toLong(), pageable, prisoners)
+  }
+
+  /**
+   * The prisoner records for [numbers], reusing any the establishment's owner classification already resolved
+   * and looking up only what it did not cover - so a filtered page does not fetch the same people twice.
+   */
+  private fun OwnerClassification.prisonersFor(numbers: List<String>): Map<String, Prisoner> {
+    val missing = numbers.filterNot { prisoners.containsKey(it) }
+    if (missing.isEmpty()) return prisoners
+    return prisoners + prisonerSearchClient.getPrisoners(missing)
   }
 
   /**
@@ -250,8 +275,6 @@ class PropertyContainerService(
 
     val groups = pageNumbers.map { number ->
       val prisoner = prisoners[number]
-      // The same pre-release "due for return" rule the person view applies, so both views agree.
-      val dueForReturnSoon = prisoner.isDueForReturnSoon()
       PrisonerPropertyGroupDto(
         prisonerNumber = number,
         prisonerName = prisoner.fullName(),
@@ -259,7 +282,10 @@ class PropertyContainerService(
         prisonerCurrentPrisonName = prisoner?.prisonId?.let { prisonNames[it] },
         prisonerMovementStatus = prisoner.movementStatus(),
         containers = (containersByPrisoner[number] ?: emptyList()).map { container ->
-          val dto = PrisonerPropertyContainerDto.fromColumns(
+          // The same rule the person view applies, off the denormalised columns, so the two views agree
+          // without this one loading any container events.
+          val currentStatus = statusResolver.effectiveStatusFromColumns(container, prisoner)
+          PrisonerPropertyContainerDto.fromColumns(
             container = container,
             prisonerName = prisoner.fullName(),
             prisonName = prisonNames[container.prisonId],
@@ -268,12 +294,9 @@ class PropertyContainerService(
             prisonerMovementStatus = prisoner.movementStatus(),
             locationDescription = container.currentInternalLocationId?.let { locations[it]?.displayName() },
             inPrisonersCurrentPrison = prisoner?.prisonId == container.prisonId,
+            currentStatus = currentStatus,
+            receivingPrisonId = receivingPrisonId(container.receivingPrisonId, currentStatus, prisoner),
           )
-          if (dueForReturnSoon && dto.currentStatus == ContainerStatus.STORED) {
-            dto.copy(currentStatus = ContainerStatus.DUE_FOR_RETURN)
-          } else {
-            dto
-          }
         },
       )
     }
@@ -460,31 +483,12 @@ class PropertyContainerService(
   }
 
   /**
-   * The prisoner's movement status, or null if the prisoner could not be resolved: in transit between prisons
-   * (prisonId TRN, lastMovementTypeCode TRN), released (prisonId OUT, lastMovementTypeCode REL), else held in an
-   * establishment.
+   * The prison a container is incoming at. Normally the container's own derived value, but when the status has
+   * been overridden to DUE_FOR_TRANSFER_OUT because the owner has moved on, the container itself carries no
+   * destination (no PRISONER_RECEIVED event was ever recorded - typical of NOMIS-migrated property), so fall
+   * back to the owner's real establishment. Otherwise the row would say "due for transfer out" to nowhere.
    */
-  private fun Prisoner?.movementStatus(): PrisonerMovementStatus? = this?.let {
-    when {
-      prisonId == TRANSIT_PRISON_ID && lastMovementTypeCode == TRANSIT_MOVEMENT_TYPE -> PrisonerMovementStatus.IN_TRANSIT
-      prisonId == RELEASED_PRISON_ID && lastMovementTypeCode == RELEASED_MOVEMENT_TYPE -> PrisonerMovementStatus.RELEASED
-      else -> PrisonerMovementStatus.IN_ESTABLISHMENT
-    }
-  }
-
-  /**
-   * Whether this prisoner's stored property should be surfaced as due for return: from a day before their
-   * confirmed release date, so staff can prepare it ahead of release. Uses the confirmed date only (not the
-   * sentence-calculated one, which can move) and stops once actually released, when the real release event
-   * has already flagged the property and persisted the status.
-   *
-   * The single source of this rule: applied identically by the person view, the establishment list rows and
-   * the establishment summary counts, so a container never reads "due for return" on one view and "stored"
-   * on another.
-   */
-  private fun Prisoner?.isDueForReturnSoon(): Boolean = this != null &&
-    movementStatus() != PrisonerMovementStatus.RELEASED &&
-    confirmedReleaseDate?.let { !it.isAfter(LocalDate.now().plusDays(1)) } == true
+  private fun receivingPrisonId(containerValue: String?, currentStatus: ContainerStatus, prisoner: Prisoner?): String? = containerValue ?: prisoner.realPrisonId()?.takeIf { currentStatus == ContainerStatus.DUE_FOR_TRANSFER_OUT }
 
   /** The count for a status from a [countContainersByStatus] map, as an Int (0 when absent). */
   private fun Map<ContainerStatus, Long>.count(status: ContainerStatus): Int = this[status]?.toInt() ?: 0
@@ -506,13 +510,5 @@ class PropertyContainerService(
 
     /** prison-api SignificantMovement.inwardType for a genuine admission into custody (vs TAP, a temporary-absence return). */
     const val ADMISSION_MOVEMENT_TYPE = "ADM"
-
-    /** prisoner-search prisonId + lastMovementTypeCode values that mean the prisoner is in transit between prisons. */
-    const val TRANSIT_PRISON_ID = "TRN"
-    const val TRANSIT_MOVEMENT_TYPE = "TRN"
-
-    /** prisoner-search prisonId + lastMovementTypeCode values that mean the prisoner has been released. */
-    const val RELEASED_PRISON_ID = "OUT"
-    const val RELEASED_MOVEMENT_TYPE = "REL"
   }
 }

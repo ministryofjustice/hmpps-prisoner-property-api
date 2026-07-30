@@ -47,33 +47,33 @@ interface PropertyContainerRepository :
   ): Long
 
   /**
-   * How many active (not removed) containers a prison holds in each current status, read from the denormalised
-   * current_status column so no events are loaded - feeds the establishment summary counts.
+   * The prisoners holding live (not removed) property at a prison. These are exactly the people whose location
+   * can change what their property's status reads, so this is the candidate set the establishment's owner
+   * classification is built over - see StatusOverlay. Served by the (prison_id, prisoner_number) index.
    */
-  @Query(
-    "select c.currentStatusValue as status, count(c) as count " +
-      "from PropertyContainer c " +
-      "where c.prisonId = :prisonId and c.removalOutcome is null " +
-      "group by c.currentStatusValue",
-  )
-  fun countContainersByStatus(@Param("prisonId") prisonId: String): List<StatusContainerCount>
+  @Query("select distinct c.prisonerNumber from PropertyContainer c where c.prisonId = :prisonId and c.removalOutcome is null")
+  fun findActivePrisonerNumbers(@Param("prisonId") prisonId: String): List<String>
 
   /**
-   * How many *stored* containers a prison holds for each prisoner, excluding any whose proposed disposal
-   * date has arisen (those show as due for disposal, which takes precedence over due for return). These are
-   * exactly the containers eligible to be surfaced as due for return ahead of their owner's release, so the
-   * summary can reclassify them once the prisoners' release dates are known - see
-   * PropertyContainerService.getPrisonPropertySummary.
+   * How many containers a prison holds for each prisoner in each persisted status, counting only containers
+   * still in storage and not yet due for disposal - i.e. the ones whose displayed status depends on where their
+   * owner is. Feeds the establishment summary counts: grouping by prisoner as well as status is what lets the
+   * counts apply the owner classification, so a tile agrees with the rows the matching filter returns.
+   *
+   * Excluding containers whose disposal date has arisen keeps the buckets exclusive - disposal takes precedence,
+   * so those are counted by [countDueForDisposal] alone rather than in two tiles at once.
    */
   @Query(
-    "select c.prisonerNumber as prisonerNumber, count(c) as count " +
+    "select c.prisonerNumber as prisonerNumber, c.currentStatusValue as status, count(c) as count " +
       "from PropertyContainer c " +
       "where c.prisonId = :prisonId and c.removalOutcome is null " +
-      "and c.currentStatusValue = uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus.STORED " +
       "and (c.proposedDisposalDate is null or c.proposedDisposalDate > :today) " +
-      "group by c.prisonerNumber",
+      "group by c.prisonerNumber, c.currentStatusValue",
   )
-  fun countStoredByPrisoner(@Param("prisonId") prisonId: String, @Param("today") today: LocalDate): List<PrisonerContainerCount>
+  fun countActiveByPrisonerAndStatus(
+    @Param("prisonId") prisonId: String,
+    @Param("today") today: LocalDate,
+  ): List<PrisonerStatusContainerCount>
 
   /**
    * How many active (not removed) containers a prison holds whose proposed disposal date has now arisen
@@ -100,14 +100,12 @@ interface LocationContainerCount {
   val count: Long
 }
 
-/** Projection for [PropertyContainerRepository.countContainersByStatus]: a container status and its container count. */
-interface StatusContainerCount {
-  val status: ContainerStatus
-  val count: Long
-}
-
-/** Projection for [PropertyContainerRepository.countStoredByPrisoner]: a prisoner and their stored-container count. */
-interface PrisonerContainerCount {
+/**
+ * Projection for [PropertyContainerRepository.countActiveByPrisonerAndStatus]: a prisoner, one of their
+ * persisted container statuses, and how many of their containers hold it.
+ */
+interface PrisonerStatusContainerCount {
   val prisonerNumber: String
+  val status: ContainerStatus
   val count: Long
 }

@@ -1,5 +1,6 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration
 
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -73,7 +74,10 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$[0].prisonerCurrentPrisonName").isEqualTo("Moorland (HMP & YOI)")
       .jsonPath("$[0].inPrisonersCurrentPrison").isEqualTo(false)
       .jsonPath("$[0].currentSealNumber").isEqualTo("SEAL002")
-      .jsonPath("$[0].currentStatus").isEqualTo("STORED")
+      // The owner has moved to MDI, so the property needs to follow them - even though nothing on the
+      // container's own history records the move.
+      .jsonPath("$[0].currentStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
+      .jsonPath("$[0].receivingPrisonId").isEqualTo("MDI")
       .jsonPath("$[0].currentLocation").isEqualTo(LOCATION_B.toString())
       .jsonPath("$[0].locationDescription").isEqualTo("Reception Property Store")
   }
@@ -113,7 +117,9 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.content[0].prisonerCurrentPrisonId").isEqualTo("MDI")
       .jsonPath("$.content[0].containers.length()").isEqualTo(1)
       .jsonPath("$.content[0].containers[0].prisonId").isEqualTo("LEI")
-      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo("STORED")
+      // Same status as the person view gives the same container - the owner has moved on, so it is due to
+      // follow them, whatever the container's own history happens to record.
+      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
       .jsonPath("$.content[0].containers[0].currentLocation").isEqualTo(LOCATION_B.toString())
       .jsonPath("$.content[0].containers[0].locationDescription").isEqualTo("Reception Property Store")
       .jsonPath("$.content[0].containers[0].inPrisonersCurrentPrison").isEqualTo(false)
@@ -122,10 +128,11 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   /**
    * The regression this guards: the person view surfaced stored property as due for return ahead of release
    * while the establishment list and summary still called it stored, so the same container read differently
-   * depending on which page you opened. All three must now agree.
+   * depending on which page you opened. All four surfaces must now agree - including the status filter, whose
+   * disagreeing with the summary tile was the "tile says 100, filter returns nothing" bug.
    */
   @Test
-  fun `stored property reads due for return on the person view, the prison list and the summary before release`() {
+  fun `stored property reads due for return on the person view, the prison list, the summary and the filter before release`() {
     hmppsAuth.stubGrantToken()
     prisonRegister.stubGetPrisons()
     locations.stubPostLocationsBatch(LOCATION_B.toString())
@@ -136,26 +143,72 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "LEI", confirmedReleaseDate = releasedTomorrow)
     prisonerSearch.stubFindByNumbersWithReleaseDate("A1234BC", "LEI", releasedTomorrow)
 
+    assertStatusAgreesEverywhere("DUE_FOR_RETURN", "$.dueToBeReturned")
+  }
+
+  /**
+   * The reported bug: for a released prisoner the establishment list said "Stored" and the person page said
+   * "Due for transfer out". The container is persisted STORED because no release event ever reached us.
+   */
+  @Test
+  fun `a released prisoner's property reads due for return everywhere`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PROP2", "Box Two")), capacity = 5)
+    prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "OUT", lastMovementTypeCode = "REL")
+    prisonerSearch.stubFindByNumbersWithMovement(Triple("A1234BC", "OUT", "REL"))
+
+    assertStatusAgreesEverywhere("DUE_FOR_RETURN", "$.dueToBeReturned")
+  }
+
+  @Test
+  fun `property for a prisoner who has moved to another prison reads due for transfer out everywhere`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PROP2", "Box Two")), capacity = 5)
+    prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "MDI")
+    prisonerSearch.stubFindByNumbers("A1234BC" to "MDI")
+
+    assertStatusAgreesEverywhere("DUE_FOR_TRANSFER_OUT", "$.dueToTransferOut")
+  }
+
+  /**
+   * The seeded container reads [status] on the person view and the establishment list, is counted by
+   * [summaryField], is returned when filtering by that status, and is *not* returned when filtering by any
+   * other live status. That last part is what stops a tile counting rows its own filter cannot reach.
+   */
+  private fun assertStatusAgreesEverywhere(status: String, summaryField: String) {
     webTestClient.get().uri("/property-containers/prisoner/A1234BC")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$[0].currentStatus").isEqualTo("DUE_FOR_RETURN")
+      .jsonPath("$[0].currentStatus").isEqualTo(status)
 
     webTestClient.get().uri("/property-containers/prison/LEI")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo("DUE_FOR_RETURN")
+      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo(status)
 
     webTestClient.get().uri("/property-containers/prison/LEI/summary")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$.dueToBeReturned").isEqualTo(1)
+      .jsonPath(summaryField).isEqualTo(1)
+
+    listOf("STORED", "DUE_FOR_RETURN", "DUE_FOR_TRANSFER_OUT").forEach { filtered ->
+      webTestClient.get().uri("/property-containers/prison/LEI?status=$filtered")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+        .exchange()
+        .expectStatus().isOk
+        .expectBody()
+        .jsonPath("$.totalElements").isEqualTo(if (filtered == status) 1 else 0)
+    }
   }
 
   @Test
@@ -901,15 +954,18 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     repository.save(dueForTransferInContainer("SEALIN", prisonerNumber = "B5678CD", heldAt = "LEI", receivedAt = "MDI"))
     prisonerSearch.stubFindByNumbers("A1234BC" to "MDI", "B5678CD" to "MDI")
 
-    // From LEI (the holding prison) the same container is held here and reads as due for transfer out.
+    // From LEI (the holding prison) the same container is held here and reads as due for transfer out. So does
+    // the container seeded in setUp, whose owner is also at MDI - a container flagged by an event and one
+    // flagged only by its owner having moved are indistinguishable to the filter, as they must be.
     webTestClient.get().uri("/property-containers/prison/LEI?status=DUE_FOR_TRANSFER_OUT")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$.totalElements").isEqualTo(1)
-      .jsonPath("$.content[0].prisonerNumber").isEqualTo("B5678CD")
-      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
+      .jsonPath("$.totalElements").isEqualTo(2)
+      .jsonPath("$.content[*].prisonerNumber").value<List<String>> { assertThat(it).containsExactly("A1234BC", "B5678CD") }
+      .jsonPath("$.content[*].containers[*].currentStatus")
+      .value<List<String>> { assertThat(it).containsOnly("DUE_FOR_TRANSFER_OUT") }
   }
 
   @Test
@@ -931,6 +987,9 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       ),
       capacity = 1,
     )
+    // The owner has moved to Moorland, so all three of their containers here are due to follow them - except
+    // the one whose disposal date has arisen, which disposal claims instead.
+    prisonerSearch.stubFindByNumbers("A1234BC" to "MDI")
 
     webTestClient.get().uri("/property-containers/prison/LEI/summary")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
@@ -941,9 +1000,34 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       // two are empty (1 space each), so 2 spaces remain across the prison.
       .jsonPath("$.availableStorageSpaces").isEqualTo(2)
       .jsonPath("$.storedOnSite").isEqualTo(1)
-      .jsonPath("$.dueToTransferOut").isEqualTo(1)
+      // The seeded container and SEALT. SEALD is *not* here: a container due for disposal is counted once, in
+      // dueToBeDisposed only - it used to be counted in both.
+      .jsonPath("$.dueToTransferOut").isEqualTo(2)
       // SEALD's proposed disposal date (2026-01-01) has arisen.
       .jsonPath("$.dueToBeDisposed").isEqualTo(1)
+      .jsonPath("$.dueToBeReturned").isEqualTo(0)
+  }
+
+  @Test
+  fun `summary counts fall back to the persisted statuses when prisoner-search is unavailable`() {
+    hmppsAuth.stubGrantToken()
+    repository.save(
+      containerWithStatus("SEALT") {
+        events.add(PropertyEvent(this, PropertyEventType.PRISONER_RECEIVED, baseTime.plusHours(1), "USER1"))
+      },
+    )
+    locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PROP2", "Box Two")), capacity = 5)
+    // No bulk stub: the lookup fails and degrades to no prisoners, so nothing can be reclassified.
+    prisonerSearch.stubFindByNumbersFails()
+
+    webTestClient.get().uri("/property-containers/prison/LEI/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // The status the container itself records, i.e. the behaviour before any of this existed - and the rows
+      // and filter degrade the same way, so the page stays self-consistent.
+      .jsonPath("$.dueToTransferOut").isEqualTo(1)
       .jsonPath("$.dueToBeReturned").isEqualTo(0)
   }
 

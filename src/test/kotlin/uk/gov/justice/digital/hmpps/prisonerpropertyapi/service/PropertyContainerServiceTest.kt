@@ -28,14 +28,13 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.LocationContainerCount
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PersonLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonPropertyFilter
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerContainerCount
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerMovementStatus
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerStatusContainerCount
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StatusContainerCount
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonPropertySummaryDto
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -50,7 +49,21 @@ class PropertyContainerServiceTest {
   private val locationsClient = mock<LocationsClient>()
   private val prisonApiClient = mock<PrisonApiClient>()
   private val activeAgenciesService = mock<ActiveAgenciesService>()
-  private val service = PropertyContainerService(repository, prisonerSearchClient, prisonRegisterClient, locationsClient, prisonApiClient, activeAgenciesService)
+
+  // The resolver and overlay factory are the real thing, not mocks: they hold the status rule under test, and
+  // stubbing them would let the rows, counts and filter drift apart again - which is the bug being fixed.
+  private val statusResolver = ContainerStatusResolver()
+  private val overlayFactory = PrisonStatusOverlayFactory(prisonerSearchClient, statusResolver)
+  private val service = PropertyContainerService(
+    repository,
+    prisonerSearchClient,
+    prisonRegisterClient,
+    locationsClient,
+    prisonApiClient,
+    activeAgenciesService,
+    statusResolver,
+    overlayFactory,
+  )
 
   @BeforeEach
   fun stubEnrichmentByDefault() {
@@ -131,13 +144,83 @@ class PropertyContainerServiceTest {
   }
 
   @Test
-  fun `getByPrisonerNumber does not derive due for return once the prisoner has actually been released`() {
+  fun `getByPrisonerNumber shows a released prisoner's property as due for return`() {
+    // The container is persisted STORED because no release event ever reached us (NOMIS-migrated property), or
+    // because a later move or reseal reset the status. It is still due back to the person who was released.
     whenever(prisonerSearchClient.getPrisoner("A1234BC"))
       .thenReturn(prisoner(prisonId = "OUT", lastMovementTypeCode = "REL").copy(confirmedReleaseDate = LocalDate.now().minusDays(1)))
     whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
 
     assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
+      assertThat(it.currentStatus).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+    })
+  }
+
+  @Test
+  fun `getByPrisonerNumber shows a released prisoner's property as due for return with no release date recorded`() {
+    whenever(prisonerSearchClient.getPrisoner("A1234BC")).thenReturn(prisoner(prisonId = "OUT", lastMovementTypeCode = "REL"))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+
+    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
+      assertThat(it.currentStatus).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+    })
+  }
+
+  @Test
+  fun `getByPrisonerNumber shows property at a prison the prisoner has left as due for transfer out`() {
+    // Again with no transfer-out event on the container: the owner having moved is what matters.
+    whenever(prisonerSearchClient.getPrisoner("A1234BC")).thenReturn(prisoner(prisonId = "MDI"))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+
+    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
+      assertThat(it.currentStatus).isEqualTo(ContainerStatus.DUE_FOR_TRANSFER_OUT)
+      // The container carries no destination of its own, so it falls back to where the owner actually is -
+      // otherwise the row would say "due for transfer out" to nowhere.
+      assertThat(it.receivingPrisonId).isEqualTo("MDI")
+    })
+  }
+
+  @Test
+  fun `getByPrisonerNumber shows property as stored again once the prisoner is back, despite a stale transfer-out event`() {
+    val container = containerAt("LEI", "SEALA").apply {
+      events.add(PropertyEvent(this, PropertyEventType.PRISONER_RECEIVED, LocalDateTime.parse("2026-02-01T09:00:00"), "SYS", fromPrisonId = "LEI", toPrisonId = "MDI"))
+      refreshDerivedState()
+    }
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+
+    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
       assertThat(it.currentStatus).isEqualTo(ContainerStatus.STORED)
+    })
+  }
+
+  @Test
+  fun `getByPrisonerNumber keeps the container's own status when the prisoner cannot be resolved`() {
+    whenever(prisonerSearchClient.getPrisoner("A1234BC")).thenReturn(null)
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+
+    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
+      assertThat(it.currentStatus).isEqualTo(ContainerStatus.STORED)
+    })
+  }
+
+  @Test
+  fun `getByPrisonerNumber filters on the status shown, not the persisted one`() {
+    // The bug this closes: filtering by the status on screen used to drop the rows showing it.
+    whenever(prisonerSearchClient.getPrisoner("A1234BC")).thenReturn(prisoner(prisonId = "OUT", lastMovementTypeCode = "REL"))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("LEI", "SEALA")))
+
+    assertThat(service.getByPrisonerNumber("A1234BC", statuses = listOf(ContainerStatus.DUE_FOR_RETURN))).hasSize(1)
+    assertThat(service.getByPrisonerNumber("A1234BC", statuses = listOf(ContainerStatus.STORED))).isEmpty()
+  }
+
+  @Test
+  fun `getByPrisonerNumber keeps disposal ahead of the owner's location`() {
+    whenever(prisonerSearchClient.getPrisoner("A1234BC")).thenReturn(prisoner(prisonId = "OUT", lastMovementTypeCode = "REL"))
+    whenever(repository.findByPrisonerNumber("A1234BC"))
+      .thenReturn(listOf(containerAt("LEI", "SEALA").apply { proposedDisposalDate = LocalDate.now().minusDays(1) }))
+
+    assertThat(service.getByPrisonerNumber("A1234BC")).singleElement().satisfies({
+      assertThat(it.currentStatus).isEqualTo(ContainerStatus.DISPOSAL_REQUIRED)
     })
   }
 
@@ -207,12 +290,17 @@ class PropertyContainerServiceTest {
     whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
       listOf(propertyLocation(box1, 10), propertyLocation(box2, 20), propertyLocation(box3, 5)),
     )
-    whenever(repository.countContainersByStatus("LEI")).thenReturn(
+    whenever(repository.countActiveByPrisonerAndStatus(eq("LEI"), any())).thenReturn(
       listOf(
-        statusCount(ContainerStatus.DUE_FOR_TRANSFER_OUT, 80),
-        statusCount(ContainerStatus.DUE_FOR_RETURN, 36),
-        // A terminal status the tiles ignore.
-        statusCount(ContainerStatus.RETURNED, 5),
+        prisonerStatusCount("A0001AA", ContainerStatus.DUE_FOR_TRANSFER_OUT, 80),
+        prisonerStatusCount("B0002BB", ContainerStatus.DUE_FOR_RETURN, 36),
+      ),
+    )
+    whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(
+      mapOf(
+        // Moved on, so their property is genuinely due to follow them.
+        "A0001AA" to prisoner(prisonId = "MDI", prisonerNumber = "A0001AA"),
+        "B0002BB" to prisoner(prisonId = "OUT", lastMovementTypeCode = "REL", prisonerNumber = "B0002BB"),
       ),
     )
     whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(40)
@@ -227,36 +315,114 @@ class PropertyContainerServiceTest {
   }
 
   @Test
+  fun `getPrisonPropertySummary clears a stale transfer-out flag for an owner who is back, but not a due for return`() {
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(emptyList())
+    whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
+    whenever(repository.countActiveByPrisonerAndStatus(eq("LEI"), any())).thenReturn(
+      listOf(
+        prisonerStatusCount("A0001AA", ContainerStatus.DUE_FOR_TRANSFER_OUT, 8),
+        prisonerStatusCount("B0002BB", ContainerStatus.DUE_FOR_RETURN, 5),
+      ),
+    )
+    // Both owners are here: A0001AA left and came back, so their flag is stale; B0002BB's property was flagged
+    // by a real release or death event, which their showing as present does not undo.
+    whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(
+      mapOf(
+        "A0001AA" to prisoner(prisonId = "LEI", prisonerNumber = "A0001AA"),
+        "B0002BB" to prisoner(prisonId = "LEI", prisonerNumber = "B0002BB"),
+      ),
+    )
+
+    val summary = service.getPrisonPropertySummary("LEI")
+
+    assertThat(summary.dueToTransferOut).isEqualTo(0)
+    assertThat(summary.dueToBeReturned).isEqualTo(5)
+  }
+
+  @Test
   fun `getPrisonPropertySummary counts stored property for prisoners about to be released as due to be returned`() {
     whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
     whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(emptyList())
     whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
-    // 4 containers already flagged due for return by a real release event.
-    whenever(repository.countContainersByStatus("LEI")).thenReturn(listOf(statusCount(ContainerStatus.DUE_FOR_RETURN, 4)))
-    // Stored property for three prisoners: one released tomorrow, one much later, one already released.
-    whenever(repository.countStoredByPrisoner(eq("LEI"), any())).thenReturn(
-      listOf(prisonerCount("A0001AA", 3), prisonerCount("B0002BB", 5), prisonerCount("C0003CC", 7)),
+    whenever(repository.countActiveByPrisonerAndStatus(eq("LEI"), any())).thenReturn(
+      listOf(
+        // Already flagged due for return by a real release event.
+        prisonerStatusCount("A0001AA", ContainerStatus.DUE_FOR_RETURN, 4),
+        // Stored property for three prisoners: one released tomorrow, one much later, one already released.
+        prisonerStatusCount("B0002BB", ContainerStatus.STORED, 3),
+        prisonerStatusCount("C0003CC", ContainerStatus.STORED, 5),
+        prisonerStatusCount("D0004DD", ContainerStatus.STORED, 7),
+      ),
     )
     whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(
       mapOf(
-        "A0001AA" to prisoner(prisonId = "LEI", confirmedReleaseDate = LocalDate.now().plusDays(1), prisonerNumber = "A0001AA"),
-        "B0002BB" to prisoner(prisonId = "LEI", confirmedReleaseDate = LocalDate.now().plusMonths(6), prisonerNumber = "B0002BB"),
-        // Already out: the release event has already flagged their property, so counting it again would double up.
-        "C0003CC" to prisoner(prisonId = "OUT", lastMovementTypeCode = "REL", confirmedReleaseDate = LocalDate.now(), prisonerNumber = "C0003CC"),
+        "A0001AA" to prisoner(prisonId = "LEI", prisonerNumber = "A0001AA"),
+        "B0002BB" to prisoner(prisonId = "LEI", confirmedReleaseDate = LocalDate.now().plusDays(1), prisonerNumber = "B0002BB"),
+        "C0003CC" to prisoner(prisonId = "LEI", confirmedReleaseDate = LocalDate.now().plusMonths(6), prisonerNumber = "C0003CC"),
+        // Already out: their stored property is due back to them too, which is the bug this fixes - it used to
+        // read "stored" on the establishment list and "due for transfer out" on the person view.
+        "D0004DD" to prisoner(prisonId = "OUT", lastMovementTypeCode = "REL", confirmedReleaseDate = LocalDate.now(), prisonerNumber = "D0004DD"),
       ),
     )
 
-    // 4 already flagged + 3 for the prisoner releasing tomorrow.
-    assertThat(service.getPrisonPropertySummary("LEI").dueToBeReturned).isEqualTo(7)
+    // 4 already flagged (their owner being present does not undo a recorded release) + 3 releasing tomorrow
+    // + 7 already released. The 5 releasing in six months stay stored.
+    assertThat(service.getPrisonPropertySummary("LEI").dueToBeReturned).isEqualTo(14)
   }
 
   @Test
-  fun `getPrisonPropertySummary does not look up prisoners when the prison holds no stored property`() {
-    whenever(repository.countContainersByStatus("LEI")).thenReturn(emptyList())
+  fun `getPrisonPropertySummary counts property for a prisoner who has moved on as due to transfer out`() {
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(emptyList())
+    whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
+    whenever(repository.countActiveByPrisonerAndStatus(eq("LEI"), any())).thenReturn(
+      listOf(
+        prisonerStatusCount("A0001AA", ContainerStatus.STORED, 3),
+        // A stale flag: the owner left and came back, so their property here is simply stored again.
+        prisonerStatusCount("B0002BB", ContainerStatus.DUE_FOR_TRANSFER_OUT, 2),
+      ),
+    )
+    whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(
+      mapOf(
+        // Moved to Moorland with no transfer-out event recorded here - typical of NOMIS-migrated property.
+        "A0001AA" to prisoner(prisonId = "MDI", prisonerNumber = "A0001AA"),
+        "B0002BB" to prisoner(prisonId = "LEI", prisonerNumber = "B0002BB"),
+      ),
+    )
+
+    val summary = service.getPrisonPropertySummary("LEI")
+
+    assertThat(summary.dueToTransferOut).isEqualTo(3)
+    assertThat(summary.dueToBeReturned).isEqualTo(0)
+  }
+
+  @Test
+  fun `getPrisonPropertySummary falls back to the persisted statuses when prisoners cannot be resolved`() {
+    whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(emptyList())
+    whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
+    whenever(repository.countActiveByPrisonerAndStatus(eq("LEI"), any())).thenReturn(
+      listOf(
+        prisonerStatusCount("A0001AA", ContainerStatus.DUE_FOR_RETURN, 4),
+        prisonerStatusCount("B0002BB", ContainerStatus.DUE_FOR_TRANSFER_OUT, 6),
+      ),
+    )
+    // prisoner-search unavailable: a failed chunk yields no prisoners rather than an error.
+    whenever(prisonerSearchClient.getPrisoners(any())).thenReturn(emptyMap())
+
+    val summary = service.getPrisonPropertySummary("LEI")
+
+    assertThat(summary.dueToBeReturned).isEqualTo(4)
+    assertThat(summary.dueToTransferOut).isEqualTo(6)
+  }
+
+  @Test
+  fun `getPrisonPropertySummary does not look up prisoners when the prison holds no active property`() {
+    whenever(repository.countActiveByPrisonerAndStatus(eq("LEI"), any())).thenReturn(emptyList())
     whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
     whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
     whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(emptyList())
-    whenever(repository.countStoredByPrisoner(eq("LEI"), any())).thenReturn(emptyList())
 
     assertThat(service.getPrisonPropertySummary("LEI").dueToBeReturned).isEqualTo(0)
     verify(prisonerSearchClient, never()).getPrisoners(any())
@@ -272,7 +438,7 @@ class PropertyContainerServiceTest {
     whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
       listOf(propertyLocation(box1, 10), propertyLocation(box2, 5)),
     )
-    whenever(repository.countContainersByStatus("LEI")).thenReturn(emptyList())
+    whenever(repository.countActiveByPrisonerAndStatus(eq("LEI"), any())).thenReturn(emptyList())
     whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
 
     val summary = service.getPrisonPropertySummary("LEI")
@@ -283,7 +449,7 @@ class PropertyContainerServiceTest {
 
   @Test
   fun `getPrisonPropertySummary returns zero counts for a prison with no property or locations`() {
-    whenever(repository.countContainersByStatus("LEI")).thenReturn(emptyList())
+    whenever(repository.countActiveByPrisonerAndStatus(eq("LEI"), any())).thenReturn(emptyList())
     whenever(repository.countContainersByLocation("LEI")).thenReturn(emptyList())
     whenever(repository.countDueForDisposal(eq("LEI"), any())).thenReturn(0)
     whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(emptyList())
@@ -594,13 +760,9 @@ class PropertyContainerServiceTest {
       .hasMessageContaining(id.toString())
   }
 
-  private fun statusCount(status: ContainerStatus, count: Long): StatusContainerCount = object : StatusContainerCount {
-    override val status = status
-    override val count = count
-  }
-
-  private fun prisonerCount(prisonerNumber: String, count: Long): PrisonerContainerCount = object : PrisonerContainerCount {
+  private fun prisonerStatusCount(prisonerNumber: String, status: ContainerStatus, count: Long): PrisonerStatusContainerCount = object : PrisonerStatusContainerCount {
     override val prisonerNumber = prisonerNumber
+    override val status = status
     override val count = count
   }
 

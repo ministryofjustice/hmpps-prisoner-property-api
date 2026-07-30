@@ -103,8 +103,16 @@ class PropertyContainerRepositoryImpl(
    * applied. No status filter hides containers that have left active storage; an explicit filter matches
    * exactly. includeRemoved additionally surfaces removed/returned/disposed containers alongside either
    * selection (transferred, combined and created-in-error stay hidden - they live in the person view).
-   * DISPOSAL_REQUIRED is time-based (not held in the denormalised column), so it matches on the proposed
-   * disposal date having arisen rather than on currentStatusValue.
+   *
+   * The statuses split three ways, mirroring the precedence in `ContainerStatusResolver`:
+   *  - the removal outcomes match the denormalised column directly - a removed container's status is its own
+   *    business and no owner movement changes it;
+   *  - DISPOSAL_REQUIRED is time-based rather than denormalised, so it matches on the proposed disposal date
+   *    having arisen;
+   *  - the live statuses (stored / due for return / due for transfer out) depend on where the owner now is,
+   *    so they go through [effectivelyLive].
+   * Because the three are mutually exclusive, filtering by the status shown on screen returns exactly the rows
+   * showing it.
    */
   private fun heldHereScope(cb: CriteriaBuilder, root: Root<PropertyContainer>, prisonId: String, filter: PrisonPropertyFilter): Predicate {
     val parts = mutableListOf<Predicate>(cb.equal(root.get<String>("prisonId"), prisonId))
@@ -112,17 +120,15 @@ class PropertyContainerRepositoryImpl(
     val noLongerHeld = root.get<RemovalOutcome>("removalOutcome")
       .`in`(RemovalOutcome.REMOVED, RemovalOutcome.RETURNED, RemovalOutcome.DISPOSED)
     val statusPredicate = if (filter.statuses.isEmpty()) {
+      // No status filter: membership does not depend on status, so no owner classification is needed.
       cb.isNull(root.get<RemovalOutcome>("removalOutcome"))
     } else {
       val statusParts = mutableListOf<Predicate>()
-      val nonDisposal = filter.statuses.filter { it != ContainerStatus.DISPOSAL_REQUIRED }
-      if (nonDisposal.isNotEmpty()) statusParts += root.get<ContainerStatus>("currentStatusValue").`in`(nonDisposal)
-      if (filter.statuses.contains(ContainerStatus.DISPOSAL_REQUIRED)) {
-        statusParts += cb.and(
-          cb.isNull(root.get<RemovalOutcome>("removalOutcome")),
-          cb.lessThanOrEqualTo(root.get<LocalDate>("proposedDisposalDate"), LocalDate.now()),
-        )
-      }
+      val persistedOnly = filter.statuses.filter { it != ContainerStatus.DISPOSAL_REQUIRED && it !in OwnerLocation.LIVE_STATUSES }
+      if (persistedOnly.isNotEmpty()) statusParts += root.get<ContainerStatus>("currentStatusValue").`in`(persistedOnly)
+      if (filter.statuses.contains(ContainerStatus.DISPOSAL_REQUIRED)) statusParts += disposalDue(cb, root)
+      filter.statuses.filter { it in OwnerLocation.LIVE_STATUSES }
+        .forEach { statusParts += effectivelyLive(cb, root, it, filter.statusOverlay) }
       cb.or(*statusParts.toTypedArray())
     }
     parts += if (filter.includeRemoved) cb.or(statusPredicate, noLongerHeld) else statusPredicate
@@ -133,5 +139,46 @@ class PropertyContainerRepositoryImpl(
         parts += if (filter.locationIds.isEmpty()) cb.disjunction() else root.get<UUID>("currentInternalLocationId").`in`(filter.locationIds)
     }
     return cb.and(*parts.toTypedArray())
+  }
+
+  /** Still in storage and past its proposed disposal date - the time-based DISPOSAL_REQUIRED status. */
+  private fun disposalDue(cb: CriteriaBuilder, root: Root<PropertyContainer>): Predicate = cb.and(
+    cb.isNull(root.get<RemovalOutcome>("removalOutcome")),
+    cb.lessThanOrEqualTo(root.get<LocalDate>("proposedDisposalDate"), LocalDate.now()),
+  )
+
+  /**
+   * Containers still in storage, not due for disposal, whose *effective* status is [status] - i.e. what the
+   * views actually show, not what the status column happens to hold.
+   *
+   * A live container's status depends on where its owner is, so matching a status means matching each group of
+   * owners together with the persisted statuses that read as [status] for that group. Both halves come from
+   * `OwnerLocation.persistedStatusesReadingAs`, the inverse of the rule the rows use, so the filter cannot drift
+   * from what is on screen. Containers relabelled *away* from [status] fall out without a second clause -
+   * filtering by STORED simply never matches the persisted statuses of an owner who has been released.
+   *
+   * With no [overlay] (unclassified, or prisoner-search unavailable) this falls back to the persisted status,
+   * which is how every surface degrades together rather than inconsistently.
+   */
+  private fun effectivelyLive(
+    cb: CriteriaBuilder,
+    root: Root<PropertyContainer>,
+    status: ContainerStatus,
+    overlay: StatusOverlay?,
+  ): Predicate {
+    val live = cb.and(
+      cb.isNull(root.get<RemovalOutcome>("removalOutcome")),
+      cb.or(
+        cb.isNull(root.get<LocalDate>("proposedDisposalDate")),
+        cb.greaterThan(root.get<LocalDate>("proposedDisposalDate"), LocalDate.now()),
+      ),
+    )
+    if (overlay == null) return cb.and(live, cb.equal(root.get<ContainerStatus>("currentStatusValue"), status))
+
+    val prisonerNumber = root.get<String>("prisonerNumber")
+    val matches = overlay.matchesFor(status).map { (prisoners, persistedStatuses) ->
+      cb.and(prisonerNumber.`in`(prisoners), root.get<ContainerStatus>("currentStatusValue").`in`(persistedStatuses))
+    }
+    return if (matches.isEmpty()) cb.disjunction() else cb.and(live, cb.or(*matches.toTypedArray()))
   }
 }

@@ -25,6 +25,11 @@ spring:
     properties:
       hibernate:
         default_batch_fetch_size: 100
+        query:
+          # The establishment list binds a set of prisoner numbers when filtering on a status that depends on
+          # where each owner is (see StatusOverlay), and that set changes size constantly. Padding the IN list
+          # to the next power of two keeps the number of distinct SQL strings small so the plan cache still works.
+          in_clause_parameter_padding: true
 
   flyway:
     enabled: true
