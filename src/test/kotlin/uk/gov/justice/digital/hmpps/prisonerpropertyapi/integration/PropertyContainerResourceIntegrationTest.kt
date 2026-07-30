@@ -897,6 +897,7 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     // B5678CD's container is held at LEI, but they were received at MDI, so it is due to transfer in to MDI.
     repository.save(dueForTransferInContainer("SEALIN", prisonerNumber = "B5678CD", heldAt = "LEI", receivedAt = "MDI"))
     prisonerSearch.stubFindByNumbers("B5678CD" to "MDI")
+    prisonerSearch.stubFindByPrison("MDI", "B5678CD")
 
     // Viewing MDI by default: nothing is physically held at MDI, so the incoming property is not listed.
     webTestClient.get().uri("/property-containers/prison/MDI")
@@ -934,8 +935,48 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       },
     )
     prisonerSearch.stubFindByNumbers("A1234BC" to "MDI", "B5678CD" to "MDI")
+    // Both are at MDI, so both have property still sitting at LEI that is owed here.
+    prisonerSearch.stubFindByPrison("MDI", "A1234BC", "B5678CD")
 
-    // Ticking transfer-in on its own drops the held-here scope: only the incoming container is returned.
+    // Ticking transfer-in on its own drops the held-here scope, so the container physically at MDI is not
+    // listed - but both LEI containers are: B5678CD's, which records MDI as its destination, and A1234BC's
+    // seeded one, which records nothing at all and is found purely because its owner is now here.
+    webTestClient.get().uri("/property-containers/prison/MDI?dueForTransferIn=true")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(2)
+      .jsonPath("$.content[*].prisonerNumber").value<List<String>> { assertThat(it).containsExactly("A1234BC", "B5678CD") }
+      .jsonPath("$.content[*].containers[*].prisonId").value<List<String>> { assertThat(it).containsOnly("LEI") }
+  }
+
+  /**
+   * The reported gap: property left behind at another prison, with nothing on the container recording the
+   * move, was invisible in the receiving prison's incoming list - even though the same container reads
+   * "due for transfer out" at the holding prison and shows on the person's own property page.
+   */
+  @Test
+  fun `dueForTransferIn surfaces property left at another prison for someone now here`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch()
+    // Held at LEI with only a create event, so it records no destination of its own.
+    repository.save(
+      PropertyContainer(
+        prisonerNumber = "B5678CD",
+        prisonId = "LEI",
+        containerType = ContainerType.STANDARD,
+        createdByUserId = "USER1",
+        currentSealNumber = "LEFTBEHIND",
+      ).apply {
+        events.add(PropertyEvent(this, PropertyEventType.CREATED_SEALED, baseTime, "USER1", sealNumber = "LEFTBEHIND", toPrisonId = "LEI"))
+        refreshDerivedState()
+      },
+    )
+    prisonerSearch.stubFindByNumbers("B5678CD" to "MDI")
+    prisonerSearch.stubFindByPrison("MDI", "B5678CD")
+
     webTestClient.get().uri("/property-containers/prison/MDI?dueForTransferIn=true")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
@@ -943,7 +984,31 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .expectBody()
       .jsonPath("$.totalElements").isEqualTo(1)
       .jsonPath("$.content[0].prisonerNumber").isEqualTo("B5678CD")
-      .jsonPath("$.content[0].containers[0].currentSealNumber").isEqualTo("SEALIN")
+      .jsonPath("$.content[0].containers[0].prisonId").isEqualTo("LEI")
+      // Still reads as due for transfer out - the status is about the container, not about who is looking.
+      .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
+      // The destination falls back to where the owner actually is, so the row does not point nowhere.
+      .jsonPath("$.content[0].containers[0].receivingPrisonId").isEqualTo("MDI")
+  }
+
+  @Test
+  fun `dueForTransferIn falls back to recorded destinations when the prison roll cannot be resolved`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch()
+    repository.save(dueForTransferInContainer("SEALIN", prisonerNumber = "B5678CD", heldAt = "LEI", receivedAt = "MDI"))
+    // A1234BC's seeded container at LEI records no destination, so only the roll could have found it.
+    prisonerSearch.stubFindByNumbers("A1234BC" to "MDI", "B5678CD" to "MDI")
+    prisonerSearch.stubFindByPrisonFails("MDI")
+
+    webTestClient.get().uri("/property-containers/prison/MDI?dueForTransferIn=true")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // The list narrows to what the containers themselves record rather than the read failing.
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].prisonerNumber").isEqualTo("B5678CD")
   }
 
   @Test

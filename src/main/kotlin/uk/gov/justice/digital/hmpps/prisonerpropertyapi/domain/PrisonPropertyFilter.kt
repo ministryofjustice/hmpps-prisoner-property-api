@@ -18,14 +18,19 @@ import java.util.UUID
  * @param branstonOnly restrict to containers held offsite at Branston (takes precedence over [locationIds]).
  * @param search a single free-text term matched (OR) against prisoner number, seal number and storage
  *   location. [searchLocationIds]/[searchBranston] carry the resolved storage-location part of that term.
- * @param includeTransferIn when true, additionally surface containers held at another prison that are due
- *   to be transferred *in* to this establishment (its owner was received here). Additive: it widens the
- *   held-here result rather than narrowing it. When it is the only status selection, only incoming
- *   property is returned.
+ * @param includeTransferIn when true, additionally surface containers held at another prison that are needed
+ *   here: either their owner is now at this establishment, or they have been sent here and not yet logged.
+ *   Additive: it widens the held-here result rather than narrowing it. When it is the only status selection,
+ *   only incoming property is returned.
  * @param statusOverlay the establishment's owner classification, needed whenever [statuses] asks for a status
  *   a container still in storage can hold (see [OwnerLocation.LIVE_STATUSES]), since those depend on where the
  *   owner now is. Null means unclassified, and the status filter then matches the persisted status column
  *   alone - the behaviour before the overlay existed, and the fallback when prisoner-search is unavailable.
+ * @param incomingPrisonerNumbers everyone currently at this establishment, needed by [includeTransferIn] to
+ *   find property still held at the prison they came from. Null means the roll could not be resolved, and the
+ *   incoming scope then matches only the destination recorded on each container - which is the behaviour
+ *   before this existed, and the fallback when prisoner-search is unavailable. Empty means the roll *was*
+ *   resolved and nobody is here, so nothing can be incoming.
  */
 data class PrisonPropertyFilter(
   val prisonerNumber: String? = null,
@@ -40,6 +45,7 @@ data class PrisonPropertyFilter(
   val searchBranston: Boolean = false,
   val includeTransferIn: Boolean = false,
   val statusOverlay: StatusOverlay? = null,
+  val incomingPrisonerNumbers: Set<String>? = null,
 ) {
   /** Whether any requested status depends on the owner's location, and so needs a [statusOverlay] to resolve. */
   fun needsStatusOverlay(): Boolean = statuses.any { it in OwnerLocation.LIVE_STATUSES }

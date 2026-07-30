@@ -1,9 +1,12 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.client
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.WebClientResponseException
@@ -37,6 +40,54 @@ class PrisonerSearchClient(
       "lastMovementTypeCode",
       "confirmedReleaseDate",
     ).joinToString(",")
+
+    /**
+     * How many of a prison's population to ask for in one go. Comfortably above the largest establishment
+     * (~2,100) and well under the 10,000 result window the search index enforces on offset + size, so the
+     * whole roll arrives in a single request. The endpoint documents paging as unreliable - it sorts by
+     * relevance score, which differs between shards - so one large page is the intended usage rather than a
+     * shortcut. There is no server-side cap on this endpoint's page size.
+     */
+    private const val PRISON_ROLL_PAGE_SIZE = 5000
+  }
+
+  /**
+   * The prisoner numbers of everyone currently at [prisonId], plus the true population size so the caller can
+   * tell whether the roll was complete. Returns null when the roll could not be fetched at all - distinct
+   * from an empty roll, which means the prison genuinely holds nobody.
+   *
+   * Used to find property that belongs to someone here but is still held at the prison they came from. Only
+   * the prisoner number is requested; nothing else is needed and the endpoint warns about response size.
+   */
+  fun getPrisonRoll(prisonId: String): PrisonRoll? {
+    log.debug("Looking up the roll for {}", prisonId)
+    return try {
+      val page = prisonerSearchWebClient
+        .get()
+        .uri { builder ->
+          builder.path("/prisoner-search/prison/{prisonId}")
+            // Nothing forces prisonerNumber into the response - a field left out here comes back null.
+            .queryParam("responseFields", "prisonerNumber")
+            .queryParam("size", PRISON_ROLL_PAGE_SIZE)
+            .queryParam("page", 0)
+            .build(prisonId)
+        }
+        // The endpoint declares consumes=application/json even though this is a GET with no body, so without
+        // this header the request is treated as octet-stream and rejected with 415.
+        .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+        .retrieve()
+        // Deserialised into our own shape: the response is a Spring Page, which Jackson cannot construct.
+        .bodyToMono<PrisonRollPage>()
+        .block()
+        ?: return null
+      PrisonRoll(
+        prisonerNumbers = page.content.mapNotNull { it.prisonerNumber }.toSet(),
+        totalAtPrison = page.totalElements,
+      )
+    } catch (ex: WebClientResponseException) {
+      log.warn("Prison roll lookup for {} failed ({}), so property owners there cannot be resolved", prisonId, ex.statusCode)
+      null
+    }
   }
 
   /**
@@ -88,6 +139,32 @@ class PrisonerSearchClient(
 }
 
 data class PrisonerNumbers(val prisonerNumbers: List<String>)
+
+/**
+ * Everyone currently at a prison. [totalAtPrison] is the population the search index reports, which is larger
+ * than [prisonerNumbers] only if the roll was truncated by the page size.
+ */
+data class PrisonRoll(
+  val prisonerNumbers: Set<String>,
+  val totalAtPrison: Long,
+) {
+  /** Whether the roll came back short, so some of the prison's population is missing from it. */
+  fun isTruncated(): Boolean = prisonerNumbers.size < totalAtPrison
+}
+
+/**
+ * The parts of prisoner-search's paged response we use. It returns a Spring `Page`, which cannot be
+ * deserialised directly (`PageImpl` has no constructor Jackson can call), so this maps the two fields that
+ * matter and ignores the rest of the paging envelope.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+private data class PrisonRollPage(
+  val content: List<PrisonerNumberOnly> = emptyList(),
+  val totalElements: Long = 0,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+private data class PrisonerNumberOnly(val prisonerNumber: String?)
 
 data class Prisoner(
   val prisonerNumber: String,

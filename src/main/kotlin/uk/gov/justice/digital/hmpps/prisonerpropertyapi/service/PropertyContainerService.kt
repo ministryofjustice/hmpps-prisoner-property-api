@@ -46,6 +46,7 @@ class PropertyContainerService(
   private val activeAgenciesService: ActiveAgenciesService,
   private val statusResolver: ContainerStatusResolver,
   private val overlayFactory: PrisonStatusOverlayFactory,
+  private val prisonRollFactory: PrisonRollFactory,
 ) {
 
   /**
@@ -219,7 +220,14 @@ class PropertyContainerService(
     } else {
       OwnerClassification.NONE
     }
-    val filter = unresolvedFilter.copy(statusOverlay = classification.overlay)
+    // Property coming here is largely property whose owner has arrived but whose box has not, and the
+    // container itself often records nothing about the move. Who is here answers that, and only prisoner-search
+    // knows - so it is fetched, like the classification above, only when actually asked for.
+    val incomingPrisonerNumbers = if (includeTransferIn) prisonRollFactory.prisonersAt(prisonId) else null
+    val filter = unresolvedFilter.copy(
+      statusOverlay = classification.overlay,
+      incomingPrisonerNumbers = incomingPrisonerNumbers,
+    )
 
     if (personLocation == null) {
       // Common path: the property DB paginates by prisoner, and prisoner-search is only called for the page.

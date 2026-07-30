@@ -319,6 +319,114 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `incoming property includes property held elsewhere for someone now at this prison`() {
+    // Nothing on the container records the move - the owner being here is what makes it incoming. This is the
+    // case NOMIS-migrated property falls into, and the one the recorded destination alone always missed.
+    saveActive("A0001AA", "LEFT-BEHIND", prisonId = "LEI")
+
+    assertThat(incomingSeals(roll = setOf("A0001AA"), prisonerNumbers = listOf("A0001AA"))).containsExactly("LEFT-BEHIND")
+  }
+
+  @Test
+  fun `incoming property excludes property already held at this prison`() {
+    saveActive("A0001AA", "HERE", prisonId = "MDI")
+
+    assertThat(incomingSeals(roll = setOf("A0001AA"), prisonerNumbers = listOf("A0001AA"))).isEmpty()
+  }
+
+  @Test
+  fun `incoming property excludes property whose owner is not at this prison`() {
+    saveActive("A0001AA", "SOMEONE-ELSES", prisonId = "LEI")
+
+    assertThat(incomingSeals(roll = setOf("B0002BB"), prisonerNumbers = listOf("A0001AA"))).isEmpty()
+  }
+
+  @Test
+  fun `incoming property excludes property that has left storage elsewhere`() {
+    saveActive("A0001AA", "GONE", prisonId = "LEI").apply {
+      removalOutcome = RemovalOutcome.RETURNED
+      removalDate = LocalDate.now()
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+
+    assertThat(incomingSeals(roll = setOf("A0001AA"), prisonerNumbers = listOf("A0001AA"))).isEmpty()
+  }
+
+  @Test
+  fun `incoming property still includes a transfer already sent here, alongside the owner-driven ones`() {
+    saveTransferredTo("A0001AA", "IN-TRANSIT", heldAt = "LEI", toPrisonId = "MDI")
+    saveActive("B0002BB", "LEFT-BEHIND", prisonId = "LEI")
+
+    assertThat(incomingSeals(roll = setOf("A0001AA", "B0002BB"), prisonerNumbers = listOf("A0001AA", "B0002BB")))
+      .containsExactlyInAnyOrder("IN-TRANSIT", "LEFT-BEHIND")
+  }
+
+  @Test
+  fun `incoming property falls back to the recorded destination when the roll is unavailable`() {
+    saveTransferredTo("A0001AA", "IN-TRANSIT", heldAt = "LEI", toPrisonId = "MDI")
+    saveActive("B0002BB", "LEFT-BEHIND", prisonId = "LEI")
+
+    // A null roll is "we do not know who is here", so only what the containers themselves record shows.
+    assertThat(incomingSeals(roll = null, prisonerNumbers = listOf("A0001AA", "B0002BB"))).containsExactly("IN-TRANSIT")
+  }
+
+  @Test
+  fun `an empty roll means nobody is here, so only recorded destinations match`() {
+    saveTransferredTo("A0001AA", "IN-TRANSIT", heldAt = "LEI", toPrisonId = "MDI")
+    saveActive("B0002BB", "LEFT-BEHIND", prisonId = "LEI")
+
+    assertThat(incomingSeals(roll = emptySet(), prisonerNumbers = listOf("A0001AA", "B0002BB"))).containsExactly("IN-TRANSIT")
+  }
+
+  @Test
+  fun `includeRemoved does not widen what counts as incoming`() {
+    saveActive("A0001AA", "GONE", prisonId = "LEI").apply {
+      removalOutcome = RemovalOutcome.DISPOSED
+      removalDate = LocalDate.now()
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+
+    // Property disposed of at another prison is not this prison's to receive, however the filter is set.
+    assertThat(incomingSeals(roll = setOf("A0001AA"), prisonerNumbers = listOf("A0001AA"), includeRemoved = true)).isEmpty()
+  }
+
+  @Test
+  fun `a seal search still applies to incoming property`() {
+    saveActive("A0001AA", "WANTED", prisonId = "LEI")
+    saveActive("A0001AA", "OTHER", prisonId = "LEI")
+
+    val seals = containerRepository.findContainers(
+      "MDI",
+      PrisonPropertyFilter(includeTransferIn = true, incomingPrisonerNumbers = setOf("A0001AA"), sealNumber = "wanted"),
+      listOf("A0001AA"),
+    ).map { it.currentSealNumber }
+
+    assertThat(seals).containsExactly("WANTED")
+  }
+
+  @Test
+  fun `asking for a status as well returns held-here property with that status plus all incoming property`() {
+    saveActive("A0001AA", "STORED-HERE", prisonId = "MDI")
+    saveActive("A0001AA", "LEFT-BEHIND", prisonId = "LEI")
+
+    val seals = containerRepository.findContainers(
+      "MDI",
+      PrisonPropertyFilter(
+        statuses = listOf(ContainerStatus.STORED),
+        statusOverlay = overlayOf("A0001AA" to OwnerLocation.HERE),
+        includeTransferIn = true,
+        incomingPrisonerNumbers = setOf("A0001AA"),
+      ),
+      listOf("A0001AA"),
+    ).map { it.currentSealNumber }
+
+    // The two scopes are OR'd: incoming property is not narrowed by the status selection.
+    assertThat(seals).containsExactlyInAnyOrder("STORED-HERE", "LEFT-BEHIND")
+  }
+
+  @Test
   fun `filtering by DISPOSAL_REQUIRED returns only containers whose disposal date has arisen`() {
     saveWithDisposalDate("A0001AA", "PAST", LocalDate.now().minusDays(1))
     saveWithDisposalDate("A0001AA", "FUTURE", LocalDate.now().plusDays(1))
@@ -393,6 +501,22 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
 
   /** An owner classification built by hand, so the predicate can be tested without prisoner-search. */
   private fun overlayOf(vararg owners: Pair<String, OwnerLocation>) = StatusOverlay(owners.toMap())
+
+  /** The seals the establishment list at MDI returns when asking for incoming property, given a prison roll. */
+  private fun incomingSeals(roll: Set<String>?, prisonerNumbers: List<String>, includeRemoved: Boolean = false): List<String?> = containerRepository.findContainers(
+    "MDI",
+    PrisonPropertyFilter(includeTransferIn = true, incomingPrisonerNumbers = roll, includeRemoved = includeRemoved),
+    prisonerNumbers,
+  ).map { it.currentSealNumber }
+
+  /** A container at [heldAt] already transferred out to [toPrisonId] and not yet logged there. */
+  private fun saveTransferredTo(prisonerNumber: String, seal: String, heldAt: String, toPrisonId: String): PropertyContainer = saveActive(prisonerNumber, seal, prisonId = heldAt).apply {
+    events.add(PropertyEvent(this, PropertyEventType.TRANSFERRED, baseTime.plusDays(1), "USER1", fromPrisonId = heldAt, toPrisonId = toPrisonId))
+    removalOutcome = RemovalOutcome.TRANSFERRED
+    removalDate = LocalDate.now()
+    refreshDerivedState()
+    containerRepository.save(this)
+  }
 
   /** The seals of the containers the establishment list returns when filtering by [status]. */
   private fun sealsMatching(status: ContainerStatus, overlay: StatusOverlay?, prisonerNumbers: List<String>): List<String?> = containerRepository.findContainers(
