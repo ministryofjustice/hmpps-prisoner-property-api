@@ -2,9 +2,9 @@
 
 Backlog for the **[MAPB-709](https://dsdmoj.atlassian.net/browse/MAPB-709) — Property snag issues**
 epic: bugs, an establishment-vs-prisoner view consistency gap, and a few enhancements found in testing
-and review. All ten items from the original batch are implemented; a second round (MAPB-725 to MAPB-727, plus
-MAPB-730) came out of testing those. The notes below record the decisions taken along the way, so the
-reasoning survives the tickets. Update **Status** and add PR links as the remaining items land.
+and review. All ten items from the original batch are implemented; a second round (MAPB-725 to MAPB-727, then
+MAPB-730, MAPB-732 and MAPB-733) came out of testing those. The notes below record the decisions taken along
+the way, so the reasoning survives the tickets. Update **Status** and add PR links as the remaining items land.
 
 Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property-ui ·
 **LIP** = hmpps-locations-inside-prison-api.
@@ -30,7 +30,8 @@ Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property
 | [MAPB-726](https://dsdmoj.atlassian.net/browse/MAPB-726) | Bug | M | API | Make the property status filters and summary tiles agree with the status shown | Merged (api #71) |
 | [MAPB-727](https://dsdmoj.atlassian.net/browse/MAPB-727) | Bug | M | API + UI | Match old and new seal numbers when logging property that arrived on transfer | Merged (api #71, #72; ui #57, #58) |
 | [MAPB-730](https://dsdmoj.atlassian.net/browse/MAPB-730) | Story | M | UI | Remember the establishment list filters when navigating away and back | To do |
-| [MAPB-732](https://dsdmoj.atlassian.net/browse/MAPB-732) | Bug | M | API | Show property left at another establishment in the receiving prison's incoming list | To do |
+| [MAPB-732](https://dsdmoj.atlassian.net/browse/MAPB-732) | Bug | M | API | Show property left at another establishment in the receiving prison's incoming list | Merged (api #74) |
+| [MAPB-733](https://dsdmoj.atlassian.net/browse/MAPB-733) | Bug | M | API + UI | Show a transferred box at the prison the person actually went to, not the one it was addressed to | To do |
 
 ## Notes
 
@@ -166,17 +167,26 @@ the cluster the source of truth instead of the chart, and it will drift again.
   order: parallelise the chunk fan-out, then a short-TTL cache on `PrisonStatusOverlayFactory` (the single
   seam), then prisoner-search's `/attribute-search` — noting the last is scoped to the prisoner's *current*
   prison so it misses property left behind elsewhere.
-- **Incoming-property filter gap — now [MAPB-732](https://dsdmoj.atlassian.net/browse/MAPB-732).**
-  `?dueForTransferIn=true` still keys on the persisted `receivingPrisonId`, so migrated property left at LEI
-  for someone now at MDI will not appear in MDI's incoming list even though it now reads "due for transfer
-  out" at LEI — and appears correctly on the person's own page, which needs no such column. This is the last
-  place the two views still disagree about the same container. The owner-classification trick cannot fix it:
-  `StatusOverlay` starts from the prisoners holding property *here* and resolves where they are, whereas this
-  needs the inverse — the prisoners currently *here* who hold property elsewhere — which the property database
-  cannot enumerate. The ticket proposes `GET /prisoner-search/prison/{prisonId}` (all prisoners in a prison,
-  `responseFields=prisonerNumber`, one large page rather than paging) unioned with the existing
-  `receiving_prison_id` clause, and flags the prerequisite to check first: that endpoint needs
-  `ROLE_GLOBAL_SEARCH` or `ROLE_PRISONER_SEARCH`, which the property API's client may not hold today.
+- **Incoming-property filter gap — fixed by [MAPB-732](https://dsdmoj.atlassian.net/browse/MAPB-732).**
+  `?dueForTransferIn=true` keyed on the persisted `receivingPrisonId` alone, so property left at LEI for
+  someone now at MDI never appeared in MDI's incoming list — the last place the establishment and person views
+  still disagreed about the same container. The column is not merely absent on migrated data, it *decays*:
+  sync writes moves and reseals, `baseEventStatus()` follows the latest event back to `STORED`, and
+  `refreshDerivedState()` clears the destination. The owner-classification trick could not help, because
+  `StatusOverlay` resolves the opposite direction — it starts from the people holding property *here*,
+  whereas this needs the people *here* who hold property elsewhere. That comes from prisoner-search's prison
+  roll (`PrisonRollFactory`), fetched once and only when incoming property is actually requested, and the
+  filter falls back to the recorded destinations alone if the roll is unavailable. **No auth change was
+  needed** — the roll endpoint shares a role gate with the bulk lookup already in use, so the prerequisite
+  flagged on the ticket turned out to be already satisfied.
+- **A transferred box addressed to the wrong prison — [MAPB-733](https://dsdmoj.atlassian.net/browse/MAPB-733).**
+  Found while doing MAPB-732 and deliberately left out of it. Leeds sends a box to Moorland, the person is
+  moved on to Berwyn instead: Leeds has closed its record, Moorland lists it as incoming forever, and Berwyn —
+  where the box and the person actually are — sees nothing on either view. MAPB-732's new clause cannot help,
+  because it requires `removal_outcome IS NULL` and a transferred container has one. The fix is to define
+  "in transit to here" as *an unreconciled transfer whose owner is now here*, which changes the person page as
+  well as the list, so the two must move together rather than shipping the establishment view ahead of the
+  person view. `incomingScope` was written to make that one more OR'd clause.
 - **`getById` / `PropertyContainerDto` has no owner context**, so the remove and change journeys tag from the
   container's own status. Fixing it means a prisoner-search call on a DTO that is also the write-endpoint
   response. Deliberately deferred.

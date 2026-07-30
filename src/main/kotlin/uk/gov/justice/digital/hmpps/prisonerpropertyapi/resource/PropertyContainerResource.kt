@@ -149,9 +149,9 @@ class PropertyContainerResource(
       "storage location), prisoner number, seal number, container type(s), status and storage location. With no " +
       "status filter, containers that have left active storage (disposed, returned, transferred, combined) are " +
       "hidden; pass a status filter, or includeRemoved=true to also surface removed/returned/disposed containers. Set " +
-      "dueForTransferIn=true to additionally surface property held at another prison that is due to be " +
-      "transferred in to this establishment (its owner was received here). Use the standard page, size and sort " +
-      "query parameters for pagination.",
+      "dueForTransferIn=true to additionally surface property held at another prison that is needed here - " +
+      "either its owner is now at this establishment, or it has been sent here and not yet logged. Use the " +
+      "standard page, size and sort query parameters for pagination.",
     responses = [
       ApiResponse(responseCode = "200", description = "Page of prisoners with their property containers returned"),
       ApiResponse(responseCode = "400", description = "Invalid prison id", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
@@ -188,7 +188,14 @@ class PropertyContainerResource(
     @Parameter(description = "Filter by where the property's owner currently is: IN_ESTABLISHMENT (people held here) or LEFT_ESTABLISHMENT (people no longer here). Resolved from prisoner-search.", example = "IN_ESTABLISHMENT")
     @RequestParam(required = false)
     personLocation: PersonLocation?,
-    @Parameter(description = "Also include property held at another prison that is due to be transferred in to this establishment (its owner was received here). Additive to the held-here list; when it is the only status selection, only incoming property is returned.", example = "false")
+    @Parameter(
+      description = "Also include property held at another prison that is needed here: either its owner is now " +
+        "at this establishment (so the property has to follow them, whether or not the move was ever recorded " +
+        "against the container), or it has been transferred here and not yet logged. Additive to the held-here " +
+        "list; when it is the only status selection, only incoming property is returned. Falls back to the " +
+        "destinations recorded on the containers alone if the establishment's population cannot be resolved.",
+      example = "false",
+    )
     @RequestParam(required = false, defaultValue = "false")
     dueForTransferIn: Boolean,
     @ParameterObject
