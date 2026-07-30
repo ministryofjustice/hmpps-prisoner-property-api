@@ -9,12 +9,15 @@ remaining items land.
 Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property-ui ·
 **LIP** = hmpps-locations-inside-prison-api.
 
+**Status** tracks the PR, not the ticket. "Merged" means the code is on `main`; the Jira ticket stays in
+*Dev review* until it has been tested, so merged is deliberately not the same as Done.
+
 | Ticket | Type | Size | Repo | Summary | Status |
 |--------|------|------|------|---------|--------|
-| [MAPB-711](https://dsdmoj.atlassian.net/browse/MAPB-711) | Story | L | API | Establishment list + summary tiles must reflect release-date-driven "Due for return" | Done (api #69) |
-| [MAPB-721](https://dsdmoj.atlassian.net/browse/MAPB-721) | Story | M | API | Model container transfer-out as a removal, not a prison reassignment (two-record model) — enabler for 712/713 | Done (api #68) |
-| [MAPB-712](https://dsdmoj.atlassian.net/browse/MAPB-712) | Bug | M | UI (+API model) | Received-but-not-stored transferred property shows as "Stored" and editable | Done (ui #56) |
-| [MAPB-713](https://dsdmoj.atlassian.net/browse/MAPB-713) | Bug | M | API (+UI) | "Property returned or transferred" tab omits property transferred out | Done (ui #56) |
+| [MAPB-711](https://dsdmoj.atlassian.net/browse/MAPB-711) | Story | L | API | Establishment list + summary tiles must reflect release-date-driven "Due for return" | Merged (api #69) |
+| [MAPB-721](https://dsdmoj.atlassian.net/browse/MAPB-721) | Story | M | API | Model container transfer-out as a removal, not a prison reassignment (two-record model) — enabler for 712/713 | Merged (api #68) |
+| [MAPB-712](https://dsdmoj.atlassian.net/browse/MAPB-712) | Bug | M | UI (+API model) | Received-but-not-stored transferred property shows as "Stored" and editable | Merged (ui #56) |
+| [MAPB-713](https://dsdmoj.atlassian.net/browse/MAPB-713) | Bug | M | API (+UI) | "Property returned or transferred" tab omits property transferred out | Merged (ui #56) |
 | [MAPB-714](https://dsdmoj.atlassian.net/browse/MAPB-714) | Bug | S | UI | Make "Due for transfer out" tag grey on the establishment list | Merged (ui #55) |
 | [MAPB-715](https://dsdmoj.atlassian.net/browse/MAPB-715) | Bug | S | API | Make establishment seal-number search case-insensitive | Merged (api #67) |
 | [MAPB-716](https://dsdmoj.atlassian.net/browse/MAPB-716) | Bug | S | UI | Show "Transferring" not "Not known" for an in-transit prisoner on the prisoner view | Merged (ui #54) |
