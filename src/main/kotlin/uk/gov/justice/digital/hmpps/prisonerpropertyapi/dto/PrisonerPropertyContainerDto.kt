@@ -52,7 +52,13 @@ data class PrisonerPropertyContainerDto(
   @Schema(description = "Current seal number, derived from the most recent seal event", example = "SEAL12345", nullable = true)
   val currentSealNumber: String?,
 
-  @Schema(description = "Current status, derived from the most recent event", example = "STORED")
+  @Schema(
+    description = "Current status. Derived from the container's history and, for a container still in storage, " +
+      "from where its owner now is: property for someone released or being released imminently reads " +
+      "DUE_FOR_RETURN, property at a prison they have left reads DUE_FOR_TRANSFER_OUT, and a disposal date " +
+      "that has arisen takes precedence over both. Identical on the person and establishment views.",
+    example = "STORED",
+  )
   val currentStatus: ContainerStatus,
 
   @Schema(description = "Current internal location id, derived from the most recent move. Null when offsite at Branston, unrecorded, or disposed", example = "11111111-1111-1111-1111-111111111111", nullable = true)
@@ -80,6 +86,11 @@ data class PrisonerPropertyContainerDto(
   val createdByUserId: String,
 ) {
   companion object {
+    /**
+     * [currentStatus] and [receivingPrisonId] are supplied rather than read off the container, because both
+     * depend on where the container's owner now is - see `ContainerStatusResolver`. Keeping the decision out
+     * here is what stops the person view and the establishment list deriving a status each and drifting apart.
+     */
     fun from(
       container: PropertyContainer,
       prisonerName: String?,
@@ -89,6 +100,8 @@ data class PrisonerPropertyContainerDto(
       prisonerMovementStatus: PrisonerMovementStatus?,
       locationDescription: String?,
       inPrisonersCurrentPrison: Boolean,
+      currentStatus: ContainerStatus,
+      receivingPrisonId: String?,
     ) = PrisonerPropertyContainerDto(
       id = container.id!!,
       prisonerNumber = container.prisonerNumber,
@@ -99,10 +112,10 @@ data class PrisonerPropertyContainerDto(
       prisonerCurrentPrisonName = prisonerCurrentPrisonName,
       prisonerMovementStatus = prisonerMovementStatus,
       inPrisonersCurrentPrison = inPrisonersCurrentPrison,
-      receivingPrisonId = container.receivingPrison(),
+      receivingPrisonId = receivingPrisonId,
       containerType = container.containerType,
       currentSealNumber = container.currentSealNumber,
-      currentStatus = container.currentStatus(),
+      currentStatus = currentStatus,
       currentLocation = container.currentLocation(),
       currentLocationType = container.currentLocationType(),
       locationDescription = locationDescription,
@@ -114,8 +127,8 @@ data class PrisonerPropertyContainerDto(
     )
 
     /**
-     * As [from], but reads the denormalised current status/location columns instead of deriving from the
-     * container's events - so the establishment-wide list can render rows without loading any events.
+     * As [from], but reads the denormalised current location columns instead of deriving from the container's
+     * events - so the establishment-wide list can render rows without loading any events.
      */
     fun fromColumns(
       container: PropertyContainer,
@@ -126,6 +139,8 @@ data class PrisonerPropertyContainerDto(
       prisonerMovementStatus: PrisonerMovementStatus?,
       locationDescription: String?,
       inPrisonersCurrentPrison: Boolean,
+      currentStatus: ContainerStatus,
+      receivingPrisonId: String?,
     ) = PrisonerPropertyContainerDto(
       id = container.id!!,
       prisonerNumber = container.prisonerNumber,
@@ -136,12 +151,10 @@ data class PrisonerPropertyContainerDto(
       prisonerCurrentPrisonName = prisonerCurrentPrisonName,
       prisonerMovementStatus = prisonerMovementStatus,
       inPrisonersCurrentPrison = inPrisonersCurrentPrison,
-      receivingPrisonId = container.receivingPrisonId,
+      receivingPrisonId = receivingPrisonId,
       containerType = container.containerType,
       currentSealNumber = container.currentSealNumber,
-      // The denormalised column holds the time-stable base status; overlay DISPOSAL_REQUIRED once the
-      // proposed disposal date has arisen, so the list matches the person view without loading events.
-      currentStatus = if (container.isDisposalDue()) ContainerStatus.DISPOSAL_REQUIRED else container.currentStatusValue,
+      currentStatus = currentStatus,
       currentLocation = container.currentInternalLocationId,
       currentLocationType = container.currentStorageLocationType,
       locationDescription = locationDescription,

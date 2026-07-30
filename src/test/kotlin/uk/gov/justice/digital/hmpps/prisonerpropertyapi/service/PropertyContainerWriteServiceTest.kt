@@ -278,16 +278,94 @@ class PropertyContainerWriteServiceTest {
     assertThat(source.isRemoved()).isTrue()
   }
 
+  /**
+   * The reported bug: many prisons never mark property as transferred out, so requiring the sending prison to
+   * have flagged it meant the commonest case matched nothing and a second record was created for the same box.
+   */
   @Test
-  fun `create ignores a previous seal that matches no due-for-transfer-out container`() {
+  fun `create reconciles a previous seal held by a merely stored container at another prison`() {
     stubSaveAssigningId()
-    val storedElsewhere = containerAt("MDI", "OLDSEAL") // active elsewhere but not due for transfer out
+    val storedElsewhere = containerAt("LEI", "OLDSEAL")
     whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(storedElsewhere))
 
-    val result = service.create(createRequest(prisonId = "LEI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
+    val result = service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
+
+    assertThat(storedElsewhere.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+    assertThat(storedElsewhere.receivingPrison()).isNull() // reconciled, so it stops awaiting at the destination
+    assertThat(result.events.map { it.eventType })
+      .containsExactly("prison-property.container.created", "prison-property.container.updated")
+  }
+
+  @Test
+  fun `create matches a previous seal ignoring case and surrounding whitespace`() {
+    stubSaveAssigningId()
+    val source = dueForTransferOut("LEI", "OldSeal", toPrisonId = "MDI")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+
+    service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "  oldseal "), "A_USER")
+
+    assertThat(source.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+  }
+
+  @Test
+  fun `create rejects a previous seal that matches nothing rather than silently duplicating the property`() {
+    val elsewhere = containerAt("LEI", "ANOTHERSEAL")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(elsewhere))
+
+    assertThatThrownBy { service.create(createRequest(prisonId = "MDI", previousSealNumber = "TYPO"), "A_USER") }
+      .isInstanceOf(PreviousSealNumberNotFoundException::class.java)
+      .hasMessageContaining("TYPO")
+
+    verify(repository, never()).save(any())
+  }
+
+  @Test
+  fun `create rejects a previous seal matching only the prison the container is being added at`() {
+    // Property already here is not property arriving on transfer - matching it would deactivate a live record.
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("MDI", "OLDSEAL")))
+
+    assertThatThrownBy { service.create(createRequest(prisonId = "MDI", previousSealNumber = "OLDSEAL"), "A_USER") }
+      .isInstanceOf(PreviousSealNumberNotFoundException::class.java)
+  }
+
+  @Test
+  fun `create ignores a blank previous seal`() {
+    stubSaveAssigningId()
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(emptyList())
+
+    val result = service.create(createRequest(prisonId = "MDI", previousSealNumber = "   "), "A_USER")
 
     assertThat(result.events).singleElement().extracting { it.eventType }.isEqualTo("prison-property.container.created")
-    assertThat(storedElsewhere.isRemoved()).isFalse()
+  }
+
+  @Test
+  fun `create records the matched seals on both containers' histories`() {
+    stubSaveAssigningId()
+    val source = dueForTransferOut("LEI", "OLDSEAL", toPrisonId = "MDI")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+
+    service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
+
+    // The arriving record names the seal it came in under; the sending record names the seal it became.
+    val created = captureSaved().events.single { it.eventType == PropertyEventType.CREATED_SEALED }
+    assertThat(created.relatedContainerSealNumber).isEqualTo("OLDSEAL")
+    assertThat(source.events.last().relatedContainerSealNumber).isEqualTo("NEWSEAL")
+  }
+
+  @Test
+  fun `create records the matched seal when reconciling a container already transferred out`() {
+    stubSaveAssigningId()
+    val source = transferredOut("LEI", "OLDSEAL", toPrisonId = "MDI")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+
+    service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
+
+    // The existing transfer event is amended, so its real date survives and it gains the seal it was matched to.
+    val transfers = source.events.filter { it.eventType == PropertyEventType.TRANSFERRED }
+    assertThat(transfers).singleElement().satisfies({
+      assertThat(it.eventDateTime).isEqualTo(LocalDateTime.parse("2026-02-01T09:00:00"))
+      assertThat(it.relatedContainerSealNumber).isEqualTo("NEWSEAL")
+    })
   }
 
   @Test

@@ -18,6 +18,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.ContainerAlready
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicatePropertyLocationNameException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicateSealNumberException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.InvalidLocationException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PreviousSealNumberNotFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerNotFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationCapacityBelowUsageException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationInUseException
@@ -135,6 +136,20 @@ class PrisonerPropertyApiExceptionHandler {
         developerMessage = e.message,
       ),
     ).also { log.info("Duplicate seal number: {}", e.message) }
+
+  @ExceptionHandler(PreviousSealNumberNotFoundException::class)
+  fun handlePreviousSealNumberNotFoundException(e: PreviousSealNumberNotFoundException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(BAD_REQUEST)
+    .body(
+      ErrorResponse(
+        status = BAD_REQUEST,
+        // Carries a code so the front end can put the error against the field the user typed into, rather than
+        // matching on the message text.
+        errorCode = PreviousSealNumberNotFoundException.ERROR_CODE,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Previous seal number not found: {}", e.message) }
 
   @ExceptionHandler(ContainerAlreadyRemovedException::class)
   fun handleContainerAlreadyRemovedException(e: ContainerAlreadyRemovedException): ResponseEntity<ErrorResponse> = ResponseEntity

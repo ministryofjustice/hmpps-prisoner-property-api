@@ -27,8 +27,12 @@ data class CreatePropertyContainerRequest(
 
   @Schema(
     description = "If this container is arriving on transfer from another establishment, the seal it was " +
-      "recorded under there (its 'due for transfer out' seal). Used to link to and deactivate that record so " +
-      "no ghost record is left behind. Leave blank for genuinely new property.",
+      "recorded under there. Any container the person still has in storage at another prison matches - the " +
+      "sending prison need not have flagged the transfer, since many never do. Matched ignoring case and " +
+      "surrounding whitespace. The matched record is linked to this one and deactivated (TRANSFERRED), and both " +
+      "histories name the other's seal. Rejected with 400 (errorCode PREVIOUS_SEAL_NUMBER_NOT_FOUND) if it " +
+      "matches nothing, so a mistyped seal cannot silently leave two records for one box. Leave blank for " +
+      "genuinely new property.",
     example = "SN8842K1",
     nullable = true,
   )

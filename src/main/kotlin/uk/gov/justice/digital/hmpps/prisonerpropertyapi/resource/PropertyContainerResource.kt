@@ -326,12 +326,20 @@ class PropertyContainerResource(
   @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
   @Operation(
     summary = "Create a new property container",
-    description = "Requires role ROLE_PRISONER_PROPERTY__RW. If `previousSealNumber` matches a container the " +
-      "prisoner has due for transfer out at another prison, that container is reconciled as the property " +
-      "arriving here on transfer: it is linked to the new record and deactivated (transferred).",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RW. When `previousSealNumber` is given it must match a " +
+      "container the prisoner still has in storage at another prison (ignoring case and surrounding whitespace); " +
+      "that container is reconciled as the property arriving here on transfer - linked to the new record and " +
+      "deactivated (transferred) - and both histories record the seal they were matched to. A previous seal that " +
+      "matches nothing is rejected with 400 rather than ignored, so a mistyped seal cannot leave two records for " +
+      "the same property.",
     responses = [
       ApiResponse(responseCode = "201", description = "Property container created"),
-      ApiResponse(responseCode = "400", description = "Invalid request", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(
+        responseCode = "400",
+        description = "Invalid request, or `previousSealNumber` matched no property held for this person at " +
+          "another establishment (errorCode PREVIOUS_SEAL_NUMBER_NOT_FOUND)",
+        content = [Content(schema = Schema(implementation = ErrorResponse::class))],
+      ),
       ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RW role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "409", description = "The seal number is already in use by another active container", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),

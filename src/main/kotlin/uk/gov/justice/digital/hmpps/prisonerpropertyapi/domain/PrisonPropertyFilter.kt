@@ -22,6 +22,10 @@ import java.util.UUID
  *   to be transferred *in* to this establishment (its owner was received here). Additive: it widens the
  *   held-here result rather than narrowing it. When it is the only status selection, only incoming
  *   property is returned.
+ * @param statusOverlay the establishment's owner classification, needed whenever [statuses] asks for a status
+ *   a container still in storage can hold (see [OwnerLocation.LIVE_STATUSES]), since those depend on where the
+ *   owner now is. Null means unclassified, and the status filter then matches the persisted status column
+ *   alone - the behaviour before the overlay existed, and the fallback when prisoner-search is unavailable.
  */
 data class PrisonPropertyFilter(
   val prisonerNumber: String? = null,
@@ -35,4 +39,8 @@ data class PrisonPropertyFilter(
   val searchLocationIds: List<UUID> = emptyList(),
   val searchBranston: Boolean = false,
   val includeTransferIn: Boolean = false,
-)
+  val statusOverlay: StatusOverlay? = null,
+) {
+  /** Whether any requested status depends on the owner's location, and so needs a [statusOverlay] to resolve. */
+  fun needsStatusOverlay(): Boolean = statuses.any { it in OwnerLocation.LIVE_STATUSES }
+}

@@ -75,12 +75,17 @@ class PropertyContainerWriteService(
   }
 
   /**
-   * Create a new sealed container. When [CreatePropertyContainerRequest.previousSealNumber] is supplied and
-   * matches a container the same prisoner has due for transfer out at another prison, that container is the
-   * property physically arriving here on transfer: it is linked to the new record and deactivated (TRANSFERRED)
-   * so its seal and location are freed and no ghost record is left behind. An unmatched previous seal is
-   * ignored (the add still succeeds). Returns the created container plus the events to publish after commit -
-   * one for the new container, and one for the source when a transfer-in was reconciled.
+   * Create a new sealed container. When [CreatePropertyContainerRequest.previousSealNumber] is supplied it names
+   * the record the property was held under at the prison it has come from: that container is the same physical
+   * property, so it is linked to this new record and deactivated (TRANSFERRED), freeing its seal and location
+   * and leaving no ghost record behind. Both records' histories name the other's seal, so the match is
+   * visible rather than implied.
+   *
+   * A previous seal that matches nothing is rejected, not ignored - silently creating the container is how one
+   * box ended up recorded twice, once here and once still awaiting transfer at the sending prison.
+   *
+   * Returns the created container plus the events to publish after commit - one for the new container, and one
+   * for the source when a transfer-in was reconciled.
    */
   @Transactional
   fun create(request: CreatePropertyContainerRequest, username: String): CreateResult {
@@ -90,18 +95,23 @@ class PropertyContainerWriteService(
     // an internalLocationId; a null type with no location is left unset (unknown location).
     val locationType = resolveLocationType(request.locationType, request.internalLocationId)
 
-    // The property physically arriving here on transfer: the prisoner's container at another prison with
-    // this previous seal that is either still due for transfer out, or already transferred out to here by
-    // the sending prison but not yet reconciled (so this add is what reconciles it).
-    val source = request.previousSealNumber?.let { previousSeal ->
+    // The property physically arriving here on transfer: the prisoner's container at another prison held under
+    // the previous seal. Any container still in storage there qualifies - plenty of prisons never record the
+    // transfer out, so requiring them to have flagged it first meant the common case never matched and a second
+    // record was created for the same box. Staff typing that seal are asserting the property arrived here, so
+    // deactivating the sending record is the intent. A container already transferred out to here also matches:
+    // this add is what reconciles it.
+    val source = request.previousSealNumber?.trim()?.takeIf { it.isNotEmpty() }?.let { previousSeal ->
       repository.findByPrisonerNumber(request.prisonerNumber).firstOrNull { candidate ->
         candidate.prisonId != request.prisonId &&
-          candidate.currentSealNumber == previousSeal &&
+          // Case- and whitespace-insensitive, like the establishment seal search: staff should not have to
+          // reproduce the exact form the sending prison recorded.
+          candidate.currentSealNumber?.trim().equals(previousSeal, ignoreCase = true) &&
           (
-            (!candidate.isRemoved() && candidate.currentStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT) ||
+            !candidate.isRemoved() ||
               (candidate.removalOutcome == RemovalOutcome.TRANSFERRED && candidate.receivingPrison() == request.prisonId)
             )
-      }
+      } ?: throw PreviousSealNumberNotFoundException(previousSeal)
     }
 
     val sealInUse = source?.let { repository.existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot(request.sealNumber, it.id!!) }
@@ -131,6 +141,9 @@ class PropertyContainerWriteService(
         toStorageLocationType = locationType,
         toPrisonId = request.prisonId,
         relatedContainerId = source?.id,
+        // The seal it arrived under, so the history reads "matched to previous seal X" rather than leaving
+        // staff to guess whether the two records were joined up.
+        relatedContainerSealNumber = source?.currentSealNumber,
       ),
     )
     if (request.proposedDisposalDate != null) {
@@ -149,13 +162,28 @@ class PropertyContainerWriteService(
       val changedField = if (it.isRemoved()) {
         // Already transferred out by the sending prison: reconcile by linking its TRANSFERRED event to this
         // new record, so it stops surfacing as awaiting at this prison. It is already removed - don't re-remove.
-        it.latestTransferEvent()?.relatedContainerId = saved.id
+        // The existing event is amended rather than a new one appended, so the history keeps the real
+        // transfer date and simply gains the seal it was matched to.
+        it.latestTransferEvent()?.apply {
+          relatedContainerId = saved.id
+          relatedContainerSealNumber = request.sealNumber
+        }
         it.refreshDerivedState()
         "receivingPrisonId"
       } else {
-        // Still due for transfer out: mark it transferred out and linked to this new record in one step.
+        // Still held at the sending prison: mark it transferred out and linked to this new record in one step.
         it.events.add(
-          PropertyEvent(it, PropertyEventType.TRANSFERRED, now, username, eventDate = LocalDate.now(), fromPrisonId = it.prisonId, toPrisonId = request.prisonId, relatedContainerId = saved.id),
+          PropertyEvent(
+            it,
+            PropertyEventType.TRANSFERRED,
+            now,
+            username,
+            eventDate = LocalDate.now(),
+            fromPrisonId = it.prisonId,
+            toPrisonId = request.prisonId,
+            relatedContainerId = saved.id,
+            relatedContainerSealNumber = request.sealNumber,
+          ),
         )
         it.removalOutcome = RemovalOutcome.TRANSFERRED
         it.removalDate = LocalDate.now()

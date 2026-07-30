@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.domain.PageRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.OwnerLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonPropertyFilter
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
@@ -15,6 +16,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StatusOverlay
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.IntegrationTestBase
 import java.time.LocalDate
@@ -194,13 +196,14 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `countStoredByPrisoner groups stored containers by prisoner, excluding removed and disposal-due ones`() {
+  fun `countActiveByPrisonerAndStatus groups by prisoner and status, excluding removed and disposal-due ones`() {
     saveActive("A0001AA", "S1")
     saveActive("A0001AA", "S2")
     saveActive("B0002BB", "S3")
     // A future disposal date is not yet due, so the container still counts as stored.
     saveWithDisposalDate("A0001AA", "FUTURE", LocalDate.now().plusDays(5))
-    // Disposal due takes precedence over due for return, so this one is excluded.
+    // Disposal due takes precedence, so this one is excluded - it is counted by countDueForDisposal alone,
+    // which is what stops a container being counted in two summary tiles at once.
     saveWithDisposalDate("A0001AA", "DUE", LocalDate.now().minusDays(1))
     // Removed property has left storage entirely.
     saveActive("A0001AA", "GONE").apply {
@@ -209,17 +212,110 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
       refreshDerivedState()
       containerRepository.save(this)
     }
-    // Property for a prisoner who has moved on is due for transfer out, not stored.
+    // A persisted due-for-transfer-out container is counted under that status, not lumped in with stored.
     saveActive("C0003CC", "MOVED").apply {
       events.add(PropertyEvent(this, PropertyEventType.PRISONER_RECEIVED, baseTime.plusDays(1), "USER1", fromPrisonId = "LEI", toPrisonId = "MDI"))
       refreshDerivedState()
       containerRepository.save(this)
     }
 
-    val counts = containerRepository.countStoredByPrisoner("LEI", LocalDate.now())
-      .associate { it.prisonerNumber to it.count }
+    val counts = containerRepository.countActiveByPrisonerAndStatus("LEI", LocalDate.now())
+      .associate { (it.prisonerNumber to it.status) to it.count }
 
-    assertThat(counts).containsOnly(entry("A0001AA", 3L), entry("B0002BB", 1L))
+    assertThat(counts).containsOnly(
+      entry("A0001AA" to ContainerStatus.STORED, 3L),
+      entry("B0002BB" to ContainerStatus.STORED, 1L),
+      entry("C0003CC" to ContainerStatus.DUE_FOR_TRANSFER_OUT, 1L),
+    )
+  }
+
+  @Test
+  fun `findActivePrisonerNumbers returns the prisoners holding live property at the prison`() {
+    saveActive("A0001AA", "S1")
+    saveActive("A0001AA", "S2")
+    saveActive("B0002BB", "S3")
+    saveActive("A0001AA", "GONE").apply {
+      removalOutcome = RemovalOutcome.RETURNED
+      removalDate = LocalDate.now()
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+    // Held at another prison, so not this establishment's to classify.
+    saveActive("C0003CC", "ELSEWHERE", prisonId = "MDI")
+
+    assertThat(containerRepository.findActivePrisonerNumbers("LEI")).containsExactlyInAnyOrder("A0001AA", "B0002BB")
+  }
+
+  @Test
+  fun `filtering by an owner-dependent status matches the status shown, not the persisted one`() {
+    saveActive("A0001AA", "RELEASED")
+    saveActive("B0002BB", "HERE")
+    saveActive("C0003CC", "MOVED")
+    // All three are persisted STORED; the owners decide what each one actually reads.
+    val overlay = overlayOf(
+      "A0001AA" to OwnerLocation.RETURNING,
+      "B0002BB" to OwnerLocation.HERE,
+      "C0003CC" to OwnerLocation.ELSEWHERE,
+    )
+    val numbers = listOf("A0001AA", "B0002BB", "C0003CC")
+
+    assertThat(sealsMatching(ContainerStatus.DUE_FOR_RETURN, overlay, numbers)).containsExactly("RELEASED")
+    assertThat(sealsMatching(ContainerStatus.DUE_FOR_TRANSFER_OUT, overlay, numbers)).containsExactly("MOVED")
+    // STORED excludes the two relabelled away, with no separate exclusion clause needed.
+    assertThat(sealsMatching(ContainerStatus.STORED, overlay, numbers)).containsExactly("HERE")
+  }
+
+  @Test
+  fun `filtering by an owner-dependent status falls back to the persisted status for unresolved prisoners`() {
+    saveActive("A0001AA", "STORED")
+    saveActive("A0001AA", "MOVED").apply {
+      events.add(PropertyEvent(this, PropertyEventType.PRISONER_RECEIVED, baseTime.plusDays(1), "USER1", fromPrisonId = "LEI", toPrisonId = "MDI"))
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+    val overlay = overlayOf("A0001AA" to OwnerLocation.UNKNOWN)
+
+    assertThat(sealsMatching(ContainerStatus.STORED, overlay, listOf("A0001AA"))).containsExactly("STORED")
+    assertThat(sealsMatching(ContainerStatus.DUE_FOR_TRANSFER_OUT, overlay, listOf("A0001AA"))).containsExactly("MOVED")
+  }
+
+  @Test
+  fun `filtering by an owner-dependent status without an overlay behaves as it did before`() {
+    saveActive("A0001AA", "STORED")
+
+    assertThat(sealsMatching(ContainerStatus.STORED, null, listOf("A0001AA"))).containsExactly("STORED")
+    assertThat(sealsMatching(ContainerStatus.DUE_FOR_RETURN, null, listOf("A0001AA"))).isEmpty()
+  }
+
+  @Test
+  fun `disposal due keeps precedence over the owner-dependent statuses`() {
+    saveWithDisposalDate("A0001AA", "DUE", LocalDate.now().minusDays(1))
+    val overlay = overlayOf("A0001AA" to OwnerLocation.RETURNING)
+
+    // Its owner is being released, but disposal is the more urgent instruction - so it shows, and is filtered,
+    // as due for disposal only. The buckets stay exclusive.
+    assertThat(sealsMatching(ContainerStatus.DUE_FOR_RETURN, overlay, listOf("A0001AA"))).isEmpty()
+    assertThat(sealsMatching(ContainerStatus.DISPOSAL_REQUIRED, overlay, listOf("A0001AA"))).containsExactly("DUE")
+  }
+
+  @Test
+  fun `includeRemoved still surfaces removed containers alongside an owner-dependent status`() {
+    saveActive("A0001AA", "STORED")
+    saveActive("A0001AA", "GONE").apply {
+      removalOutcome = RemovalOutcome.RETURNED
+      removalDate = LocalDate.now()
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+    val overlay = overlayOf("A0001AA" to OwnerLocation.HERE)
+
+    val seals = containerRepository.findContainers(
+      "LEI",
+      PrisonPropertyFilter(statuses = listOf(ContainerStatus.STORED), includeRemoved = true, statusOverlay = overlay),
+      listOf("A0001AA"),
+    ).map { it.currentSealNumber }
+
+    assertThat(seals).containsExactlyInAnyOrder("STORED", "GONE")
   }
 
   @Test
@@ -295,16 +391,27 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
     assertThat(counts).containsExactlyInAnyOrderEntriesOf(mapOf(LOCATION_A to 2L, LOCATION_B to 1L))
   }
 
+  /** An owner classification built by hand, so the predicate can be tested without prisoner-search. */
+  private fun overlayOf(vararg owners: Pair<String, OwnerLocation>) = StatusOverlay(owners.toMap())
+
+  /** The seals of the containers the establishment list returns when filtering by [status]. */
+  private fun sealsMatching(status: ContainerStatus, overlay: StatusOverlay?, prisonerNumbers: List<String>): List<String?> = containerRepository.findContainers(
+    "LEI",
+    PrisonPropertyFilter(statuses = listOf(status), statusOverlay = overlay),
+    prisonerNumbers,
+  ).map { it.currentSealNumber }
+
   private fun saveActive(
     prisonerNumber: String,
     seal: String,
     location: UUID? = null,
     branston: Boolean = false,
     type: ContainerType = ContainerType.STANDARD,
+    prisonId: String = "LEI",
   ): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = prisonerNumber,
-      prisonId = "LEI",
+      prisonId = prisonId,
       containerType = type,
       createdByUserId = "USER1",
       currentSealNumber = seal,

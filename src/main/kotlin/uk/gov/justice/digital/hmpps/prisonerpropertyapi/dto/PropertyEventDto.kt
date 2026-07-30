@@ -53,10 +53,22 @@ data class PropertyEventDto(
   @Schema(description = "Business date the event relates to (e.g. proposed disposal or removal date), if any", example = "2026-09-15", nullable = true)
   val eventDate: LocalDate?,
 
-  @Schema(description = "Id of a related container, for combine events", example = "33333333-3333-3333-3333-333333333333", nullable = true)
+  @Schema(
+    description = "Id of a container this event relates to: the container this one was combined into, or the " +
+      "matching record at the other establishment when property arriving on transfer was matched to its " +
+      "previous seal",
+    example = "33333333-3333-3333-3333-333333333333",
+    nullable = true,
+  )
   val relatedContainerId: UUID?,
 
-  @Schema(description = "Seal number of the related container, for combine events - the container this one was combined into", example = "SN991234", nullable = true)
+  @Schema(
+    description = "Seal number of the related container as at this event: the container this one was combined " +
+      "into, or - for property matched on arrival from another establishment - the seal the other record holds. " +
+      "On the arriving container that is the previous seal; on the sending container it is the new one",
+    example = "SN991234",
+    nullable = true,
+  )
   val relatedContainerSealNumber: String? = null,
 ) {
   companion object {
