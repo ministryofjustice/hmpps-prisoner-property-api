@@ -117,6 +117,13 @@ paginate in SQL without loading every event. **They are not the truth.** Every w
 `refreshDerivedState()` after mutating events or removal state, or the list view silently drifts from
 the container's real state.
 
+`receivingPrisonId` in particular is only as good as the events that reached the container: NOMIS-migrated
+property has none, and a later sync-written move or reseal takes `baseStatus()` back to `STORED`, which
+clears the column again. So the "due for transfer in" filter does **not** rely on it alone — it also matches
+live property held elsewhere whose owner is on this prison's roll (`PrisonRollFactory`, backed by
+prisoner-search). That mirrors the person page, which lists any live container held at another establishment
+as incoming while its owner is here. With no roll available the filter falls back to the column alone.
+
 Disposal is deliberately excluded from the mirror: it is time-based, so a container becomes overdue with
 no write occurring. `V9__reset_denormalised_disposal_status.sql` exists precisely because it *was* once
 denormalised and went stale.

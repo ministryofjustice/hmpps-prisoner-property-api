@@ -348,6 +348,13 @@ Three rules worth carrying in your head:
    `currentStorageLocationType` and `receivingPrisonId` exist only so the establishment-wide list can
    filter and paginate in SQL without loading every event. Every write path must call
    `refreshDerivedState()`; the derivation methods remain authoritative.
+4. **Some questions the columns cannot answer at all**, because they depend on where a container's *owner*
+   now is — which lives in prisoner-search, not here. A container's displayed status is one
+   (`ContainerStatusResolver`); whether it is due to transfer *in* to a given prison is another. The
+   `receivingPrisonId` column only records a destination when a reception or transfer-out was written
+   against the container, and ordinary NOMIS sync traffic resets it, so the establishment's incoming list
+   also matches property whose owner is on that prison's roll (`PrisonRollFactory`). Both fall back to the
+   columns alone when prisoner-search is unavailable.
 
 `ActiveAgency` is separate: one row per prison, recording whether that prison is live on DPS and when it
 switched. It gates writes in the UI and labels history in the API.
