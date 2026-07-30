@@ -106,6 +106,45 @@ container's status was being derived independently in four places, so they drift
   `errorCode` rather than silently ignored — ignoring it is how the duplicate was made. Both histories now
   name the seal they were matched to. Dropping the status check also fixed an unrelated trap: a source
   container past its disposal date read as `DISPOSAL_REQUIRED` and so could never be matched.
+  - **Follow-up found in testing (api #72, ui #57).** Matching then worked for property tagged *Due for
+    transfer out* but failed for *In transit*. Two separate causes. In the UI, the previous-seal pre-check
+    filtered on "not removed" — and *in transit* **is** a removal outcome of `TRANSFERRED` — so it rejected the
+    property most obviously on its way here, before the API was ever called. The membership rule for
+    "Property due to be transferred in" now lives in one place shared by the list and the check, so anything
+    staff can see listed can be quoted. In the API, reconciling an already-transferred container required the
+    sending prison's *stated destination* to equal the prison logging the arrival; a box sent to one prison and
+    arriving at another could not be logged at all. It now needs the transfer to be **unreconciled** rather
+    than correctly addressed — staff holding the box are better evidence than the sender's expectation — and
+    prison ids are compared trimmed and case-insensitively, so badly-cased local property is not mistaken for
+    property elsewhere. The already-transferred path had no test coverage at all, which is why this survived.
+
+## Deploys: the `node-fetch` replica conflict
+
+Preprod deploys failed for about ten days from ~20 July with
+`conflict with "node-fetch" with subresource "scale" using apps/v1: .spec.replicas`, and the automatic
+rollback failed on the same conflict. Nothing to do with the application code — the failing run happened to be
+a property release, which is only how it was noticed.
+
+A Node.js Kubernetes client had taken ownership of `.spec.replicas` via the `/scale` subresource and left
+preprod on 4 replicas while the chart says 2. Helm 4 uses server-side apply, which reports a conflict when
+another manager owns a field **and the values differ** — so dev, carrying the identical claim but sitting on
+the value helm wanted, kept deploying happily and hid the problem.
+
+Fixed by removing that manager's entry so helm reclaims the field (dev and preprod both cleared; prod was
+never affected):
+
+```
+kubectl get deploy <name> -n <ns> --show-managed-fields -o json   # find the node-fetch/scale entry index
+kubectl patch deployment <name> -n <ns> --type=json -p='[{"op":"remove","path":"/metadata/managedFields/<i>"}]'
+```
+
+The same manager also set `kubectl.kubernetes.io/restartedAt` (a rollout restart) on 14 July, and touched
+**only** the property API — not the property UI, not the locations apps, which carry different managers
+(`Go-http-client`, `kubectl/scale`, `HashiCorp`). That pattern reads as a one-off human action through a
+Node-based Kubernetes GUI or script rather than scheduled platform tooling; `node-fetch` is just the default
+field-manager name taken from the HTTP user-agent. **Not conclusively attributed** — worth asking Cloud
+Platform if it recurs. Do *not* "fix" it by setting `replicaCount` to whatever the cluster holds: that makes
+the cluster the source of truth instead of the chart, and it will drift again.
 
 ## Outstanding
 
