@@ -327,11 +327,12 @@ class PropertyContainerResource(
   @Operation(
     summary = "Create a new property container",
     description = "Requires role ROLE_PRISONER_PROPERTY__RW. When `previousSealNumber` is given it must match a " +
-      "container the prisoner still has in storage at another prison (ignoring case and surrounding whitespace); " +
-      "that container is reconciled as the property arriving here on transfer - linked to the new record and " +
-      "deactivated (transferred) - and both histories record the seal they were matched to. A previous seal that " +
-      "matches nothing is rejected with 400 rather than ignored, so a mistyped seal cannot leave two records for " +
-      "the same property.",
+      "container the prisoner has at another prison that is either still in storage there or already " +
+      "transferred out and not yet logged anywhere (ignoring case and surrounding whitespace); that container " +
+      "is reconciled as the property arriving here on transfer - linked to the new record and deactivated " +
+      "(transferred) - and both histories record the seal they were matched to. A previous seal that matches " +
+      "nothing is rejected with 400 rather than ignored, so a mistyped seal cannot leave two records for the " +
+      "same property.",
     responses = [
       ApiResponse(responseCode = "201", description = "Property container created"),
       ApiResponse(

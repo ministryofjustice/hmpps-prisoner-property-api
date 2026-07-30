@@ -369,6 +369,55 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
+  fun `create reconciles a transfer that named a different destination from the prison it arrived at`() {
+    // The destination is the sending prison's expectation, not a fact: the person may have moved on again, or
+    // it may simply have been wrong. Requiring it to match meant the prison actually holding the box could not
+    // log it at all, while the sender's record showed it in transit indefinitely.
+    stubSaveAssigningId()
+    val source = transferredOut("LEI", "OLDSEAL", toPrisonId = "MDI")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+
+    service.create(createRequest(prisonId = "IWI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
+
+    assertThat(source.latestTransferEvent()?.relatedContainerId).isNotNull()
+    assertThat(source.receivingPrison()).isNull() // reconciled, so it stops awaiting anywhere
+  }
+
+  @Test
+  fun `create will not match a transfer whose arrival has already been logged`() {
+    // Reconciled means some prison already holds a record for this box; matching it again would duplicate it.
+    val source = transferredOut("LEI", "OLDSEAL", toPrisonId = "MDI").apply {
+      latestTransferEvent()?.relatedContainerId = UUID.randomUUID()
+    }
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+
+    assertThatThrownBy { service.create(createRequest(prisonId = "MDI", previousSealNumber = "OLDSEAL"), "A_USER") }
+      .isInstanceOf(PreviousSealNumberNotFoundException::class.java)
+  }
+
+  @Test
+  fun `create will not mistake badly cased local property for property arriving on transfer`() {
+    // Nothing normalises prison ids on the way in, so a stray " mdi" can be stored verbatim. Comparing them
+    // raw would make property already here look like it is at another prison - and matching it would
+    // deactivate a live local record.
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt(" mdi ", "OLDSEAL")))
+
+    assertThatThrownBy { service.create(createRequest(prisonId = "MDI", previousSealNumber = "OLDSEAL"), "A_USER") }
+      .isInstanceOf(PreviousSealNumberNotFoundException::class.java)
+  }
+
+  @Test
+  fun `create matches property at a genuinely different prison however its id is cased`() {
+    stubSaveAssigningId()
+    val source = containerAt(" lei ", "OLDSEAL")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+
+    service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
+
+    assertThat(source.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+  }
+
+  @Test
   fun `update rejects amending the seal to one held by another active container`() {
     val existing = existingContainer()
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
