@@ -43,7 +43,9 @@ This service replaces that part of NOMIS with something purpose-built. The two m
 They use the front end, and it is scoped to the prison they're working at.
 
 **Other HMPPS systems** — the service announces every change, so other services can react without anyone
-re-keying anything. Most importantly this is how NOMIS is kept up to date during the changeover.
+re-keying anything. Most importantly this is how NOMIS is kept up to date during the changeover. (The one
+exception is the bulk migration of existing NOMIS property, which deliberately stays silent rather than
+announcing millions of changes nobody needs to hear.)
 
 ## The rollout: two systems, one at a time
 
@@ -92,7 +94,7 @@ Switching a prison on is done by the rollout team through an admin screen — no
 | **Move it** | Move property to a different storage location, or send it to the central warehouse. |
 | **Combine it** | Merge several containers into one new sealed container — with the originals' history preserved. |
 | **Hand it back or dispose of it** | Record property returned to the person, transferred to another prison, or destroyed. |
-| **Stay ahead of deadlines** | Flags property that's overdue for disposal, or due for return because the person has been released. |
+| **Stay ahead of deadlines** | Flags property that's overdue for disposal, or due for return because the person has been released or is about to be. |
 | **Manage storage** | Set up and maintain the storage locations a prison has, and how much each holds. |
 | **Run the rollout** | Switch prisons over to the new service, and control the warning staff see in NOMIS. |
 

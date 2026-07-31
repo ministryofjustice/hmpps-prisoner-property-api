@@ -271,6 +271,11 @@ flowchart LR
 **Published:** `prison-property.container.created`, `prison-property.container.updated`. That's all —
 there is no removed/deleted type; removal is an *update* that sets a removal outcome.
 
+Every published event carries a **`source` message attribute** (`PropertyEventSource`: `DPS` or `NOMIS`).
+It exists so a subscriber syncing back to NOMIS can discard the events NOMIS itself caused — without it, a
+NOMIS change syncs in, publishes, and syncs straight back out again. Filter on it rather than trying to
+infer origin from the payload.
+
 **Consumed:** `prison-offender-events.prisoner.received` flags property held elsewhere as due for
 transfer out. `prison-offender-events.prisoner.released` flags property due for return — but only for
 reason `RELEASED`, since the same event also fires for court, temporary absence and transfers. A death
@@ -281,9 +286,17 @@ recorded as a distinct event so the history reads correctly. Any other event typ
 
 ## 6. Domain model — event sourcing
 
-The heart of the design: **a container's current state is not stored, it is derived.** A
-`PropertyContainer` owns an ordered list of immutable `PropertyEvent`s, and status, location and seal
-are computed from the most recent relevant event.
+The heart of the design: **a container's current state is derived from its history.** A
+`PropertyContainer` owns an ordered list of immutable `PropertyEvent`s, and status and location are
+computed from the most recent relevant event.
+
+Two qualifications, both of which matter more than they look:
+
+- **The seal number is stored**, not derived — `currentSealNumber` is a real column, because uniqueness
+  across containers in storage has to be checked in SQL. There is no `currentSeal()` method to go with
+  `currentStatus()` and `currentLocation()`.
+- **Status and location are also mirrored into columns** (see rule 3 below), and the establishment-wide
+  list reads those columns rather than the events. So there are two read paths, and they must agree.
 
 ```mermaid
 classDiagram
@@ -295,16 +308,18 @@ classDiagram
         +String currentSealNumber
         +LocalDate proposedDisposalDate
         +RemovalOutcome removalOutcome
-        +Boolean archived
+        +LocalDate removalDate
         ~ContainerStatus currentStatusValue
-        ~String currentInternalLocationId
+        ~UUID currentInternalLocationId
+        ~StorageLocationType currentStorageLocationType
         ~String receivingPrisonId
         +currentStatus() ContainerStatus
         +baseStatus() ContainerStatus
         +isRemoved() Boolean
         +isDisposalDue() Boolean
-        +currentLocation() String
+        +currentLocation() UUID
         +receivingPrison() String
+        +latestTransferEvent() PropertyEvent
         +refreshDerivedState()
     }
 
@@ -312,13 +327,17 @@ classDiagram
         +UUID id
         +PropertyEventType eventType
         +LocalDateTime eventDateTime
+        +LocalDate eventDate
         +String eventUserId
         +String sealNumber
-        +String fromInternalLocationId
-        +String toInternalLocationId
+        +ContainerType containerType
+        +UUID fromInternalLocationId
+        +UUID toInternalLocationId
+        +StorageLocationType toStorageLocationType
         +String fromPrisonId
         +String toPrisonId
         +UUID relatedContainerId
+        +String relatedContainerSealNumber
     }
 
     class ActiveAgency {
@@ -338,26 +357,78 @@ Methods are shown alongside fields on purpose: the `+currentStatus()` line is th
 stored columns are not. The `~` fields are the denormalised mirrors — marked package-internal because
 that is exactly what they are: an indexing detail, not part of the model.
 
-Three rules worth carrying in your head:
+Five rules worth carrying in your head:
 
 1. **`removalOutcome` wins.** Once set, the container is removed: `currentStatus()` reports the removal
    status regardless of events, and `currentLocation()` returns null — it isn't anywhere any more.
+   `REMOVED` is the odd one out among the outcomes: it is *reversible*, and clearing it alongside a
+   `REACTIVATED` event brings the container back. That is why there is no `archived` flag; there was one,
+   and `V14__drop_archived.sql` dropped it in favour of this.
 2. **Disposal is time-based.** `isDisposalDue()` compares `proposedDisposalDate` to today, so a
    container becomes overdue with no write happening. This is why it is never denormalised.
 3. **The mirror columns are not the truth.** `currentStatusValue`, `currentInternalLocationId`,
    `currentStorageLocationType` and `receivingPrisonId` exist only so the establishment-wide list can
    filter and paginate in SQL without loading every event. Every write path must call
-   `refreshDerivedState()`; the derivation methods remain authoritative.
-4. **Some questions the columns cannot answer at all**, because they depend on where a container's *owner*
-   now is — which lives in prisoner-search, not here. A container's displayed status is one
-   (`ContainerStatusResolver`); whether it is due to transfer *in* to a given prison is another. The
-   `receivingPrisonId` column only records a destination when a reception or transfer-out was written
-   against the container, and ordinary NOMIS sync traffic resets it, so the establishment's incoming list
-   also matches property whose owner is on that prison's roll (`PrisonRollFactory`). Both fall back to the
-   columns alone when prisoner-search is unavailable.
+   `refreshDerivedState()`; the derivation methods remain authoritative. **A new write path that forgets
+   this compiles, passes its own test, and silently breaks the establishment list and the summary tiles.**
+4. **A transfer out is a removal, not a move.** This is the most counter-intuitive thing in the domain and
+   the easiest to get wrong. Sending a container to another prison does **not** reassign its `prisonId`.
+   It removes the source container with outcome `TRANSFERRED` and exposes `receivingPrisonId`; the
+   destination gets a *separate* record when receiving staff log the arrival. The two are reconciled by
+   `relatedContainerId` when the seals are matched, in either order. A live container therefore never
+   shows `TRANSFER` — `baseEventStatus()` deliberately steps over it — and `currentLocation()` returns null
+   after a transfer so the receiving prison assigns its own.
+5. **Some questions the columns cannot answer at all**, because they depend on where a container's *owner*
+   now is — which lives in prisoner-search, not here. See the next section: this turned out to be a large
+   enough idea to need one.
 
 `ActiveAgency` is separate: one row per prison, recording whether that prison is live on DPS and when it
 switched. It gates writes in the UI and labels history in the API.
+
+### 6a. Owner location — the status you see is not the status in the column
+
+A container's stored status describes *the container*. What staff need to know is usually about the
+**person**: this box is still here, but its owner left last week. No column can answer that, because the
+owner's whereabouts live in prisoner-search.
+
+So reads layer an overlay on top of the stored status:
+
+| Component | Job |
+| --- | --- |
+| `OwnerLocation` | The three answers that matter — owner is `HERE`, `RETURNING` (released or about to be), or `ELSEWHERE` — and `statusFor()`, the single mapping from owner location to displayed status. |
+| `PrisonStatusOverlayFactory` | Builds a `StatusOverlay` for one prison: resolves the owners of the property held there in one bulk prisoner-search lookup. |
+| `StatusOverlay` | The resolved answer for a set of prisoners, handed to the query and the row mapper. |
+| `ContainerStatusResolver` | Applies the precedence — removal, then disposal due, then owner location, then the container's own base status — for both the person view (`effectiveStatus`) and the establishment list (`effectiveStatusFromColumns`). |
+
+Two consequences worth knowing before changing any of it:
+
+- **The status filter is derived from the same mapping, inverted.** `OwnerLocation.persistedStatusesReadingAs`
+  is deliberately the inverse of `statusFor`, so filtering by "due for return" cannot select a different set
+  of containers than the ones displaying that tag. Change one without the other and the list contradicts
+  itself — which is the bug this machinery was built to end (MAPB-725/726).
+- **It degrades rather than fails.** If prisoner-search is unavailable the overlay is empty and everything
+  falls back to the stored columns: statuses read as they did before, rather than the page erroring.
+
+The incoming ("due to transfer in") list works the same way and for the same reason. `receivingPrisonId`
+only records a destination when a reception or transfer-out was written against the container, and ordinary
+NOMIS sync traffic resets it — so `incomingScope` also matches property whose owner is on this prison's roll
+(`PrisonRollFactory`), and **drops** property addressed here whose owner has demonstrably turned up
+somewhere else. Someone in transit or released does not count as having turned up: `TRN` and `OUT` are
+sentinels, not establishments, so the recorded destination stands until they actually arrive.
+
+### 6b. Querying the establishment list
+
+`PrisonPropertyFilter` is the resolved set of criteria for the establishment-wide list — search term, type,
+status, person location, whether to include removed and incoming property, plus the overlay and roll data
+above. `PropertyContainerRepositoryCustom` / `…Impl` build the Criteria API query from it.
+
+One deliberate oddity: the list **pages by prisoner, not by container.** A page is a set of people and all
+of their property, so one person's containers can never split across a page boundary — which they would
+otherwise do, and which reads as missing property.
+
+`application.yml` sets `hibernate.query.in_clause_parameter_padding: true` specifically for this path: the
+overlay binds a variable-size set of prisoner numbers, and without padding every distinct set size compiles
+its own statement.
 
 Enum meanings are in the [README's domain model section](../README.md#domain-model) — not repeated here.
 
@@ -404,8 +475,9 @@ prod. Neither repo's deployment steps are restated here — see the
 | **Container** | A sealed bag or box holding a prisoner's property. The thing the service tracks. |
 | **Seal number** | The number on the tamper-evident seal. Unique across containers currently in storage; changing it is an event. |
 | **Event** | An immutable record of something that happened to a container. The container's history *is* its events. |
-| **Derived state** | Status, location and seal — computed from the events, not stored. |
-| **Removal outcome** | Why a container left storage: returned, disposed, transferred, combined, or created in error. |
+| **Derived state** | Status and location — computed from the events. Also mirrored into columns for the establishment list; the seal number, by contrast, is genuinely stored. |
+| **Removal outcome** | Why a container left storage: returned, disposed, transferred, combined, created in error, or removed. The last is reversible; the others are not. |
+| **Owner location** | Where the container's *owner* is — here, returning, or elsewhere. Comes from prisoner-search and overrides the container's own status on every screen. |
 | **Active agency** | A prison that is live on DPS for property. The rollout gate. |
 | **Branston** | The central warehouse property can be sent to, as opposed to a location inside a prison. |
 | **DPS** | Digital Prison Services — the modern services replacing NOMIS. |

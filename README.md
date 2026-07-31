@@ -33,9 +33,13 @@ follow the change.
 
 ### Domain model
 
-The data is **event-sourced**: a `PropertyContainer` owns an ordered history of `PropertyEvent`s,
-and the container's *current* seal number, status and location are **derived from its most recent
-relevant event** rather than stored.
+The data is **event-sourced**: a `PropertyContainer` owns an ordered history of `PropertyEvent`s, and the
+container's *current* status and location are **derived from its most recent relevant event**.
+
+Two things temper that. The **seal number is stored**, because uniqueness across containers in storage has
+to be checked in SQL. And status, location, location type and receiving prison are each **mirrored into a
+column** so the establishment-wide list can filter and page without loading every event — the derivation
+stays authoritative, but every write path must call `refreshDerivedState()` to keep the mirrors honest.
 
 ```
 PropertyContainer 1 ──────< * PropertyEvent
@@ -53,14 +57,22 @@ PropertyContainer 1 ──────< * PropertyEvent
 ```
 
 - **Container types:** `STANDARD`, `EXCESS`, `VALUABLES`, `CONFISCATED`.
-- **Event types:** `CREATED_SEALED`, `SEAL_CHANGED`, `CONTAINER_TYPE_CHANGE`, `MOVED`,
-  `TRANSFERRED`, `RETURNED`, `DISPOSAL_REQUIRED`, `DISPOSED`, `COMBINED`.
-- **Status (derived):** `STORED`, `DISPOSAL_REQUIRED`, `DISPOSED`, `RETURNED`, `TRANSFER`,
-  `COMBINED`.
+- **Event types:** `CREATED_SEALED`, `SEAL_CHANGED`, `CONTAINER_TYPE_CHANGE`, `MOVED`, `TRANSFERRED`,
+  `RETURNED`, `DISPOSAL_REQUIRED`, `DISPOSED`, `COMBINED`, `CREATED_IN_ERROR`, `REMOVED`, `REACTIVATED`,
+  and the three movement events driven by the prisoner event listener — `PRISONER_RECEIVED`,
+  `PRISONER_RELEASED`, `DIED_IN_CUSTODY`.
+- **Status (derived):** `STORED`, `DUE_FOR_TRANSFER_OUT`, `DUE_FOR_RETURN`, `DISPOSAL_REQUIRED`,
+  `DISPOSED`, `RETURNED`, `TRANSFER`, `COMBINED`, `CREATED_IN_ERROR`, `REMOVED`. The first three drive the
+  establishment summary tiles and list filters.
 - **Storage location types:** `INTERNAL` (a `hmpps-locations-inside-prison-api` location UUID) or
   `BRANSTON` (the offsite warehouse, where there is no internal location id).
 - **Removal outcomes:** when a container leaves active storage its `removalOutcome` records why —
-  `DISPOSED`, `RETURNED`, `TRANSFERRED` or `COMBINED` — alongside the `removalDate`.
+  `DISPOSED`, `RETURNED`, `TRANSFERRED`, `COMBINED`, `CREATED_IN_ERROR` or `REMOVED` — alongside the
+  `removalDate`. `REMOVED` is the only reversible one: clearing it with a `REACTIVATED` event brings the
+  container back, which is why there is no separate archived flag.
+- **A transfer out is a removal, not a move.** Sending a container to another prison does not reassign its
+  `prisonId`; it removes the source with outcome `TRANSFERRED` and the destination gets its own record when
+  staff there log the arrival. See [architecture.md](docs/architecture.md) §6.
 - Internal location ids reference the `hmpps-locations-inside-prison-api` location UUID.
 - A container is only created once a seal has been entered; changing a seal keeps the same
   container id.
@@ -70,22 +82,46 @@ PropertyContainer 1 ──────< * PropertyEvent
 ### API endpoints
 
 All endpoints are JSON and require an HMPPS Auth bearer token. Reads require
-`ROLE_PRISONER_PROPERTY__RO`; writes require `ROLE_PRISONER_PROPERTY__RW`; the NOMIS sync
-endpoints require `ROLE_PRISONER_PROPERTY__SYNC`.
+`ROLE_PRISONER_PROPERTY__RO`; writes require `ROLE_PRISONER_PROPERTY__RW`; the NOMIS sync endpoints
+require `ROLE_PRISONER_PROPERTY__SYNC`; the rollout console requires `ROLE_PRISONER_PROPERTY__ADMIN` and
+storage-location management `ROLE_PRISONER_PROPERTY__LOCATION_ADMIN`.
 
 **Property containers** (`/property-containers`)
 
 | Method & path | Role | Description |
 | --- | --- | --- |
 | `GET /prisoner/{prisonerNumber}` | RO | All containers held for a prisoner |
-| `GET /prison/{prisonId}` | RO | All containers held in a prison |
+| `GET /prisoner/{prisonerNumber}/summary` | RO | Property counts for one prisoner (feeds the profile tile) |
+| `GET /prisoner/{prisonerNumber}/events` | RO | The prisoner's property timeline across all their containers |
+| `GET /prison/{prisonId}` | RO | All containers held in a prison — searchable, filterable, paged by prisoner |
+| `GET /prison/{prisonId}/summary` | RO | The establishment summary tiles |
+| `GET /prison/{prisonId}/box-locations` | RO | Storage locations with space, for the "where stored" step |
 | `GET /{id}` | RO | A single container by id |
+| `GET /{id}/events` | RO | One container's history |
 | `POST /` | RW | Create a new sealed container |
 | `PUT /{id}` | RW | Update a container's type, seal, location and proposed disposal date |
 | `POST /{id}/move` | RW | Move a container to an internal location or to Branston |
 | `POST /combine` | RW | Combine two or more source containers into a new sealed container |
-| `POST /{id}/remove` | RW | Remove from storage by returning or transferring |
+| `POST /{id}/remove` | RW | Remove from storage — returned, transferred, disposed or created in error |
 | `POST /{id}/dispose` | RW | Dispose of (destroy) a container |
+
+**Rollout console** (`/active-agencies`) — which prisons manage property in DPS rather than NOMIS. The
+same list is published on the actuator `/info` payload, which is how the front end reads it.
+
+| Method & path | Role | Description |
+| --- | --- | --- |
+| `GET /` | ADMIN | The prisons currently switched on |
+| `GET /all` | ADMIN | Every prison with its on/off state, for the console |
+| `PUT /{agencyId}` | ADMIN | Switch a prison on or off |
+
+**Storage locations** (`/property-locations`)
+
+| Method & path | Role | Description |
+| --- | --- | --- |
+| `GET /prison/{prisonId}` | LOCATION_ADMIN | The prison's property storage locations |
+| `POST /prison/{prisonId}` | LOCATION_ADMIN | Add a storage location |
+| `PUT /{id}` | LOCATION_ADMIN | Rename a location or change its capacity |
+| `DELETE /{id}` | LOCATION_ADMIN | Remove an empty storage location |
 
 **Sync with NOMIS** (`/sync/property-containers`)
 
@@ -125,8 +161,9 @@ NOMIS sync services above.
 | [Architecture](docs/architecture.md) | The whole service — both repos, diagrams, messaging, domain model. |
 | [Technical implementation](docs/technical-implementation.md) | This API's internals: packages, patterns, dependencies. |
 | [Establishment summary counts](docs/establishment-summary-counts.md) | How the summary tiles are counted. |
-| [Operational runbooks](docs/runbook.md) | One-off/coordinated operational procedures (migrations, backfills). |
-| [Property returned or transferred tab](docs/property-returned-or-transferred-tab.md) | Roadmap item — not built. |
+| [Operational runbooks](docs/runbook.md) | One-off/coordinated operational procedures (migrations, backfills). Not a general operations reference. |
+| [Property returned or transferred tab](docs/property-returned-or-transferred-tab.md) | How the tab was built, and how each open design question was answered. |
+| [Property snag issues](docs/property-snags.md) | The MAPB-709 snag backlog and the decisions taken on each. |
 
 ## Tech stack
 

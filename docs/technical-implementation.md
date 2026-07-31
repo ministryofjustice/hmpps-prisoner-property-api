@@ -24,9 +24,9 @@ Base package: `uk.gov.justice.digital.hmpps.prisonerpropertyapi`
 | `service/` | All business logic. **The transaction boundary.** Never publishes. |
 | `domain/` | JPA entities, enums, repositories, and the derivation logic that constitutes the model. |
 | `dto/` | The wire contract (requests + responses), with springdoc `@Schema` annotations. `dto/sync/` holds the NOMIS wire types. |
-| `event/` | Domain-event plumbing: `PropertyContainerEventFactory`, `DomainEventPublisher` (out), `PrisonerEventListener` (in), `HmppsDomainEvent`. |
+| `event/` | Domain-event plumbing: `PropertyContainerEventFactory`, `DomainEventPublisher` (out), `PrisonerEventListener` (in), `HmppsDomainEvent`, and `PropertyEventSource` — the `DPS`/`NOMIS` attribute a sync-back filters on to avoid looping. |
 | `client/` | Outbound WebClients, one per external service, each declaring its own small response types. |
-| `config/` | WebClient/OAuth2 wiring, caching, OpenAPI, and the `@RestControllerAdvice` exception handler. |
+| `config/` | WebClient/OAuth2 wiring, caching, OpenAPI, the `@RestControllerAdvice` exception handler, and `ActiveAgenciesInfo` — an `InfoContributor` that publishes the active-prison list on `/info`. That is a public contract: it is how the front end learns which prisons are switched on. |
 | `health/` | One health-ping bean per external dependency. |
 
 There is **no custom `SecurityConfiguration`** — JWT resource-server security comes from
@@ -60,10 +60,23 @@ role, and keeping them apart is what stops staff endpoints and machine endpoints
 | `SyncPropertyContainerService` | The NOMIS path only: `sync` (ongoing) and `migrate` (bulk initial load). |
 
 All three build their events through **`PropertyContainerEventFactory`**, so an event raised by a staff
-action and one raised by NOMIS sync are the same shape. Three smaller services support them:
-`ActiveAgenciesService` (rollout flag — deliberately **not** cached, so an admin toggle can't flip-flop
-between pods), `BoxLocationService` (storage locations with space) and `PropertyLocationAdminService`
-(location CRUD, guarding capacity and in-use deletes).
+action and one raised by NOMIS sync are the same shape. Six smaller components support them:
+
+| Component | Responsibility |
+| --- | --- |
+| `ActiveAgenciesService` | The rollout flag. Deliberately **not** cached, so an admin toggle can't flip-flop between pods. |
+| `BoxLocationService` | Storage locations with space. |
+| `PropertyLocationAdminService` | Location CRUD, guarding capacity and in-use deletes. |
+| `ContainerStatusResolver` | The status any screen actually shows — removal, then disposal, then owner location, then base status. |
+| `PrisonStatusOverlayFactory` | Resolves the owners of one prison's property into a `StatusOverlay`. |
+| `PrisonRollFactory` | Who is currently on a prison's roll, for the incoming-property list. |
+
+The last three are the owner-location machinery described in
+[architecture.md §6a](architecture.md#6a-owner-location--the-status-you-see-is-not-the-status-in-the-column).
+They have deliberately different failure modes when prisoner-search is slow or partial:
+`PrisonStatusOverlayFactory` caps candidates and would rather mislabel than omit, `PrisonRollFactory`
+tolerates truncation and would rather omit than mislabel. Both are wrong in the direction that is safe for
+what they feed.
 
 Write services are thin on dependencies on purpose: `PropertyContainerWriteService` takes only the
 repository and `LocationsClient` — it validates a location and appends events; it does not know who the
@@ -100,7 +113,8 @@ result type, and publish in the resource. Never inject `DomainEventPublisher` in
 
 ## Derived state
 
-A container's status, location and seal are **computed, not stored**:
+A container's status and location are **computed** from its events. Its seal number is not — the seal is a
+stored column, because uniqueness has to be checked in SQL, which is why there is no `currentSeal()` below.
 
 | Method | Rule |
 | --- | --- |
@@ -108,8 +122,16 @@ A container's status, location and seal are **computed, not stored**:
 | `baseStatus()` | As above but **without** the time-based disposal overlay — this is what gets denormalised. |
 | `isRemoved()` | `removalOutcome != null`. |
 | `isDisposalDue()` | Not removed, and `proposedDisposalDate` is today or earlier. |
-| `currentLocation()` | Location from the latest location-bearing event; **null once removed**. |
-| `receivingPrison()` | The destination prison, only while `baseStatus()` is `DUE_FOR_TRANSFER_OUT`. |
+| `currentLocation()` | `UUID?` of the latest location-bearing event's location. **Null once removed**, and null after a transfer out — the receiving prison assigns its own. |
+| `receivingPrison()` | The destination prison, in **two** cases: while `baseStatus()` is `DUE_FOR_TRANSFER_OUT`, *and* once removed as `TRANSFERRED` while the latest transfer event is still unreconciled (`relatedContainerId == null`). |
+
+**`currentStatus()` is not what users see.** Every read surface passes through `ContainerStatusResolver`,
+which layers the owner's location over the container's own status — see
+[architecture.md §6a](architecture.md#6a-owner-location--the-status-you-see-is-not-the-status-in-the-column).
+The table above is the entity's view of itself, not the screen's.
+
+The second branch of `receivingPrison()` is what makes transferred-out property visible at the prison it
+was sent to: `incomingScope`'s in-flight predicate depends on it. Delete it and boxes vanish in transit.
 
 Four columns mirror this state — `currentStatusValue`, `currentInternalLocationId`,
 `currentStorageLocationType`, `receivingPrisonId` — purely so the establishment list can filter and
@@ -182,17 +204,32 @@ leaking a sequence.
 `findById` uses the `PropertyContainer.withEvents` entity graph: deriving state touches every event, so
 loading them lazily would be an N+1 on every read.
 
-**Schema changes go in a new `V{n}__*.sql` Flyway migration — never an entity-only DDL change.** Twelve
+**Schema changes go in a new `V{n}__*.sql` Flyway migration — never an entity-only DDL change.** Fourteen
 migrations so far (`src/main/resources/db/migration/`); their names describe the change, and reading them
-in order is the fastest way to understand how the model arrived where it is.
+in order is the fastest way to understand how the model arrived where it is. The last two are instructive:
+`V13` adds a seal snapshot to combine events so history names the right destination even after a reseal,
+and `V14` drops `archived` in favour of the reversible `REMOVED` outcome.
+
+### The establishment-list query
+
+`PrisonPropertyFilter` is the resolved criteria object for the establishment-wide list, and
+`PropertyContainerRepositoryCustom` / `…Impl` build the Criteria API query from it. The list **pages by
+prisoner rather than by container**, so a person's containers cannot split across a page boundary; and
+`application.yml` sets `hibernate.query.in_clause_parameter_padding: true` because the owner-location
+overlay binds a variable-size prisoner-number set that would otherwise compile a new statement per size.
+`PersonLocation` filters the same list by where the owner is, in memory, from the overlay already resolved.
 
 ---
 
 ## Testing
 
 Integration tests extend `IntegrationTestBase` (RANDOM_PORT, `test` profile, Testcontainers Postgres +
-LocalStack, WireMock HMPPS Auth) and authenticate with the `setAuthorisation()` JWT helper. **Docker must
-be running.** `OpenApiDocsTest` and `ResourceSecurityTest` enforce the annotation/role conventions above.
+LocalStack) and authenticate with the `setAuthorisation()` JWT helper. **Docker must be running.**
+`OpenApiDocsTest` and `ResourceSecurityTest` enforce the annotation/role conventions above.
+
+`IntegrationTestBase` registers WireMock extensions for **all five** upstreams — HMPPS Auth, prisoner
+search, prison register, locations inside prison and prison API — so a new test gets every stub seam for
+free and does not need to add one.
 
 Full check: `./gradlew check`. See the [README](../README.md) for the rest.
 
@@ -204,5 +241,6 @@ Full check: `./gradlew check`. See the [README](../README.md) for the rest.
   draft**. It was a decision aid written before the timeline work; most of what it proposes is now built,
   and some of its current-state claims are false (it says there is no prison-api client — there is). It is
   kept for the *why*. Do not read it as current state.
-- `server/routes/index.ts` in the UI is one very large file — noted here because it is the thing most
-  likely to surprise someone crossing over from this repo.
+- `server/routes/index.test.ts` in the UI is a single ~2,500-line route test, even though the routes
+  themselves were split into one file per journey. Noted here because someone crossing over from this repo
+  will go looking for `establishmentList.test.ts` and not find it.

@@ -4,6 +4,12 @@ One-off and recurring operational procedures for the deployed service. Day-to-da
 manual intervention; the steps here are for coordinated changes (migrations, backfills) that can't be
 expressed as a Flyway migration alone.
 
+**This is not a general operations reference** — there is nothing here about health checks, queues, alerts
+or scaling. Each entry is a specific procedure, kept after the fact so the reasoning survives. For how the
+service is put together see [architecture.md](architecture.md); for rolling a prison on or off see the
+rollout console (`/active-agencies`, `ROLE_PRISONER_PROPERTY__ADMIN`) described in the
+[README](../README.md#api-endpoints).
+
 **Related docs:** [README](../README.md) · [Architecture](architecture.md) ·
 [Technical implementation](technical-implementation.md)
 
