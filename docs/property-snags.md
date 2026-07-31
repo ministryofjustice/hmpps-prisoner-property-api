@@ -3,7 +3,7 @@
 Backlog for the **[MAPB-709](https://dsdmoj.atlassian.net/browse/MAPB-709) — Property snag issues**
 epic: bugs, an establishment-vs-prisoner view consistency gap, and a few enhancements found in testing
 and review. All ten items from the original batch are implemented; a second round (MAPB-725 to MAPB-727, then
-MAPB-730, MAPB-732, MAPB-733 and MAPB-734) came out of testing those. The notes below record the decisions taken along
+MAPB-730, MAPB-732, MAPB-733, MAPB-734 and MAPB-736) came out of testing those. The notes below record the decisions taken along
 the way, so the reasoning survives the tickets. Update **Status** and add PR links as the remaining items land.
 
 Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property-ui ·
@@ -31,8 +31,9 @@ Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property
 | [MAPB-727](https://dsdmoj.atlassian.net/browse/MAPB-727) | Bug | M | API + UI | Match old and new seal numbers when logging property that arrived on transfer | Merged (api #71, #72; ui #57, #58) |
 | [MAPB-730](https://dsdmoj.atlassian.net/browse/MAPB-730) | Story | M | UI | Remember the establishment list filters when navigating away and back | Merged (ui #59) |
 | [MAPB-732](https://dsdmoj.atlassian.net/browse/MAPB-732) | Bug | M | API | Show property left at another establishment in the receiving prison's incoming list | Merged (api #74) |
-| [MAPB-733](https://dsdmoj.atlassian.net/browse/MAPB-733) | Bug | M | API + UI | Show a transferred box at the prison the person actually went to, not the one it was addressed to | In review (api #76, ui #61) |
+| [MAPB-733](https://dsdmoj.atlassian.net/browse/MAPB-733) | Bug | M | API + UI | Show a transferred box at the prison the person actually went to, not the one it was addressed to | Merged (api #76, ui #61) |
 | [MAPB-734](https://dsdmoj.atlassian.net/browse/MAPB-734) | Story | S | UI | Show the applied filters as removable tags on the establishment property list | Merged (ui #60) |
+| [MAPB-736](https://dsdmoj.atlassian.net/browse/MAPB-736) | Story | S | UI | Combine the Change and Remove actions into a single Manage action | In review (ui #62) |
 
 ## Notes
 
@@ -134,6 +135,15 @@ container's status was being derived independently in four places, so they drift
   concertina is collapsed on redisplay — so MAPB-734 shows them as removable tags above it, borrowing the
   non-residential locations pattern. Stickiness without visible state would have been a worse bug than the one
   it fixed.
+- **One action instead of two — [MAPB-736](https://dsdmoj.atlassian.net/browse/MAPB-736).** Both lists ended
+  each row with `Change | Remove`, which made staff decide what they were doing before they could act on a
+  container. The distinction was never real: the change screen has always carried a *Remove container* button,
+  so Change was already the route to both. One **Manage** link now opens that screen, which is retitled to
+  match — the word clicked is the word arrived at. The URLs, the two journeys and the `?from=` origin are
+  untouched; removal simply sits one click further in, behind the screen showing what is about to go. The
+  Playwright removal spec was rewritten to walk person page → Manage → Remove container rather than a link of
+  its own, because that browser test is the only thing standing between this change and quietly losing the
+  ability to remove a container.
 
 ## Deploys: the `node-fetch` replica conflict
 
