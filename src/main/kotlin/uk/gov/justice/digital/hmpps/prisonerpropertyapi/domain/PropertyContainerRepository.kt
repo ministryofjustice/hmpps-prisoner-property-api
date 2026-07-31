@@ -55,6 +55,16 @@ interface PropertyContainerRepository :
   fun findActivePrisonerNumbers(@Param("prisonId") prisonId: String): List<String>
 
   /**
+   * The people whose property is addressed to this prison - either flagged to follow them here, or already
+   * transferred here and not yet logged. Small (it is only what is in flight), and resolved against
+   * prisoner-search so the establishment list can drop property whose owner has since gone somewhere else and
+   * which is therefore not coming after all. The destination is only ever as current as the last write to the
+   * container, so it goes stale the moment someone is moved on again.
+   */
+  @Query("select distinct c.prisonerNumber from PropertyContainer c where c.receivingPrisonId = :prisonId")
+  fun findPrisonerNumbersWithPropertyAddressedTo(@Param("prisonId") prisonId: String): List<String>
+
+  /**
    * How many containers a prison holds for each prisoner in each persisted status, counting only containers
    * still in storage and not yet due for disposal - i.e. the ones whose displayed status depends on where their
    * owner is. Feeds the establishment summary counts: grouping by prisoner as well as status is what lets the

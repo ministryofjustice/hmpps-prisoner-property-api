@@ -31,6 +31,10 @@ import java.util.UUID
  *   incoming scope then matches only the destination recorded on each container - which is the behaviour
  *   before this existed, and the fallback when prisoner-search is unavailable. Empty means the roll *was*
  *   resolved and nobody is here, so nothing can be incoming.
+ * @param transferOwnersMovedOn owners of property transferred *to* this establishment who have since turned up
+ *   at a different one, so the box is not coming here whatever the transfer said. Deliberately excludes people
+ *   in transit or released: we cannot yet say where their property should go, so the sending prison's
+ *   intention still stands. Empty when nothing needs excluding, or when the owners could not be resolved.
  */
 data class PrisonPropertyFilter(
   val prisonerNumber: String? = null,
@@ -46,6 +50,7 @@ data class PrisonPropertyFilter(
   val includeTransferIn: Boolean = false,
   val statusOverlay: StatusOverlay? = null,
   val incomingPrisonerNumbers: Set<String>? = null,
+  val transferOwnersMovedOn: Set<String> = emptySet(),
 ) {
   /** Whether any requested status depends on the owner's location, and so needs a [statusOverlay] to resolve. */
   fun needsStatusOverlay(): Boolean = statuses.any { it in OwnerLocation.LIVE_STATUSES }

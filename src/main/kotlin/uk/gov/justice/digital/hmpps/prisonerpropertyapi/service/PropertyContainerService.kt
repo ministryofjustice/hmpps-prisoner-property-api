@@ -227,6 +227,7 @@ class PropertyContainerService(
     val filter = unresolvedFilter.copy(
       statusOverlay = classification.overlay,
       incomingPrisonerNumbers = incomingPrisonerNumbers,
+      transferOwnersMovedOn = if (includeTransferIn) transferOwnersMovedOnFrom(prisonId) else emptySet(),
     )
 
     if (personLocation == null) {
@@ -251,6 +252,28 @@ class PropertyContainerService(
     val matching = allNumbers.filter { personLocation.matches(prisoners[it]?.prisonId, prisonId) }
     val pageNumbers = matching.drop(pageable.offset.toInt()).take(pageable.pageSize)
     return buildGroupsPage(prisonId, filter, pageNumbers, matching.size.toLong(), pageable, prisoners)
+  }
+
+  /**
+   * Of the people whose property is addressed to [prisonId], the ones who have turned up somewhere else - so
+   * their property is not coming here after all, whatever the container says.
+   *
+   * A container's destination records where the person was *expected* to go, as at the last write to it. Plans
+   * change: they can be redirected in the meantime, and the property then belongs at the prison that actually
+   * has them. Without this the named destination lists it for ever, because nothing will ever arrive there to
+   * reconcile it, while the prison that does have them cannot see it at all.
+   *
+   * Someone in transit or released is deliberately *not* counted as having moved on: we cannot yet say where
+   * their property should go, so the recorded destination stands until we can. Small enough for one lookup -
+   * it is only what is in flight to this prison.
+   */
+  private fun transferOwnersMovedOnFrom(prisonId: String): Set<String> {
+    val addressedHere = repository.findPrisonerNumbersWithPropertyAddressedTo(prisonId)
+    if (addressedHere.isEmpty()) return emptySet()
+    val prisoners = prisonerSearchClient.getPrisoners(addressedHere)
+    return addressedHere
+      .filter { prisoners[it].realPrisonId()?.equals(prisonId, ignoreCase = true) == false }
+      .toSet()
   }
 
   /**
