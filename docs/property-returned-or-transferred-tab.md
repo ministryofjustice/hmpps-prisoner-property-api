@@ -1,79 +1,62 @@
-# Roadmap: "Property returned or transferred" tab
+# "Property returned or transferred" tab
 
-> **Status: roadmap / backlog — not in alpha scope.** This document only records the intent and the build
-> options so the work can be picked up later. There is nothing to build yet.
+> **Status: built and live** (MAPB-677). This document was written as a roadmap while the tab was still a
+> design; it now records what was built and, more usefully, how each of the open questions was answered.
+> The answers are the interesting part — several went the opposite way to the original design.
 
 ## Purpose
 
-The prisoner property page today has two tabs: **Property** (the person's active containers) and
-**Property history** (the interleaved timeline). Neither lists, as a plain table, the containers that have
-*left* active storage — the ones that were **returned** to the person, **disposed** of, or **transferred
-out**. Those events appear in the timeline but there is no at-a-glance list of them.
+The prisoner property page has three tabs: **Property** (the person's active containers), **Property
+history** (the interleaved timeline), and this one — a plain table of the containers that have *left*
+active storage. Those removals appear in the timeline, but the timeline is not the place to answer "what
+happened to this person's property".
 
-This roadmap item adds a **third tab**, "Property returned or transferred", showing exactly that set: every
-container for the prisoner that is no longer in active storage.
+## What was built
 
-### Design reference
+`GET /prisoner/:prisonerNumber/returned` in the UI, rendering `pages/prisonerPropertyReturned.njk` from
+`buildReturnedOrTransferredView` in `server/utils/personProperty.ts`. **No API change was needed.**
 
-From the design mock-up the tab is a sortable table, one row per removed container, with columns:
+The shipped table has five columns, sortable, newest removal first:
 
-| Column                    | Notes                                                                 |
-| ------------------------- | --------------------------------------------------------------------- |
-| Seal number               | The container's last seal number.                                     |
-| Prisoner establishment    | Where the container was held.                                         |
-| Property type             | Standard / Valuables / Confiscated / Excess etc.                      |
-| Last known storage location | The location it sat in before it left storage ("No date set" style). |
-| Disposal date             | Where relevant (disposals); blank otherwise.                          |
-| Last updated              | When the removal was recorded.                                        |
-| Status (tag)              | **Returned** / **Disposed** / **Transferred out**.                    |
+| Column | Notes |
+| --- | --- |
+| Seal number | The container's last seal number. |
+| Establishment | Where the container was held. |
+| Property type | Standard / Valuables / Confiscated / Excess etc. |
+| Removal date | When it left storage. |
+| Status (tag) | **Removed** / **Returned** / **Disposed** / **Transferred out**. |
 
-The status tag reuses the person-view timeline palette (Returned = green, Disposed = red, Transferred out =
-grey), matching `server/utils/prisonerTimeline.ts` in the UI.
+## What counts as removed
 
-## What counts as "removed"
+Four outcomes are shown: `REMOVED`, `RETURNED`, `DISPOSED`, `TRANSFERRED`.
 
-A container has left active storage when it has a removal outcome — i.e. `currentStatus()` is one of:
+`COMBINED` and `CREATED_IN_ERROR` are **excluded**, and the reasoning is recorded next to the constant in
+`personProperty.ts`: combined property did not leave, it became part of another container that is still
+tracked; created-in-error property was never really there. Neither is something the person "had returned or
+transferred out", which is what the tab claims to list.
 
-- `RETURNED` — returned to the person
-- `DISPOSED` — destroyed
-- `TRANSFER` — transferred out to another establishment
-- `CREATED_IN_ERROR` — removed as a mistake (decide whether to surface these)
-- `COMBINED` — merged into another container (probably **excluded** — it did not really leave, it became
-  part of another live container)
+Note `REMOVED` — it did not exist when this was designed. It arrived with MAPB-674 as the reversible
+removal outcome that replaced the `archived` flag, and it belongs here.
 
-These are exactly the containers the current property tab and the establishment list **hide by default**
-(see `PropertyContainer.isRemoved()` and the `includeRemoved` handling).
+## How the open questions were answered
 
-## Build options
+The original document ended with four open questions. All four are settled, and three went against the
+design mock-up:
 
-### API options
+- **"Does 'last known storage location' need the pre-removal location captured?"** — answered by **dropping
+  the column**. Rather than surface a location the container no longer occupies, the design question was
+  reframed: staff want to know *when* it left, not which shelf it was on beforehand. "Last known storage
+  location", "Disposal date" and "Last updated" all collapsed into a single **Removal date**, which is why
+  the shipped table has five columns and the design reference had seven.
+- **"Is a removal date available?"** — yes. `removalDate` is on the container and exposed on
+  `PrisonerPropertyContainerDto`, so no derivation from events was needed.
+- **"Are `CREATED_IN_ERROR` and `COMBINED` in or out?"** — out, as above.
+- **"Prisoner-only, or the establishment view too?"** — prisoner-only. Nothing equivalent was added to the
+  establishment list; the `includeRemoved` filter there covers that need.
 
-1. **Reuse the existing prisoner endpoint with a status filter (lowest cost).**
-   `GET /property-containers/prisoner/{prisonerNumber}` already accepts a repeatable `status` query
-   parameter and returns `PrisonerPropertyContainerDto`s. Passing
-   `status=RETURNED&status=DISPOSED&status=TRANSFER` (plus `CREATED_IN_ERROR` if wanted) returns the removed
-   set directly — no API change needed. The DTO already carries seal number, prison, container type,
-   location description, proposed disposal date and removal fields.
-   - *Caveat:* confirm the DTO exposes the **removal date** and the **last-known location** for a removed
-     container. `PropertyContainer.currentLocation()` returns `null` once removed, so the "Last known
-     storage location" column may need the pre-removal location — either surfaced from the latest
-     location-bearing event, or a new field on the DTO.
+## How the API question was answered
 
-2. **A dedicated "removed history" read** if the columns/sorting diverge from the active list — e.g. server
-   -side sorting by disposal date or last-updated, or a shape that always includes the last-known location
-   and removal date. Model it on `getByPrisonerNumber` in `PropertyContainerService`.
-
-### UI options
-
-- Add a third tab to the prisoner property page alongside "Property" and "Property history", rendering the
-  removed set as a GOV.UK sortable table, reusing the timeline status-tag styling.
-- Sorting: the design shows sortable "Prisoner establishment", "Disposal date" and "Last updated" columns —
-  decide client-side vs server-side sorting.
-
-## Open questions to resolve before building
-
-- Does "Last known storage location" need the **pre-removal** location captured/exposed (it is currently
-  cleared on removal)?
-- Is a **removal/disposal date** available on the container or only derivable from the events?
-- Are `CREATED_IN_ERROR` and `COMBINED` containers in or out of this tab?
-- Is this scoped to the prisoner's own history only, or should it also work from the establishment view?
+Option 1 (reuse the existing prisoner endpoint) was chosen, and taken further than proposed: the UI does
+not pass a status filter at all. It reuses the **unfiltered** `getPropertyForPrisoner` call that already
+feeds the page header, and filters client-side. One request serves the whole page, and the dedicated
+"removed history" read in option 2 was never built.

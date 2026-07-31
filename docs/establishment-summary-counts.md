@@ -86,9 +86,11 @@ commits an event** — there is no separate scheduled job or projection to rebui
 The one exception is disposal (see below), which is time-based and so is **not** denormalised — it is
 recomputed from a date on every read.
 
-Only **active** containers count: every query filters `archived = false`, and the status/disposal
-queries also filter `removal_outcome is null` (a container that has been disposed, returned, transferred
-out or combined is no longer live stock).
+Only **live** containers count: the status and disposal queries filter `removal_outcome is null` — a
+container that has been disposed, returned, transferred out, combined or removed is no longer live stock.
+
+There is no `archived` column. There was one; `V14__drop_archived.sql` dropped it under MAPB-674 in favour
+of the reversible `REMOVED` removal outcome, so removal is the single mechanism for "no longer here".
 
 ## The five tiles
 
@@ -103,8 +105,13 @@ Remaining room for property across the prison's storage locations.
 - Sum across all locations.
 
 "Containers it holds" is `countContainersByLocation` — grouped by `current_internal_location_id`, counting
-only containers **physically present in an internal box** (id not null, so offsite-at-Branston and removed
-containers are excluded), `archived = false`.
+only containers **physically present in an internal box**: the query filters on `prison_id` and
+`current_internal_location_id is not null`, and nothing else.
+
+That excludes offsite-at-Branston property directly, and removed property only *indirectly* — removal
+clears the location via `refreshDerivedState()`, so there is no `removal_outcome` clause here. Worth
+knowing: the exclusion depends on that refresh being called, so a write path that skips it inflates this
+count. (It returns a `List<LocationContainerCount>`, which the service associates into a map.)
 
 **Triggers a change:** a container moving into / out of an internal box (create, move, transfer, remove),
 or an admin editing a location's capacity in locations-inside-prison-api. This call is deliberately **not
@@ -114,7 +121,7 @@ cached** (MAPB-656) so a capacity edit or a transfer shows up immediately across
 
 `countsByLocation.values.sum()` — the total of the same per-location counts, i.e. every active container
 physically sitting in an internal location at this establishment. Excludes containers held offsite at
-Branston (null internal location id), removed containers, and archived ones.
+Branston (null internal location id) and removed containers (whose location is cleared on removal).
 
 **Triggers a change:** any event that changes where a container physically is — a new sealed container
 added to a box (`CREATED_SEALED`), a move to Branston or a transfer out (both clear the internal location),
@@ -169,8 +176,14 @@ it was counted twice, in this tile and in one of the other two.
 | Due to be returned | owner released, releasing within a day, or property flagged `PRISONER_RELEASED` / `DIED_IN_CUSTODY` | the owner is released or the release date arrives; `RETURNED`/removal clears it |
 | Due to be disposed | `proposed_disposal_date <= today` | proposed disposal date arrives (time-based); `DISPOSED` clears it |
 
-The four buckets are mutually exclusive, so a container is counted in at most one of them, and each tile
-matches the establishment list filter of the same name.
+The three **status** buckets — due to transfer out, due to be returned, due to be disposed — are mutually
+exclusive, so a container appears in at most one of them, and each matches the establishment list filter of
+the same name.
+
+"Stored on-site" is not part of that set and **overlaps them on purpose**: it answers a different question,
+*what is physically in our boxes*. A container sitting in a box whose owner has moved prison counts in both
+"stored on-site" and "due to transfer out" — correctly, since it is both. The tiles are therefore not a
+partition and will not sum to the prison's active stock.
 
 The location-driven tiles update the instant the triggering event's transaction commits (via
 `refreshDerivedState()`). The two owner-driven tiles additionally change when the *person* moves, with no
