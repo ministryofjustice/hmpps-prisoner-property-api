@@ -3,7 +3,7 @@
 Backlog for the **[MAPB-709](https://dsdmoj.atlassian.net/browse/MAPB-709) — Property snag issues**
 epic: bugs, an establishment-vs-prisoner view consistency gap, and a few enhancements found in testing
 and review. All ten items from the original batch are implemented; a second round (MAPB-725 to MAPB-727, then
-MAPB-730, MAPB-732 and MAPB-733) came out of testing those. The notes below record the decisions taken along
+MAPB-730, MAPB-732, MAPB-733 and MAPB-734) came out of testing those. The notes below record the decisions taken along
 the way, so the reasoning survives the tickets. Update **Status** and add PR links as the remaining items land.
 
 Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property-ui ·
@@ -32,6 +32,7 @@ Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property
 | [MAPB-730](https://dsdmoj.atlassian.net/browse/MAPB-730) | Story | M | UI | Remember the establishment list filters when navigating away and back | Merged (ui #59) |
 | [MAPB-732](https://dsdmoj.atlassian.net/browse/MAPB-732) | Bug | M | API | Show property left at another establishment in the receiving prison's incoming list | Merged (api #74) |
 | [MAPB-733](https://dsdmoj.atlassian.net/browse/MAPB-733) | Bug | M | API + UI | Show a transferred box at the prison the person actually went to, not the one it was addressed to | To do |
+| [MAPB-734](https://dsdmoj.atlassian.net/browse/MAPB-734) | Story | S | UI | Show the applied filters as removable tags on the establishment property list | Merged (ui #60) |
 
 ## Notes
 
