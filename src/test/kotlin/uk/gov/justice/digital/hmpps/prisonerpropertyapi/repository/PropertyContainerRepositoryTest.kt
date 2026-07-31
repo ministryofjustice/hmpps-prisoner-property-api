@@ -363,6 +363,51 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `a box sent to one prison but whose owner went to another is incoming where the owner is`() {
+    // LEI sent it to MDI; the person was redirected to IWI. IWI is the only prison that can receive it, and
+    // before this it was the one prison that could not see it.
+    saveTransferredTo("A0001AA", "REDIRECTED", heldAt = "LEI", toPrisonId = "MDI")
+
+    val seals = containerRepository.findContainers(
+      "IWI",
+      PrisonPropertyFilter(includeTransferIn = true, incomingPrisonerNumbers = setOf("A0001AA")),
+      listOf("A0001AA"),
+    ).map { it.currentSealNumber }
+
+    assertThat(seals).containsExactly("REDIRECTED")
+  }
+
+  @Test
+  fun `a box stops showing at the prison it was addressed to once its owner has gone elsewhere`() {
+    saveTransferredTo("A0001AA", "REDIRECTED", heldAt = "LEI", toPrisonId = "MDI")
+
+    // Nothing will ever arrive at MDI to reconcile it, so left alone it would sit there for ever.
+    assertThat(
+      incomingSeals(roll = emptySet(), prisonerNumbers = listOf("A0001AA"), movedOn = setOf("A0001AA")),
+    ).isEmpty()
+  }
+
+  @Test
+  fun `a box still shows at the prison it was addressed to while its owner is in transit`() {
+    saveTransferredTo("A0001AA", "IN-TRANSIT", heldAt = "LEI", toPrisonId = "MDI")
+
+    // Sent ahead of the person. They are on their way and not at any prison yet, so nobody can say the box is
+    // in the wrong place - the sending prison's intention stands.
+    assertThat(incomingSeals(roll = emptySet(), prisonerNumbers = listOf("A0001AA"))).containsExactly("IN-TRANSIT")
+  }
+
+  @Test
+  fun `a reconciled transfer is not incoming anywhere, even where its owner now is`() {
+    saveTransferredTo("A0001AA", "ARRIVED", heldAt = "LEI", toPrisonId = "MDI").apply {
+      latestTransferEvent()?.relatedContainerId = UUID.randomUUID()
+      refreshDerivedState()
+      containerRepository.save(this)
+    }
+
+    assertThat(incomingSeals(roll = setOf("A0001AA"), prisonerNumbers = listOf("A0001AA"))).isEmpty()
+  }
+
+  @Test
   fun `incoming property falls back to the recorded destination when the roll is unavailable`() {
     saveTransferredTo("A0001AA", "IN-TRANSIT", heldAt = "LEI", toPrisonId = "MDI")
     saveActive("B0002BB", "LEFT-BEHIND", prisonId = "LEI")
@@ -503,9 +548,19 @@ class PropertyContainerRepositoryTest : IntegrationTestBase() {
   private fun overlayOf(vararg owners: Pair<String, OwnerLocation>) = StatusOverlay(owners.toMap())
 
   /** The seals the establishment list at MDI returns when asking for incoming property, given a prison roll. */
-  private fun incomingSeals(roll: Set<String>?, prisonerNumbers: List<String>, includeRemoved: Boolean = false): List<String?> = containerRepository.findContainers(
+  private fun incomingSeals(
+    roll: Set<String>?,
+    prisonerNumbers: List<String>,
+    includeRemoved: Boolean = false,
+    movedOn: Set<String> = emptySet(),
+  ): List<String?> = containerRepository.findContainers(
     "MDI",
-    PrisonPropertyFilter(includeTransferIn = true, incomingPrisonerNumbers = roll, includeRemoved = includeRemoved),
+    PrisonPropertyFilter(
+      includeTransferIn = true,
+      incomingPrisonerNumbers = roll,
+      includeRemoved = includeRemoved,
+      transferOwnersMovedOn = movedOn,
+    ),
     prisonerNumbers,
   ).map { it.currentSealNumber }
 

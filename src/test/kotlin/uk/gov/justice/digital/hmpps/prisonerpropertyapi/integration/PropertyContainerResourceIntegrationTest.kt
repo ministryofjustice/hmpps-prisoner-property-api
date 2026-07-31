@@ -991,6 +991,101 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.content[0].containers[0].receivingPrisonId").isEqualTo("MDI")
   }
 
+  /**
+   * Leeds sends a box to Moorland, but the person is redirected to Isle of Wight. Before this, Leeds had closed
+   * its record, Moorland listed a box that was never coming, and Isle of Wight - which actually has both the
+   * person and the box - saw nothing at all.
+   */
+  @Test
+  fun `a redirected transfer is incoming where the person actually went, and not where it was addressed`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch()
+    repository.save(dueForTransferInContainer("SEALIN", prisonerNumber = "B5678CD", heldAt = "LEI", receivedAt = "MDI"))
+    prisonerSearch.stubFindByNumbers("A1234BC" to "IWI", "B5678CD" to "IWI")
+    prisonerSearch.stubFindByPrison("IWI", "B5678CD")
+    prisonerSearch.stubFindByPrison("MDI")
+
+    // Isle of Wight can now see it, so it can be logged in.
+    webTestClient.get().uri("/property-containers/prison/IWI?dueForTransferIn=true")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].prisonerNumber").isEqualTo("B5678CD")
+      .jsonPath("$.content[0].containers[0].currentSealNumber").isEqualTo("SEALIN")
+
+    // Moorland no longer lists a box that is not coming - nothing would ever have arrived to clear it.
+    webTestClient.get().uri("/property-containers/prison/MDI?dueForTransferIn=true")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(0)
+  }
+
+  @Test
+  fun `a box already sent to one prison is incoming where its owner actually went`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch()
+    // Leeds has marked it transferred out to Moorland, so Leeds has closed its record - but the person is at
+    // Isle of Wight, which had no way of knowing the box existed.
+    repository.save(
+      PropertyContainer(
+        prisonerNumber = "B5678CD",
+        prisonId = "LEI",
+        containerType = ContainerType.STANDARD,
+        createdByUserId = "USER1",
+        currentSealNumber = "SENTAWAY",
+      ).apply {
+        events.add(PropertyEvent(this, PropertyEventType.CREATED_SEALED, baseTime, "USER1", sealNumber = "SENTAWAY", toPrisonId = "LEI"))
+        events.add(PropertyEvent(this, PropertyEventType.TRANSFERRED, baseTime.plusDays(1), "USER1", fromPrisonId = "LEI", toPrisonId = "MDI"))
+        removalOutcome = uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome.TRANSFERRED
+        removalDate = baseTime.toLocalDate()
+        refreshDerivedState()
+      },
+    )
+    prisonerSearch.stubFindByNumbers("A1234BC" to "IWI", "B5678CD" to "IWI")
+    prisonerSearch.stubFindByPrison("IWI", "B5678CD")
+    prisonerSearch.stubFindByPrison("MDI")
+
+    webTestClient.get().uri("/property-containers/prison/IWI?dueForTransferIn=true")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentSealNumber").isEqualTo("SENTAWAY")
+
+    webTestClient.get().uri("/property-containers/prison/MDI?dueForTransferIn=true")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(0)
+  }
+
+  @Test
+  fun `a transfer sent ahead of someone still in transit stays listed at the prison it was addressed to`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch()
+    repository.save(dueForTransferInContainer("SEALIN", prisonerNumber = "B5678CD", heldAt = "LEI", receivedAt = "MDI"))
+    // Nobody can say where the box should go until they arrive somewhere, so the sender's intention stands.
+    prisonerSearch.stubFindByNumbersWithMovement(Triple("A1234BC", "TRN", "TRN"), Triple("B5678CD", "TRN", "TRN"))
+    prisonerSearch.stubFindByPrison("MDI")
+
+    webTestClient.get().uri("/property-containers/prison/MDI?dueForTransferIn=true")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentSealNumber").isEqualTo("SEALIN")
+  }
+
   @Test
   fun `dueForTransferIn falls back to recorded destinations when the prison roll cannot be resolved`() {
     hmppsAuth.stubGrantToken()

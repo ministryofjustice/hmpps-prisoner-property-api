@@ -163,16 +163,35 @@ class PropertyContainerRepositoryImpl(
    * started - the list narrows rather than failing.
    */
   private fun incomingScope(cb: CriteriaBuilder, root: Root<PropertyContainer>, prisonId: String, filter: PrisonPropertyFilter): Predicate {
-    val parts = mutableListOf(cb.equal(root.get<String>("receivingPrisonId"), prisonId))
+    val prisonerNumber = root.get<String>("prisonerNumber")
+    val heldElsewhere = cb.notEqual(root.get<String>("prisonId"), prisonId)
+    // A transfer nobody has logged yet. receivingPrisonId is derived from the transfer event and cleared once
+    // it names the record made at the far end, so a non-null one is exactly "sent, not yet arrived".
+    val inFlight = cb.and(
+      cb.equal(root.get<RemovalOutcome>("removalOutcome"), RemovalOutcome.TRANSFERRED),
+      cb.isNotNull(root.get<String>("receivingPrisonId")),
+    )
+
+    val parts = mutableListOf<Predicate>()
+
+    // Addressed here by the sending prison - unless its owner has demonstrably gone somewhere else, in which
+    // case the box is not coming here whatever the label says. Someone in transit or released is not "somewhere
+    // else" for this purpose: we cannot yet say where the box should go, so the sender's intent still stands.
+    val addressedHere = cb.equal(root.get<String>("receivingPrisonId"), prisonId)
+    parts += filter.transferOwnersMovedOn.takeIf { it.isNotEmpty() }
+      ?.let { movedOn -> cb.and(addressedHere, cb.not(prisonerNumber.`in`(movedOn))) }
+      ?: addressedHere
+
     filter.incomingPrisonerNumbers?.takeIf { it.isNotEmpty() }?.let { roll ->
-      parts += cb.and(
-        cb.notEqual(root.get<String>("prisonId"), prisonId),
-        // Only property still in storage there. Removed property is not ours to receive - and the one removed
-        // case that is, an unreconciled transfer heading here, is already covered by the clause above.
-        cb.isNull(root.get<RemovalOutcome>("removalOutcome")),
-        root.get<String>("prisonerNumber").`in`(roll),
-      )
+      val ownerIsHere = prisonerNumber.`in`(roll)
+      // Still in storage at the prison the owner came from, so it has to follow them.
+      parts += cb.and(heldElsewhere, cb.isNull(root.get<RemovalOutcome>("removalOutcome")), ownerIsHere)
+      // Already sent, but to wherever the sending prison expected the owner to be. The owner is here, so this
+      // is where the box needs logging - otherwise it is invisible at the one prison that can actually receive
+      // it, while the prison named on the transfer lists it for ever.
+      parts += cb.and(heldElsewhere, inFlight, ownerIsHere)
     }
+
     return cb.or(*parts.toTypedArray())
   }
 
