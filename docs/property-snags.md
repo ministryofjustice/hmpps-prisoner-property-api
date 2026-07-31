@@ -3,7 +3,8 @@
 Backlog for the **[MAPB-709](https://dsdmoj.atlassian.net/browse/MAPB-709) — Property snag issues**
 epic: bugs, an establishment-vs-prisoner view consistency gap, and a few enhancements found in testing
 and review. All ten items from the original batch are implemented; a second round (MAPB-725 to MAPB-727, then
-MAPB-730, MAPB-732, MAPB-733, MAPB-734 and MAPB-736) came out of testing those. The notes below record the decisions taken along
+MAPB-730, MAPB-732, MAPB-733, MAPB-734 and MAPB-736) came out of testing those, and a third (MAPB-738, MAPB-739)
+out of rollout itself. The notes below record the decisions taken along
 the way, so the reasoning survives the tickets. Update **Status** and add PR links as the remaining items land.
 
 Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property-ui ·
@@ -34,6 +35,8 @@ Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property
 | [MAPB-733](https://dsdmoj.atlassian.net/browse/MAPB-733) | Bug | M | API + UI | Show a transferred box at the prison the person actually went to, not the one it was addressed to | Merged (api #76, ui #61) |
 | [MAPB-734](https://dsdmoj.atlassian.net/browse/MAPB-734) | Story | S | UI | Show the applied filters as removable tags on the establishment property list | Merged (ui #60) |
 | [MAPB-736](https://dsdmoj.atlassian.net/browse/MAPB-736) | Story | S | UI | Combine the Change and Remove actions into a single Manage action | In review (ui #62) |
+| [MAPB-738](https://dsdmoj.atlassian.net/browse/MAPB-738) | Bug | S | UI | Add property button shows on the history and returned tabs for prisons not switched on in DPS | In review (ui #63) |
+| [MAPB-739](https://dsdmoj.atlassian.net/browse/MAPB-739) | Bug | S | UI | Enabling a prison only takes effect on one pod, so requests alternate between working and unauthorised | In review (ui #64) |
 
 ## Notes
 
@@ -144,6 +147,27 @@ container's status was being derived independently in four places, so they drift
   Playwright removal spec was rewritten to walk person page → Manage → Remove container rather than a link of
   its own, because that browser test is the only thing standing between this change and quietly losing the
   ability to remove a container.
+- **Two rollout-gate bugs, found switching prisons on — [MAPB-738](https://dsdmoj.atlassian.net/browse/MAPB-738)
+  and [MAPB-739](https://dsdmoj.atlassian.net/browse/MAPB-739).** Both present to staff as the same thing, an
+  *Add property* button that leads to the "not authorised" page, and both are in the UI.
+  MAPB-738: the button lives in the header partial shared by all three person tabs, but only the Property
+  handler gated `canManage` on the establishment being switched on in DPS — history and returned used the
+  manage role alone, so the button reappeared a tab away from where it was correctly hidden. Neither passed
+  `showNomisBanner` either, so the explanation went with it. The "View only" banner was copy-pasted between two
+  templates, which is how the two newer tabs came to be missing it; it is now a partial included by all four.
+  MAPB-739: the active-prison set was cached per process on a five-minute TTL, and the admin toggle called
+  `invalidate()` — which clears the cache **on the pod that served that POST only**. Every other pod carried on
+  refusing writes, so staff saw roughly every other request fail (2 replicas in dev/preprod, 4 in prod) until
+  the TTL ran out. A per-pod cache cannot be invalidated from another pod, so there is no fix that keeps it:
+  the UI now **reads the set live** and keeps the last good read as a failure fallback only. Do not reintroduce
+  the TTL as an optimisation — the API removed its own copy of this cache for the same reason, and the read is
+  its `/info`, actuator-cached for two seconds over a table with a few hundred rows. Redis was considered and
+  rejected: it would work, but it buys a cache-invalidation path to get wrong in exchange for almost nothing.
+- **The API has no active-prison gate on writes** — worth its own ticket, not folded into either bug above.
+  `ActiveAgenciesService.isActive()` has no production callers, and the write endpoints on
+  `PropertyContainerResource` are gated on `ROLE_PRISONER_PROPERTY__RW` alone. Mutual exclusivity with NOMIS
+  during rollout therefore rests entirely on the UI, which the two bugs above showed is a single point of
+  failure.
 
 ## Deploys: the `node-fetch` replica conflict
 
