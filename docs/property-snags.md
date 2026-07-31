@@ -29,7 +29,7 @@ Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property
 | [MAPB-725](https://dsdmoj.atlassian.net/browse/MAPB-725) | Bug | L | API + UI | Show one property status on both the establishment and person views | Merged (api #71, ui #57) |
 | [MAPB-726](https://dsdmoj.atlassian.net/browse/MAPB-726) | Bug | M | API | Make the property status filters and summary tiles agree with the status shown | Merged (api #71) |
 | [MAPB-727](https://dsdmoj.atlassian.net/browse/MAPB-727) | Bug | M | API + UI | Match old and new seal numbers when logging property that arrived on transfer | Merged (api #71, #72; ui #57, #58) |
-| [MAPB-730](https://dsdmoj.atlassian.net/browse/MAPB-730) | Story | M | UI | Remember the establishment list filters when navigating away and back | To do |
+| [MAPB-730](https://dsdmoj.atlassian.net/browse/MAPB-730) | Story | M | UI | Remember the establishment list filters when navigating away and back | Merged (ui #59) |
 | [MAPB-732](https://dsdmoj.atlassian.net/browse/MAPB-732) | Bug | M | API | Show property left at another establishment in the receiving prison's incoming list | Merged (api #74) |
 | [MAPB-733](https://dsdmoj.atlassian.net/browse/MAPB-733) | Bug | M | API + UI | Show a transferred box at the prison the person actually went to, not the one it was addressed to | To do |
 
