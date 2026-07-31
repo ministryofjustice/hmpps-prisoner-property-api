@@ -31,7 +31,7 @@ Repos: **API** = hmpps-prisoner-property-api · **UI** = hmpps-prisoner-property
 | [MAPB-727](https://dsdmoj.atlassian.net/browse/MAPB-727) | Bug | M | API + UI | Match old and new seal numbers when logging property that arrived on transfer | Merged (api #71, #72; ui #57, #58) |
 | [MAPB-730](https://dsdmoj.atlassian.net/browse/MAPB-730) | Story | M | UI | Remember the establishment list filters when navigating away and back | Merged (ui #59) |
 | [MAPB-732](https://dsdmoj.atlassian.net/browse/MAPB-732) | Bug | M | API | Show property left at another establishment in the receiving prison's incoming list | Merged (api #74) |
-| [MAPB-733](https://dsdmoj.atlassian.net/browse/MAPB-733) | Bug | M | API + UI | Show a transferred box at the prison the person actually went to, not the one it was addressed to | To do |
+| [MAPB-733](https://dsdmoj.atlassian.net/browse/MAPB-733) | Bug | M | API + UI | Show a transferred box at the prison the person actually went to, not the one it was addressed to | In review (api #76, ui #61) |
 | [MAPB-734](https://dsdmoj.atlassian.net/browse/MAPB-734) | Story | S | UI | Show the applied filters as removable tags on the establishment property list | Merged (ui #60) |
 
 ## Notes
@@ -122,12 +122,18 @@ container's status was being derived independently in four places, so they drift
     box are better evidence than the sender's expectation — and prison ids are compared trimmed and
     case-insensitively, so badly-cased local property is not mistaken for property elsewhere. The
     already-transferred path had no test coverage at all, which is why this survived the first fix.
-- **MAPB-730** (remember the establishment list filters) came out of the same testing but is not started.
-  Recommended shape is on the ticket: store the filters, search term and page in session, falling back to them
-  only when the URL has no query string, following `hmpps-incident-reporting`'s `dashboardFilters`. Two traps
-  are recorded there — "Clear search"/"Clear filters" are plain links to `/` and would silently re-apply the
-  remembered state unless given an explicit clear parameter, and remembered filters must be scoped to the
-  active caseload so switching establishment does not inherit them.
+- **Remembering the filters — [MAPB-730](https://dsdmoj.atlassian.net/browse/MAPB-730), and the tags that had
+  to follow it ([MAPB-734](https://dsdmoj.atlassian.net/browse/MAPB-734)).** The list stores its *canonical
+  query string* in session and a bare `GET /` redirects to it, so the URL always describes the page and there
+  is no rendered state that can disagree with the address bar. Both traps flagged on the ticket were real:
+  "Clear search"/"Clear filters" were plain links to `/`, which under a session fallback means *restore what I
+  had*, so they now carry `?clear=1`; and the remembered query is scoped to the active caseload, so switching
+  establishment does not inherit another prison's filters. `hmpps-incident-reporting`'s `dashboardFilters` was
+  the model but does neither, and writes `page` to session without ever restoring it. One consequence needed a
+  second ticket: filters that survive navigation are filters the user has forgotten they set, and the filter
+  concertina is collapsed on redisplay — so MAPB-734 shows them as removable tags above it, borrowing the
+  non-residential locations pattern. Stickiness without visible state would have been a worse bug than the one
+  it fixed.
 
 ## Deploys: the `node-fetch` replica conflict
 
@@ -188,6 +194,15 @@ the cluster the source of truth instead of the chart, and it will drift again.
   "in transit to here" as *an unreconciled transfer whose owner is now here*, which changes the person page as
   well as the list, so the two must move together rather than shipping the establishment view ahead of the
   person view. `incomingScope` was written to make that one more OR'd clause.
+  Done that way, plus the half the ticket did not ask for: a container addressed here also **drops off** once
+  its owner has demonstrably turned up somewhere else, or Moorland would keep listing it forever. That needs
+  the owners resolved, so it costs one bulk lookup over the property in flight to this prison — a small set,
+  and only when incoming property is requested. Someone **in transit or released does not count as having
+  moved on**: `TRN` and `OUT` are sentinels, not establishments, and until they arrive somewhere nobody can
+  say where their property should go, so the recorded destination stands — which is also what keeps a box sent
+  ahead of someone still travelling working. The query was first scoped to transferred containers, matching
+  the ticket's wording, until a test using a container merely *flagged* to follow its owner failed: that
+  address goes stale in exactly the same way, so it now covers everything addressed here.
 - **`getById` / `PropertyContainerDto` has no owner context**, so the remove and change journeys tag from the
   container's own status. Fixing it means a prisoner-search call on a DTO that is also the write-endpoint
   response. Deliberately deferred.
