@@ -282,6 +282,58 @@ reason `RELEASED`, since the same event also fires for court, temporary absence 
 in custody arrives as a release too, distinguished only by NOMIS movement reason code `DEC`, and is
 recorded as a distinct event so the history reads correctly. Any other event type is logged and ignored.
 
+### The payload
+
+```json
+{
+  "eventType": "prison-property.container.updated",
+  "version": 1,
+  "occurredAt": "2026-08-05T09:00:00Z",
+  "prisonerNumber": "A1234BC",
+  "source": "DPS",
+  "additionalInformation": {
+    "dpsId": "0198c2b4-...",
+    "changedFields": ["location", "removalOutcome", "currentStatus"],
+    "nomisPropertyContainerId": 12345
+  }
+}
+```
+
+`dpsId` names the container the event is about and is always present. `nomisPropertyContainerId` appears
+only on NOMIS-sourced (sync) events. `changedFields` is absent entirely on `.created`.
+
+`changedFields` is **derived, not hand-written** — every write snapshots the container's subscriber-visible
+state before mutating and diffs it afterwards (`event/ContainerChangedFields.kt`). The vocabulary is a
+fixed set, ordered as listed here:
+
+| Field | Means |
+|---|---|
+| `sealNumber` | the seal changed |
+| `containerType` | standard/excess/valuables/confiscated changed |
+| `location` | the internal location *or* the storage location type changed — one entry covers both, because a subscriber sees one location either way |
+| `proposedDisposalDate` | the proposed disposal date was set, changed or cleared |
+| `removalOutcome` | the container left, or returned to, active storage |
+| `currentStatus` | the status shown against the container changed |
+| `receivingPrisonId` | the prison it is now due to transfer *in* to changed |
+
+Note that these are not independent: one action usually names several. A removal is never just
+`["removalOutcome"]` — the container also gives up its location and changes status. **A subscriber that
+filters on `changedFields` must therefore match on the field it cares about, not on an exact list.**
+
+### Which containers get an event
+
+| Write | Events |
+|---|---|
+| create | one `.created` for the new container — plus one `.updated` for the source when a transfer-in was reconciled |
+| update / move / dispose / remove | one `.updated` — or **none**, when the write changed nothing observable |
+| combine | one `.created` for the new container **plus one `.updated` per source**, each naming its own `dpsId` |
+| prisoner received / released / died | one `.updated` per container actually changed; none for containers already in that state |
+| sync upsert | one `.created` or `.updated`, `source: NOMIS`; none when the snapshot changed nothing |
+| sync migrate | **none, ever** — bulk replay must not flood the topic |
+
+The multi-container writes are the ones to be careful with: a subscriber that only handles the container
+named in the request will miss the other containers the same transaction changed.
+
 ---
 
 ## 6. Domain model — event sourcing

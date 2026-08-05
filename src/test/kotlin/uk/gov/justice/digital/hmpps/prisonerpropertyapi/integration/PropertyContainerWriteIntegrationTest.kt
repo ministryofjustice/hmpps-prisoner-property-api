@@ -4,12 +4,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.check
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
@@ -25,8 +23,6 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyEventSource
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
@@ -39,9 +35,6 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
 
   @Autowired
   private lateinit var repository: PropertyContainerRepository
-
-  @MockitoSpyBean
-  private lateinit var domainEventPublisher: DomainEventPublisher
 
   @BeforeEach
   fun stubLocationLookups() {
@@ -134,6 +127,11 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .expectBody()
       .jsonPath("$.currentLocationType").isEqualTo("BRANSTON")
       .jsonPath("$.currentLocation").doesNotExist()
+
+    // One update changing two things must name both, not just whichever the handler happened to track.
+    assertThat(publishedEventsFor(id)).singleElement().satisfies({
+      assertThat(it.changedFields).containsExactly("containerType", "location")
+    })
   }
 
   @Test
@@ -192,7 +190,7 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `allows updating a container without changing its seal`() {
+  fun `allows updating a container without changing its seal, and publishes nothing`() {
     val id = repository.save(seedContainer(seal = "SEAL1")).id!!
 
     webTestClient.put().uri("/property-containers/{id}", id)
@@ -200,6 +198,8 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .bodyValue(updateRequest(sealNumber = "SEAL1"))
       .exchange()
       .expectStatus().isOk
+
+    assertNoEventsPublished()
   }
 
   @Test
@@ -284,7 +284,7 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
     verify(domainEventPublisher).publish(
       check {
         assertThat(it.eventType).isEqualTo("prison-property.container.updated")
-        assertThat(it.additionalInformation?.get("changedFields")).isEqualTo(listOf("removalOutcome"))
+        assertThat(it.changedFields).containsExactly("location", "removalOutcome", "currentStatus")
       },
     )
   }
@@ -313,6 +313,12 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.currentStatus").isEqualTo("RETURNED")
       .jsonPath("$.removalOutcome").isEqualTo("RETURNED")
       .jsonPath("$.currentLocation").doesNotExist()
+
+    assertThat(publishedEventsFor(id)).singleElement().satisfies({
+      assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+      assertThat(it.source).isEqualTo(PropertyEventSource.DPS)
+      assertThat(it.changedFields).containsExactly("location", "removalOutcome", "currentStatus")
+    })
   }
 
   @Test
@@ -337,6 +343,12 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
     assertThat(transferred.currentStatusValue).isEqualTo(ContainerStatus.TRANSFER)
     assertThat(transferred.receivingPrisonId).isEqualTo("MDI")
     assertThat(transferred.events.last().eventType).isEqualTo(PropertyEventType.TRANSFERRED)
+
+    // A transfer out also names its destination, which is how the receiving prison's incoming list finds it.
+    assertThat(publishedEventsFor(id)).singleElement().satisfies({
+      assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+      assertThat(it.changedFields).containsExactly("location", "removalOutcome", "currentStatus", "receivingPrisonId")
+    })
   }
 
   @Test
@@ -352,6 +364,11 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.currentStatus").isEqualTo("CREATED_IN_ERROR")
       .jsonPath("$.removalOutcome").isEqualTo("CREATED_IN_ERROR")
       .jsonPath("$.currentLocation").doesNotExist()
+
+    assertThat(publishedEventsFor(id)).singleElement().satisfies({
+      assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+      assertThat(it.changedFields).containsExactly("location", "removalOutcome", "currentStatus")
+    })
   }
 
   @Test
@@ -406,10 +423,25 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .jsonPath("$[0].relatedContainerId").isEqualTo(created.id.toString())
       .jsonPath("$[0].relatedContainerSealNumber").isEqualTo("NEWSEAL")
 
-    val captor = argumentCaptor<HmppsDomainEvent>()
-    verify(domainEventPublisher, times(3)).publish(captor.capture())
-    assertThat(captor.allValues.map { it.eventType })
-      .containsExactly("prison-property.container.created", "prison-property.container.updated", "prison-property.container.updated")
+    // The NOMIS sync has to close both sources and open the destination, so it needs an event naming each
+    // of the three containers - asserting only the event types would pass if both updates named the same
+    // source, or the wrong container entirely.
+    val events = publishedEvents()
+    assertThat(events.map { it.eventType to it.dpsId }).containsExactly(
+      "prison-property.container.created" to created.id.toString(),
+      "prison-property.container.updated" to a.toString(),
+      "prison-property.container.updated" to b.toString(),
+    )
+    assertThat(events).allSatisfy {
+      assertThat(it.source).isEqualTo(PropertyEventSource.DPS)
+      assertThat(it.prisonerNumber).isEqualTo("A1234BC")
+    }
+    // A combined-away source does not merely gain an outcome: it leaves storage and gives up its location.
+    assertThat(events.drop(1)).allSatisfy {
+      assertThat(it.changedFields).containsExactly("location", "removalOutcome", "currentStatus")
+    }
+    // The new container is a create, so it names no changed fields at all.
+    assertThat(events.first().changedFields).isEmpty()
   }
 
   @Test
@@ -513,6 +545,23 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       .expectBody()
       .jsonPath("$.currentLocationType").isEqualTo("INTERNAL")
       .jsonPath("$.currentLocation").isEqualTo(newLocation.toString())
+
+    assertThat(publishedEventsFor(id)).singleElement().satisfies({
+      assertThat(it.changedFields).containsExactly("location")
+    })
+  }
+
+  @Test
+  fun `a move to the location the container is already in publishes nothing`() {
+    val id = repository.save(seedContainer()).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/move", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(MoveContainerRequest(locationType = StorageLocationType.INTERNAL, internalLocationId = LOCATION))
+      .exchange()
+      .expectStatus().isOk
+
+    assertNoEventsPublished()
   }
 
   @Test

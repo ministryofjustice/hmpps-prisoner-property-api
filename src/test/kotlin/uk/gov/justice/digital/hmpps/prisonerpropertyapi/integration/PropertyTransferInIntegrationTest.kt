@@ -4,12 +4,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
-import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
@@ -19,8 +17,6 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import java.time.LocalDate
 import java.time.LocalDateTime
 
@@ -33,9 +29,6 @@ class PropertyTransferInIntegrationTest : IntegrationTestBase() {
 
   @Autowired
   private lateinit var repository: PropertyContainerRepository
-
-  @MockitoSpyBean
-  private lateinit var domainEventPublisher: DomainEventPublisher
 
   @AfterEach
   fun cleanUp() = repository.deleteAll()
@@ -71,11 +64,16 @@ class PropertyTransferInIntegrationTest : IntegrationTestBase() {
     assertThat(reconciled.currentStatus()).isEqualTo(ContainerStatus.TRANSFER)
     assertThat(reconciled.events.last().toPrisonId).isEqualTo("MDI")
 
-    // both the created (new) and updated (source) events are published
-    val captor = argumentCaptor<HmppsDomainEvent>()
-    verify(domainEventPublisher, times(2)).publish(captor.capture())
-    assertThat(captor.allValues.map { it.eventType })
-      .containsExactly("prison-property.container.created", "prison-property.container.updated")
+    // both the created (new) and updated (source) events are published, each naming its own container
+    assertThat(publishedEvents().map { it.eventType to it.dpsId }).containsExactly(
+      "prison-property.container.created" to created.id.toString(),
+      "prison-property.container.updated" to source.toString(),
+    )
+    // The source is transferred out in the same transaction, so it reports the status change as well as the
+    // outcome. No receivingPrisonId: it is reconciled against the new record as it is removed, so it never
+    // passes through "awaiting arrival at MDI" the way a transfer-out recorded on its own does.
+    assertThat(publishedEventsFor(source).single().changedFields)
+      .containsExactly("removalOutcome", "currentStatus")
   }
 
   /**

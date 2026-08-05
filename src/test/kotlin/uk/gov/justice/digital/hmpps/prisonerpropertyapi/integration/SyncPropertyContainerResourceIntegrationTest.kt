@@ -15,6 +15,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.NomisContainerC
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyEventSource
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
@@ -61,7 +62,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `re-syncing an unchanged snapshot adds no events`() {
+  fun `re-syncing an unchanged snapshot adds no events and publishes nothing`() {
     val created = upsert(request())
 
     val updated = upsert(request(dpsId = created.dpsId))
@@ -69,6 +70,38 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     assertThat(updated.dpsId).isEqualTo(created.dpsId)
     assertThat(updated.mappingType).isEqualTo(SyncMappingType.UPDATED)
     assertThat(eventRepository.findByContainerIdOrderByEventDateTimeDesc(created.dpsId)).hasSize(1)
+    // Only the create is published - a snapshot that changed nothing must not echo back onto the topic.
+    assertThat(publishedEvents()).singleElement()
+      .satisfies({ assertThat(it.eventType).isEqualTo("prison-property.container.created") })
+  }
+
+  @Test
+  fun `a NOMIS-sourced upsert publishes a created event carrying the NOMIS container id`() {
+    val created = upsert(request())
+
+    assertThat(publishedEvents()).singleElement().satisfies({
+      assertThat(it.eventType).isEqualTo("prison-property.container.created")
+      assertThat(it.dpsId).isEqualTo(created.dpsId.toString())
+      assertThat(it.prisonerNumber).isEqualTo("A1234BC")
+      // The source attribute is what lets the sync-back-to-NOMIS subscriber discard the events NOMIS
+      // itself caused, so it has to survive the whole publish path, not just the factory.
+      assertThat(it.source).isEqualTo(PropertyEventSource.NOMIS)
+      assertThat(it.nomisPropertyContainerId).isEqualTo(123L)
+    })
+  }
+
+  @Test
+  fun `a NOMIS-sourced update publishes an updated event naming what changed`() {
+    val created = upsert(request())
+
+    upsert(request(dpsId = created.dpsId, sealMark = "SEAL2"))
+
+    assertThat(publishedEvents().last()).satisfies({
+      assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+      assertThat(it.dpsId).isEqualTo(created.dpsId.toString())
+      assertThat(it.source).isEqualTo(PropertyEventSource.NOMIS)
+      assertThat(it.changedFields).containsExactly("sealNumber")
+    })
   }
 
   @Test
@@ -246,16 +279,23 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `migrate creates a container`() {
-    val response = webTestClient.post().uri("/sync/property-containers/migrate")
-      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
-      .bodyValue(request())
-      .exchange()
-      .expectStatus().isOk
-      .expectBody(SyncPropertyContainerResponse::class.java)
-      .returnResult().responseBody!!
+  fun `migrate creates a container and publishes nothing`() {
+    val response = migrate(request())
 
     assertThat(response.mappingType).isEqualTo(SyncMappingType.CREATED)
+    // Migration replays the whole NOMIS estate in bulk; publishing would flood the topic with events for
+    // history nobody acted on. The resource still calls publishAfterCommit, so only the null event stops it.
+    assertNoEventsPublished()
+  }
+
+  @Test
+  fun `migrating a change over an existing container publishes nothing either`() {
+    val created = migrate(request())
+
+    migrate(request(dpsId = created.dpsId, sealMark = "SEAL2"))
+
+    getById(created.dpsId).jsonPath("$.currentSealNumber").isEqualTo("SEAL2")
+    assertNoEventsPublished()
   }
 
   @Test
@@ -277,6 +317,15 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   private fun upsert(request: SyncPropertyContainerRequest): SyncPropertyContainerResponse = webTestClient.post()
     .uri("/sync/property-containers/upsert")
+    .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+    .bodyValue(request)
+    .exchange()
+    .expectStatus().isOk
+    .expectBody(SyncPropertyContainerResponse::class.java)
+    .returnResult().responseBody!!
+
+  private fun migrate(request: SyncPropertyContainerRequest): SyncPropertyContainerResponse = webTestClient.post()
+    .uri("/sync/property-containers/migrate")
     .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
     .bodyValue(request)
     .exchange()
