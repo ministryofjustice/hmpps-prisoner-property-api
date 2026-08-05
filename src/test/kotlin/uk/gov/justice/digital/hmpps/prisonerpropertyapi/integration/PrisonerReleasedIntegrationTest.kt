@@ -6,10 +6,7 @@ import org.awaitility.kotlin.await
 import org.awaitility.kotlin.untilAsserted
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.mockito.kotlin.check
-import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import software.amazon.awssdk.services.sns.model.MessageAttributeValue
 import software.amazon.awssdk.services.sns.model.PublishRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
@@ -18,7 +15,6 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import uk.gov.justice.hmpps.sqs.HmppsQueueService
 
@@ -32,9 +28,6 @@ class PrisonerReleasedIntegrationTest : IntegrationTestBase() {
 
   @Autowired
   private lateinit var objectMapper: ObjectMapper
-
-  @MockitoSpyBean
-  private lateinit var domainEventPublisher: DomainEventPublisher
 
   @AfterEach
   fun cleanUp() = repository.deleteAll()
@@ -50,13 +43,11 @@ class PrisonerReleasedIntegrationTest : IntegrationTestBase() {
         .isEqualTo(ContainerStatus.DUE_FOR_RETURN)
     }
     assertThat(latestEventType(container.id)).isEqualTo(PropertyEventType.PRISONER_RELEASED)
-    verify(domainEventPublisher).publish(
-      check {
-        assertThat(it.eventType).isEqualTo("prison-property.container.updated")
-        assertThat(it.prisonerNumber).isEqualTo("A1234BC")
-        assertThat(it.additionalInformation?.get("dpsId")).isEqualTo(container.id.toString())
-      },
-    )
+    assertThat(publishedEventsFor(container.id).last()).satisfies({
+      assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+      assertThat(it.prisonerNumber).isEqualTo("A1234BC")
+      assertThat(it.changedFields).containsExactly("currentStatus")
+    })
   }
 
   @Test
@@ -70,13 +61,11 @@ class PrisonerReleasedIntegrationTest : IntegrationTestBase() {
     }
     assertThat(repository.findById(container.id).orElseThrow().currentStatus())
       .isEqualTo(ContainerStatus.DUE_FOR_RETURN)
-    verify(domainEventPublisher).publish(
-      check {
-        assertThat(it.eventType).isEqualTo("prison-property.container.updated")
-        assertThat(it.prisonerNumber).isEqualTo("A1234BC")
-        assertThat(it.additionalInformation?.get("dpsId")).isEqualTo(container.id.toString())
-      },
-    )
+    assertThat(publishedEventsFor(container.id).last()).satisfies({
+      assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+      assertThat(it.prisonerNumber).isEqualTo("A1234BC")
+      assertThat(it.changedFields).containsExactly("currentStatus")
+    })
   }
 
   @Test
@@ -88,6 +77,9 @@ class PrisonerReleasedIntegrationTest : IntegrationTestBase() {
     // status stays STORED; allow time for the (ignored) message to be consumed
     Thread.sleep(1000)
     assertThat(repository.findById(container.id).orElseThrow().currentStatus()).isEqualTo(ContainerStatus.STORED)
+    // Nothing changed, so nothing beyond the container's own create may be published.
+    assertThat(publishedEventsFor(container.id).map { it.eventType })
+      .containsExactly("prison-property.container.created")
   }
 
   private fun createContainer(prisonId: String): PropertyContainerDto = webTestClient.post().uri("/property-containers")

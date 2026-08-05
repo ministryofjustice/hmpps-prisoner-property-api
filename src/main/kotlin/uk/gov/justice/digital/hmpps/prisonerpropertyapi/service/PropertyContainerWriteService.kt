@@ -18,9 +18,11 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.ContainerState
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyContainerEventFactory
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyDomainEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.changedFieldsSince
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -29,6 +31,10 @@ import java.util.UUID
  * Creates and updates property containers from staff actions, translating each change into the
  * event-sourced domain. The service is the transaction boundary; it *builds* the domain event to
  * raise (if any) and returns it in a [WriteResult] so the resource can publish it after commit.
+ *
+ * Every path that changes an existing container snapshots its [ContainerState] before mutating and derives
+ * the event's `changedFields` from the difference (see [changedFieldsSince]) rather than naming the fields
+ * by hand. A write that turns out to change nothing observable therefore raises no event at all.
  */
 @Service
 class PropertyContainerWriteService(
@@ -178,7 +184,8 @@ class PropertyContainerWriteService(
     )
 
     source?.let {
-      val changedField = if (it.isRemoved()) {
+      val before = ContainerState.of(it)
+      if (it.isRemoved()) {
         // Already transferred out by the sending prison: reconcile by linking its TRANSFERRED event to this
         // new record, so it stops surfacing as awaiting at this prison. It is already removed - don't re-remove.
         // The existing event is amended rather than a new one appended, so the history keeps the real
@@ -188,7 +195,6 @@ class PropertyContainerWriteService(
           relatedContainerSealNumber = request.sealNumber
         }
         it.refreshDerivedState()
-        "receivingPrisonId"
       } else {
         // Still held at the sending prison: mark it transferred out and linked to this new record in one step.
         it.events.add(
@@ -207,9 +213,8 @@ class PropertyContainerWriteService(
         it.removalOutcome = RemovalOutcome.TRANSFERRED
         it.removalDate = LocalDate.now()
         it.refreshDerivedState()
-        "removalOutcome"
       }
-      events += PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, it.id!!, it.prisonerNumber, listOf(changedField))
+      events += PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, it.id!!, it.prisonerNumber, it.changedFieldsSince(before))
     }
 
     return CreateResult(PropertyContainerDto.from(saved), events)
@@ -219,7 +224,7 @@ class PropertyContainerWriteService(
   fun update(id: UUID, request: UpdatePropertyContainerRequest, username: String): WriteResult {
     val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
     val now = LocalDateTime.now()
-    val changed = mutableListOf<String>()
+    val before = ContainerState.of(container)
 
     if (request.locationType == StorageLocationType.BRANSTON && request.internalLocationId != null) {
       throw ValidationException("internalLocationId must not be set for Branston storage")
@@ -245,13 +250,11 @@ class PropertyContainerWriteService(
       }
       container.currentSealNumber = request.sealNumber
       container.events.add(PropertyEvent(container, PropertyEventType.SEAL_CHANGED, now, username, sealNumber = request.sealNumber))
-      changed += "sealNumber"
     }
 
     if (request.containerType != container.containerType) {
       container.containerType = request.containerType
       container.events.add(PropertyEvent(container, PropertyEventType.CONTAINER_TYPE_CHANGE, now, username))
-      changed += "containerType"
     }
 
     if (movingToInternal) {
@@ -266,7 +269,6 @@ class PropertyContainerWriteService(
           toStorageLocationType = StorageLocationType.INTERNAL,
         ),
       )
-      changed += "location"
     } else if (movingToBranston) {
       container.events.add(
         PropertyEvent(
@@ -278,7 +280,6 @@ class PropertyContainerWriteService(
           toStorageLocationType = StorageLocationType.BRANSTON,
         ),
       )
-      changed += "location"
     }
 
     if (request.proposedDisposalDate != container.proposedDisposalDate) {
@@ -286,13 +287,12 @@ class PropertyContainerWriteService(
       if (request.proposedDisposalDate != null) {
         container.events.add(PropertyEvent(container, PropertyEventType.DISPOSAL_REQUIRED, now, username, eventDate = request.proposedDisposalDate))
       }
-      changed += "proposedDisposalDate"
     }
 
-    var event: HmppsDomainEvent? = null
-    if (changed.isNotEmpty()) {
-      container.refreshDerivedState()
-      event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, changed)
+    container.refreshDerivedState()
+    val changed = container.changedFieldsSince(before)
+    val event = changed.takeIf { it.isNotEmpty() }?.let {
+      PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, it)
     }
     return WriteResult(PropertyContainerDto.from(container), event)
   }
@@ -302,10 +302,11 @@ class PropertyContainerWriteService(
   fun dispose(id: UUID, request: DisposeContainerRequest, username: String): WriteResult {
     val container = loadActive(id)
     val date = request.disposalDate ?: LocalDate.now()
+    val before = ContainerState.of(container)
     container.events.add(
       PropertyEvent(container, PropertyEventType.DISPOSED, LocalDateTime.now(), username, eventDate = date, fromPrisonId = container.prisonId),
     )
-    return container.removeWith(RemovalOutcome.DISPOSED, date)
+    return container.removeWith(RemovalOutcome.DISPOSED, date, before)
   }
 
   /**
@@ -328,10 +329,11 @@ class PropertyContainerWriteService(
     if (request.outcome == RemovalOutcome.TRANSFERRED) {
       return container.transferTo(request.toPrisonId!!, username, date)
     }
+    val before = ContainerState.of(container)
     container.events.add(
       PropertyEvent(container, request.outcome.eventType, LocalDateTime.now(), username, eventDate = date, fromPrisonId = container.prisonId),
     )
-    return container.removeWith(request.outcome, date)
+    return container.removeWith(request.outcome, date, before)
   }
 
   /**
@@ -390,13 +392,14 @@ class PropertyContainerWriteService(
       PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, prisonerNumber, changedFields = null),
     )
     sources.forEach { source ->
+      val before = ContainerState.of(source)
       source.events.add(
         PropertyEvent(source, PropertyEventType.COMBINED, now, username, eventDate = today, relatedContainerId = saved.id, relatedContainerSealNumber = saved.currentSealNumber),
       )
       source.removalOutcome = RemovalOutcome.COMBINED
       source.removalDate = today
       source.refreshDerivedState()
-      events += PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, source.id!!, source.prisonerNumber, listOf("removalOutcome"))
+      events += PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, source.id!!, source.prisonerNumber, source.changedFieldsSince(before))
     }
 
     return CombineResult(PropertyContainerDto.from(saved), events)
@@ -420,6 +423,7 @@ class PropertyContainerWriteService(
       return WriteResult(PropertyContainerDto.from(container), null)
     }
 
+    val before = ContainerState.of(container)
     container.events.add(
       PropertyEvent(
         container,
@@ -432,7 +436,7 @@ class PropertyContainerWriteService(
       ),
     )
     container.refreshDerivedState()
-    val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, listOf("location"))
+    val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, container.changedFieldsSince(before))
     return WriteResult(PropertyContainerDto.from(container), event)
   }
 
@@ -451,6 +455,7 @@ class PropertyContainerWriteService(
     return repository.findByPrisonerNumber(prisonerNumber)
       .filter { !it.isRemoved() && it.prisonId != newPrisonId && !it.isAlreadyDueForTransferOut(newPrisonId) }
       .map { container ->
+        val before = ContainerState.of(container)
         container.events.add(
           PropertyEvent(
             container,
@@ -462,7 +467,7 @@ class PropertyContainerWriteService(
           ),
         )
         container.refreshDerivedState()
-        PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, listOf("currentStatus"))
+        PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, container.changedFieldsSince(before))
       }
   }
 
@@ -495,11 +500,12 @@ class PropertyContainerWriteService(
     return repository.findByPrisonerNumber(prisonerNumber)
       .filter { !it.isRemoved() && it.baseStatus() != ContainerStatus.DUE_FOR_RETURN }
       .map { container ->
+        val before = ContainerState.of(container)
         container.events.add(
           PropertyEvent(container, eventType, now, SYSTEM_USER, fromPrisonId = container.prisonId),
         )
         container.refreshDerivedState()
-        PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, listOf("currentStatus"))
+        PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, container.changedFieldsSince(before))
       }
   }
 
@@ -519,21 +525,27 @@ class PropertyContainerWriteService(
    * [PropertyContainer.receivingPrison]).
    */
   private fun PropertyContainer.transferTo(toPrisonId: String, username: String, date: LocalDate): WriteResult {
+    val before = ContainerState.of(this)
     events.add(
       PropertyEvent(this, PropertyEventType.TRANSFERRED, LocalDateTime.now(), username, eventDate = date, fromPrisonId = prisonId, toPrisonId = toPrisonId),
     )
     removalOutcome = RemovalOutcome.TRANSFERRED
     removalDate = date
     refreshDerivedState()
-    val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, listOf("removalOutcome"))
+    val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, changedFieldsSince(before))
     return WriteResult(PropertyContainerDto.from(this), event)
   }
 
-  private fun PropertyContainer.removeWith(outcome: RemovalOutcome, date: LocalDate): WriteResult {
+  /**
+   * [before] must be snapshotted by the caller *before* it appends its removal event: appending alone
+   * already moves the derived status (it is read off the latest event), so a snapshot taken here would
+   * miss the status change and report only the outcome - the under-reporting this diff exists to prevent.
+   */
+  private fun PropertyContainer.removeWith(outcome: RemovalOutcome, date: LocalDate, before: ContainerState): WriteResult {
     removalOutcome = outcome
     removalDate = date
     refreshDerivedState()
-    val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, listOf("removalOutcome"))
+    val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, id!!, prisonerNumber, changedFieldsSince(before))
     return WriteResult(PropertyContainerDto.from(this), event)
   }
 

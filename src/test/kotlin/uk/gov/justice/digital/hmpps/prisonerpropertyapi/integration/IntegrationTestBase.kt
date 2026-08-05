@@ -1,6 +1,10 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration
 
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.extension.ExtendWith
+import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.atLeast
+import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT
@@ -9,10 +13,13 @@ import org.springframework.http.HttpHeaders
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.web.reactive.server.WebTestClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.config.LocalStackContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.config.LocalStackContainer.setLocalStackProperties
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.config.PostgresContainer
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension
@@ -24,6 +31,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.Pri
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonerSearchApiExtension
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonerSearchApiExtension.Companion.prisonerSearch
 import uk.gov.justice.hmpps.test.kotlin.auth.JwtAuthorisationHelper
+import java.util.UUID
 
 @ExtendWith(
   HmppsAuthApiExtension::class,
@@ -42,6 +50,27 @@ abstract class IntegrationTestBase {
 
   @Autowired
   protected lateinit var jwtAuthHelper: JwtAuthorisationHelper
+
+  /**
+   * Spied rather than mocked so publishing still happens; every test can then assert what was raised.
+   * Reset between tests by the bean override, so [publishedEvents] only ever sees the current test's events.
+   */
+  @MockitoSpyBean
+  protected lateinit var domainEventPublisher: DomainEventPublisher
+
+  /** Every domain event published so far in this test, in the order it was published. */
+  protected fun publishedEvents(): List<HmppsDomainEvent> = argumentCaptor<HmppsDomainEvent>()
+    .apply { verify(domainEventPublisher, atLeast(0)).publish(capture()) }
+    .allValues
+
+  /**
+   * Assert nothing was published. Worth stating explicitly on every no-op path: a write that turns out to
+   * change nothing must stay silent, and a spurious event is invisible to a test that only checks the
+   * database.
+   */
+  protected fun assertNoEventsPublished() {
+    assertThat(publishedEvents()).isEmpty()
+  }
 
   companion object {
     private val pgContainer = PostgresContainer.instance
@@ -68,6 +97,9 @@ abstract class IntegrationTestBase {
     scopes: List<String> = listOf("read"),
   ): (HttpHeaders) -> Unit = jwtAuthHelper.setAuthorisationHeader(username = username, scope = scopes, roles = roles)
 
+  /** The events published for one container, so a multi-container write can be asserted per container. */
+  protected fun publishedEventsFor(containerId: UUID): List<HmppsDomainEvent> = publishedEvents().filter { it.dpsId == containerId.toString() }
+
   protected fun stubPingWithResponse(status: Int) {
     hmppsAuth.stubHealthPing(status)
     prisonerSearch.stubHealthPing(status)
@@ -76,3 +108,12 @@ abstract class IntegrationTestBase {
     prisonApi.stubHealthPing(status)
   }
 }
+
+/** The container the event is about. */
+internal val HmppsDomainEvent.dpsId: String? get() = additionalInformation?.get("dpsId") as String?
+
+/** Empty rather than null on a `.created` event, which omits the key entirely. */
+@Suppress("UNCHECKED_CAST")
+internal val HmppsDomainEvent.changedFields: List<String> get() = additionalInformation?.get("changedFields") as? List<String> ?: emptyList()
+
+internal val HmppsDomainEvent.nomisPropertyContainerId: Long? get() = additionalInformation?.get("nomisPropertyContainerId") as Long?

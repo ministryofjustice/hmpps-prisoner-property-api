@@ -450,7 +450,7 @@ class PropertyContainerWriteServiceTest {
     assertThat(existing.currentLocation()).isNull()
     assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.DISPOSED)
     assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
-    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("removalOutcome"))
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("location", "removalOutcome", "currentStatus"))
   }
 
   @Test
@@ -494,6 +494,7 @@ class PropertyContainerWriteServiceTest {
     assertThat(existing.currentLocation()).isNull()
     assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.RETURNED)
     assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("location", "removalOutcome", "currentStatus"))
   }
 
   @Test
@@ -516,7 +517,7 @@ class PropertyContainerWriteServiceTest {
     assertThat(event.relatedContainerId).isNull()
     assertThat(existing.receivingPrison()).isEqualTo("MDI")
     assertThat(result.event?.eventType).isEqualTo("prison-property.container.updated")
-    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("removalOutcome"))
+    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("location", "removalOutcome", "currentStatus", "receivingPrisonId"))
   }
 
   @Test
@@ -678,8 +679,15 @@ class PropertyContainerWriteServiceTest {
     assertThat(a.currentStatus()).isEqualTo(ContainerStatus.COMBINED)
     assertThat(a.events.last().eventType).isEqualTo(PropertyEventType.COMBINED)
     assertThat(a.events.last().relatedContainerId).isEqualTo(result.container.id)
-    assertThat(result.events.map { it.eventType })
-      .containsExactly("prison-property.container.created", "prison-property.container.updated", "prison-property.container.updated")
+    // One event per affected container - the destination and *both* sources - each naming its own container.
+    assertThat(result.events.map { it.eventType to it.additionalInformation?.get("dpsId") }).containsExactly(
+      "prison-property.container.created" to result.container.id.toString(),
+      "prison-property.container.updated" to a.id.toString(),
+      "prison-property.container.updated" to b.id.toString(),
+    )
+    assertThat(result.events.drop(1)).allSatisfy {
+      assertThat(it.additionalInformation?.get("changedFields")).isEqualTo(listOf("location", "removalOutcome", "currentStatus"))
+    }
   }
 
   @Test

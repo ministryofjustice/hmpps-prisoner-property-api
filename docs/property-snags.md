@@ -199,6 +199,27 @@ the cluster the source of truth instead of the chart, and it will drift again.
 
 ## Outstanding
 
+- **Combined containers stay open in NOMIS — [MAPB-743](https://dsdmoj.atlassian.net/browse/MAPB-743).**
+  Combining two containers in DPS left three in NOMIS: the two sources plus the new one. An audit of every
+  write path cleared this API — `combine` raises `1 + N` events (one `.created` for the destination, one
+  `.updated` per source, each naming its own `dpsId`), and every mutating endpoint publishes after commit.
+  The break is downstream and in two places. `hmpps-prisoner-to-nomis-update` only acts on an update whose
+  `changedFields` intersects `{sealNumber, location, containerType, proposedDisposalDate}`, so both source
+  events were dropped as `property-update-ignored`; and `PropertyContainerUpdateRequest` in
+  `hmpps-nomis-prisoner-api` has no `active`/`expiryDate` field at all, so even a handled event has no way
+  to close a container — the fields exist on the create request and the get response, just not on update.
+  Not specific to combine: remove, dispose and transfer-out all emitted `["removalOutcome"]` and were all
+  invisible for the same reason. What landed here is the honest half — `changedFields` is now diffed from
+  the container's state rather than written by hand, so a removal names the status and location it gives up
+  too, and the event tests now assert *which* containers were named rather than just how many.
+  **Deploy ordering matters:** `location` is already in the consumer's supported set, so the completed
+  `changedFields` makes it start acting on removal events by clearing the NOMIS location without closing
+  the container. Not worse than the silent drop, but sequence it with Syscon rather than shipping blind.
+  Still open with Syscon: whether a combined-away container should be deactivated, expiry-dated or deleted.
+  Two known weaknesses were left alone as out of scope — the multi-event publish is not atomic (if SNS
+  fails on the second of three combine events the transaction has already committed and the rest are lost,
+  with no outbox or retry), and "publish after commit" is a convention of where the `@Transactional`
+  boundary sits rather than a `TransactionSynchronization`, so an outer transaction would silently break it.
 - **Performance measurement (MAPB-711, now also MAPB-726).** Both shipped on the agreed basis of "make the
   views consistent first, then measure". The counts can no longer be a pure SQL aggregate (the owner's
   location lives in prisoner-search), so they group by prisoner and resolve them in one chunked bulk lookup —
