@@ -439,7 +439,11 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     hmppsAuth.stubGrantToken()
     prisonerSearch.stubGetPrisoner("A1234BC")
     prisonRegister.stubGetPrisons()
-    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    // Distinct names so the assertions can tell where the container was at each event from where it is now.
+    locations.stubPostLocationsBatchNamed(
+      LOCATION_A.toString() to "Old Property Store",
+      LOCATION_B.toString() to "Reception Property Store",
+    )
     // Admission and transfer-in movement rows are sourced from prison-api (later-dated than the container
     // events, so they sit at the top of the newest-first list).
     prisonApi.stubGetPrisonTimeline(
@@ -483,12 +487,64 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$[4].eventType").isEqualTo("CREATED_SEALED")
       .jsonPath("$[4].actingEstablishmentName").isEqualTo("Leeds (HMP)")
       .jsonPath("$[4].toPrisonName").isEqualTo("Leeds (HMP)")
-      // oldest item is the seed container's creation: seal-as-of-event is the original seal, while the
-      // container's *current* seal (in the expandable details) is the later one
+      // oldest item is the seed container's creation. Every detail is as at that event, so the expandable
+      // details show the original seal - not the later SEAL002 the container carries now - and the location
+      // it was created in, not the one it was later moved to.
       .jsonPath("$[7].eventType").isEqualTo("CREATED_SEALED")
       .jsonPath("$[7].sealNumber").isEqualTo("SEAL001")
-      .jsonPath("$[7].containerSealNumber").isEqualTo("SEAL002")
-      .jsonPath("$[7].containerLocationDescription").isEqualTo("Reception Property Store")
+      .jsonPath("$[7].containerSealNumber").isEqualTo("SEAL001")
+      .jsonPath("$[7].containerLocationDescription").isEqualTo("Old Property Store")
+      // and the later move shows the destination it moved to
+      .jsonPath("$[5].eventType").isEqualTo("MOVED")
+      .jsonPath("$[5].containerLocationDescription").isEqualTo("Reception Property Store")
+  }
+
+  @Test
+  fun `timeline shows each container event's type as at that event, not the container's current type`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_A.toString())
+    prisonApi.stubGetPrisonTimeline("A1234BC")
+    // Replace the seed with a container created STANDARD and later changed to EXCESS, staying in the same
+    // location throughout - the scenario that showed the original "added to storage" entry as EXCESS.
+    repository.deleteAll()
+    repository.save(retypedContainer())
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.length()").isEqualTo(2)
+      // newest first: the type change itself carries the new type, and names what it changed from
+      .jsonPath("$[0].eventType").isEqualTo("CONTAINER_TYPE_CHANGE")
+      .jsonPath("$[0].containerType").isEqualTo("EXCESS")
+      .jsonPath("$[0].previousContainerType").isEqualTo("STANDARD")
+      // and the creation that predates it still reads STANDARD, with nothing to have changed from
+      .jsonPath("$[1].eventType").isEqualTo("CREATED_SEALED")
+      .jsonPath("$[1].containerType").isEqualTo("STANDARD")
+      .jsonPath("$[1].previousContainerType").doesNotExist()
+  }
+
+  @Test
+  fun `container history names what a property type was changed from`() {
+    hmppsAuth.stubGrantToken()
+    prisonRegister.stubGetPrisons()
+    repository.deleteAll()
+    val id = repository.save(retypedContainer()).id!!
+
+    webTestClient.get().uri("/property-containers/{id}/events", id)
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.length()").isEqualTo(2)
+      .jsonPath("$[0].eventType").isEqualTo("CONTAINER_TYPE_CHANGE")
+      .jsonPath("$[0].containerType").isEqualTo("EXCESS")
+      .jsonPath("$[0].previousContainerType").isEqualTo("STANDARD")
+      // the oldest event has no predecessor to have changed from
+      .jsonPath("$[1].previousContainerType").doesNotExist()
   }
 
   @Test
@@ -1369,6 +1425,37 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     )
     container.events.add(
       PropertyEvent(container, PropertyEventType.MOVED, baseTime.plusHours(2), "USER1", toInternalLocationId = LOCATION_B),
+    )
+    container.refreshDerivedState()
+    return container
+  }
+
+  /**
+   * A container created as STANDARD and later changed to EXCESS without moving, so its events disagree with
+   * its current type. Reproduces the reported defect: the history must show STANDARD on the creation and
+   * EXCESS only from the change onwards, rather than EXCESS throughout.
+   */
+  private fun retypedContainer(): PropertyContainer {
+    val container = PropertyContainer(
+      prisonerNumber = "A1234BC",
+      prisonId = "LEI",
+      containerType = ContainerType.EXCESS,
+      createdByUserId = "USER1",
+      currentSealNumber = "SEAL010",
+    )
+    container.events.add(
+      PropertyEvent(
+        container,
+        PropertyEventType.CREATED_SEALED,
+        baseTime,
+        "USER1",
+        sealNumber = "SEAL010",
+        toInternalLocationId = LOCATION_A,
+        containerType = ContainerType.STANDARD,
+      ),
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CONTAINER_TYPE_CHANGE, baseTime.plusHours(1), "USER1"),
     )
     container.refreshDerivedState()
     return container
