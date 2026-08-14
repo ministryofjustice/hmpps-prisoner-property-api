@@ -80,4 +80,14 @@ class PropertyEvent(
   @GeneratedUuidV7
   @Column(name = "id", updatable = false, nullable = false)
   open var id: UUID? = null,
-)
+) {
+  /**
+   * Whether this event changes where the container is: it names a destination, or it is a transfer out (which
+   * clears the location so the receiving prison assigns its own). Shared by [PropertyContainer]'s derivation
+   * of the current location and by the timeline's walk deriving the location as at each historical event, so
+   * the two cannot drift apart.
+   */
+  fun affectsLocation(): Boolean = toInternalLocationId != null ||
+    toStorageLocationType != null ||
+    eventType == PropertyEventType.TRANSFERRED
+}
