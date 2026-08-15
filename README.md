@@ -185,8 +185,28 @@ docker run --rm --network host -v /tmp/schemaspy:/output schemaspy/schemaspy:6.2
   -u prisoner_property -p prisoner_property -vizjs
 ```
 
-Tables and columns have no descriptions yet — those are added as `COMMENT ON` statements by
-MAPB-761, and a CSV export for the MOJ Data Catalogue follows in MAPB-762.
+### Table and column descriptions
+
+Descriptions live in the database as `COMMENT ON` statements, applied by
+`db/migration/V15__schema_comments.sql`, so SchemaSpy, the CSV export and any Glue crawl all read the
+same source of truth. Each column description ends with a sensitivity classification:
+
+| Tag | Meaning |
+| --- | --- |
+| `[Sensitivity: NONE]` | Not personal data in itself |
+| `[Sensitivity: PERSONAL]` | Identifies or locates a person — prisoner *or* staff |
+| `[Sensitivity: SPECIAL-CATEGORY]` | UK GDPR Article 9 data, or offence data under Article 10 |
+| `[Sensitivity: OFFICIAL-SENSITIVE]` | Not personal data, but damaging if disclosed |
+
+The tag describes the column's own content, not the row's: every container and event belongs to a
+prisoner via `property_container.prisoner_number`, so the whole record is personal data about that
+prisoner however an individual column is tagged — which is what matters for a subject access request.
+Nothing in this schema is special category.
+
+**Any new table or column needs a `COMMENT ON`** in a migration — `SchemaCommentsTest` fails the build
+otherwise. A later migration can add to or replace any comment at any time.
+
+A CSV export for the MOJ Data Catalogue follows in MAPB-762.
 
 ## Tech stack
 
