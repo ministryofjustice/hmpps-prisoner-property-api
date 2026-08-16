@@ -113,31 +113,48 @@ data class PrisonerTimelineItemDto(
   @Schema(description = "Id of the container this event belongs to; null for prisoner movements", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d", nullable = true)
   val containerId: UUID?,
 
-  @Schema(description = "Type of the container, for the item's expandable details; null for prisoner movements", example = "STANDARD", nullable = true)
+  @Schema(description = "The container's type as at this event, for the item's expandable details; null for prisoner movements", example = "STANDARD", nullable = true)
   val containerType: ContainerType?,
 
-  @Schema(description = "The container's current seal number, for the item's expandable details", example = "SN880032", nullable = true)
+  @Schema(
+    description = "The container's type immediately before this event, so a type change can be described as " +
+      "\"changed from X to Y\". Null when there is no earlier event, and null when the two agree - which is " +
+      "the case for events predating the snapshot column",
+    example = "EXCESS",
+    nullable = true,
+  )
+  val previousContainerType: ContainerType? = null,
+
+  @Schema(description = "The container's seal number as at this event, for the item's expandable details", example = "SN880032", nullable = true)
   val containerSealNumber: String?,
 
-  @Schema(description = "The container's current status, for the item's expandable details", example = "STORED", nullable = true)
+  @Schema(description = "The container's status as at this event, for the item's expandable details", example = "STORED", nullable = true)
   val containerStatus: ContainerStatus?,
 
-  @Schema(description = "Human-friendly description of the container's current location, for the item's expandable details", example = "Reception Property Store", nullable = true)
+  @Schema(description = "Human-friendly description of the container's location as at this event, for the item's expandable details", example = "Reception Property Store", nullable = true)
   val containerLocationDescription: String?,
 ) {
   companion object {
     /** Any event recorded by the system rather than a user carries this reserved user id. */
     private const val SYSTEM_USER = "PRISONER_PROPERTY_API"
 
-    /** Build a container-event item, given the seal-as-at-this-event and the resolved prison/location names. */
+    /**
+     * Build a container-event item. Every detail is the value *as at this event* rather than the container's
+     * current state, so an entry that predates a later change still reads correctly: the type comes from the
+     * event's own snapshot, and the seal, status, location and previous type are walked forward through the
+     * container's events by the caller (see PropertyContainerService.getPrisonerTimeline). Only the container
+     * id is taken from the live entity, since it is what the details panel links to.
+     */
     fun containerEvent(
       event: PropertyEvent,
       container: PropertyContainer,
       sealAsOfEvent: String?,
+      statusAsOfEvent: ContainerStatus,
+      locationDescriptionAsOfEvent: String?,
+      previousContainerType: ContainerType?,
       actingEstablishmentName: String?,
       fromPrisonName: String?,
       toPrisonName: String?,
-      containerLocationDescription: String?,
     ) = PrisonerTimelineItemDto(
       itemType = TimelineItemType.CONTAINER_EVENT,
       movementKind = null,
@@ -157,10 +174,11 @@ data class PrisonerTimelineItemDto(
       relatedContainerId = event.relatedContainerId,
       relatedContainerSealNumber = event.relatedContainerSealNumber,
       containerId = container.id,
-      containerType = container.containerType,
-      containerSealNumber = container.currentSealNumber,
-      containerStatus = container.currentStatus(),
-      containerLocationDescription = containerLocationDescription,
+      containerType = event.containerType,
+      previousContainerType = previousContainerType?.takeUnless { it == event.containerType },
+      containerSealNumber = sealAsOfEvent,
+      containerStatus = statusAsOfEvent,
+      containerLocationDescription = locationDescriptionAsOfEvent,
     )
 
     /**

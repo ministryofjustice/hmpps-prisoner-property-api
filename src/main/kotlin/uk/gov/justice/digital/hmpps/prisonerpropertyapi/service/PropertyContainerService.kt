@@ -344,9 +344,17 @@ class PropertyContainerService(
   fun getEvents(id: UUID): List<PropertyEventDto> {
     val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
     val prisonNames = prisonRegisterClient.getPrisonNames()
+    // Walk oldest-first so each event can be told the type its predecessor carried (which is what a type
+    // change was changed *from*), then reverse to the newest-first order the endpoint returns.
+    var previousContainerType: ContainerType? = null
     return container.events
-      .sortedByDescending { it.eventDateTime }
-      .map { PropertyEventDto.from(it, prisonNames) }
+      .sortedBy { it.eventDateTime }
+      .map { event ->
+        val dto = PropertyEventDto.from(event, prisonNames, previousContainerType)
+        previousContainerType = event.containerType
+        dto
+      }
+      .asReversed()
   }
 
   /**
@@ -364,11 +372,31 @@ class PropertyContainerService(
     val prisonNames = prisonRegisterClient.getPrisonNames()
     val prisoner = prisonerSearchClient.getPrisoner(prisonerNumber)
     val prisonerName = prisoner.fullName()
-    val locations = if (containers.isEmpty()) emptyMap() else locationsClient.getLocations(containers.mapNotNull { it.currentLocation() })
+    // Every location the containers have ever been in, not just where they are now: each event's details are
+    // rendered as at that event, so a container that has moved needs its earlier locations resolved too.
+    val locations = if (containers.isEmpty()) {
+      emptyMap()
+    } else {
+      locationsClient.getLocations(
+        containers.flatMap { container ->
+          container.events.mapNotNull { it.toInternalLocationId } + listOfNotNull(container.currentLocation())
+        }.distinct(),
+      )
+    }
 
     val containerItems = containers.flatMap { container ->
-      val locationDescription = container.currentLocation()?.let { locations[it]?.displayName() }
       var sealAsOfEvent: String? = null
+      // The container's location as at each event, walked forward in time: an event sets it when it carries a
+      // destination, and a TRANSFERRED clears it (the receiving prison assigns its own) - mirroring the filter
+      // in PropertyContainer.latestLocationEvent(), which derives the current location the same way.
+      var locationAsOfEvent: UUID? = null
+      // The container's status as at each event, mirroring PropertyContainer.baseEventStatus(): the latest
+      // non-DISPOSAL_REQUIRED event's status, with TRANSFER collapsing to STORED. Deliberately not
+      // event.eventType.status, which would report a status baseEventStatus skips. The time-based disposal
+      // overlay (isDisposalDue) is not reconstructed historically - see the DTO comment.
+      var statusAsOfEvent = ContainerStatus.STORED
+      // The container's type as at the previous event, so a type change can be described as "from X to Y".
+      var previousContainerType: ContainerType? = null
       // The prison holding the container as at each event, walked forward in time (like sealAsOfEvent): a
       // CREATED_SEALED records the origin (toPrisonId) and each TRANSFERRED moves it on, so a historical event
       // keeps the establishment it actually happened at even after a transfer reassigns the container's current
@@ -380,15 +408,25 @@ class PropertyContainerService(
         (if (event.eventType == PropertyEventType.CREATED_SEALED) event.toPrisonId else event.fromPrisonId)?.let { heldPrisonId = it }
         val actingEstablishmentName = prisonNames[heldPrisonId ?: container.prisonId]
         if (event.eventType == PropertyEventType.TRANSFERRED) event.toPrisonId?.let { heldPrisonId = it }
-        PrisonerTimelineItemDto.containerEvent(
+        if (event.affectsLocation()) {
+          locationAsOfEvent = if (event.eventType == PropertyEventType.TRANSFERRED) null else event.toInternalLocationId
+        }
+        if (event.eventType != PropertyEventType.DISPOSAL_REQUIRED) {
+          statusAsOfEvent = event.eventType.status.takeUnless { it == ContainerStatus.TRANSFER } ?: ContainerStatus.STORED
+        }
+        val item = PrisonerTimelineItemDto.containerEvent(
           event = event,
           container = container,
           sealAsOfEvent = sealAsOfEvent,
+          statusAsOfEvent = statusAsOfEvent,
+          locationDescriptionAsOfEvent = locationAsOfEvent?.let { locations[it]?.displayName() },
+          previousContainerType = previousContainerType,
           actingEstablishmentName = actingEstablishmentName,
           fromPrisonName = event.fromPrisonId?.let { prisonNames[it] },
           toPrisonName = event.toPrisonId?.let { prisonNames[it] },
-          containerLocationDescription = locationDescription,
         )
+        previousContainerType = event.containerType
+        item
       }
     }
 

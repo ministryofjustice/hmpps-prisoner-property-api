@@ -89,16 +89,24 @@ class LocationsMockServer : WireMockServer(WIREMOCK_PORT) {
     )
   }
 
-  /** Stub the batch lookup, returning one non-residential location object per supplied id. */
-  fun stubPostLocationsBatch(vararg ids: String) {
-    val body = ids.joinToString(prefix = "[", postfix = "]") { id ->
+  /** Stub the batch lookup, returning one non-residential location object per supplied id, all named alike. */
+  fun stubPostLocationsBatch(vararg ids: String) = stubPostLocationsBatchNamed(
+    *ids.map { it to "Reception Property Store" }.toTypedArray(),
+  )
+
+  /**
+   * Stub the batch lookup with a distinct name per id, for cases that need to tell one location from another -
+   * such as asserting an event shows the location it happened in rather than where the container is now.
+   */
+  fun stubPostLocationsBatchNamed(vararg idToName: Pair<String, String>) {
+    val body = idToName.joinToString(prefix = "[", postfix = "]") { (id, name) ->
       """
         {
           "id": "$id",
           "prisonId": "MDI",
           "code": "PROP",
           "pathHierarchy": "RECP-PROP",
-          "localName": "Reception Property Store",
+          "localName": "$name",
           "locationType": "STORE",
           "status": "ACTIVE"
         }
