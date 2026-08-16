@@ -63,13 +63,14 @@ jobs:
             *.gradle*
             **/gradle-wrapper.properties
 
-      - name: Initialise database
+      - name: Initialise database and export reference data
         shell: bash
         run: |
           docker compose -f ${{ inputs.docker_compose_file }} up -d --wait
           export JAVA_OPTS="${{ inputs.java_options }}"
-          ./gradlew -Pinit-db=true test \
-            --tests uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.InitialiseDatabase
+          ./gradlew -Pinit-db=true -PreferenceDataOutput="${PWD}/reference-data.csv" test \
+            --tests uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.InitialiseDatabase \
+            --tests uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.ExportReferenceData
 
       - name: Generate database schema report
         uses: ministryofjustice/hmpps-github-shared-actions/.github/actions/database_schema_report@860f18498f2263bb888da24cafc3c47cc87e3543 # v1.1.0
@@ -79,6 +80,20 @@ jobs:
           user: ${{ inputs.database_user }}
           password: ${{ inputs.database_password }}
 
+      - name: Generate CSV data dictionary
+        shell: bash
+        env:
+          DB_NAME: ${{ inputs.database_name }}
+          DB_USER: ${{ inputs.database_user }}
+          DB_PASSWORD: ${{ inputs.database_password }}
+          DB_SCHEMA: ${{ inputs.database_schema }}
+        run: |
+          scripts/generate-data-dictionary.sh /tmp/schemaspy/data-dictionary.csv
+          cp reference-data.csv /tmp/schemaspy/reference-data.csv
+
+      # The gh-pages root needs an empty .nojekyll file, added once by hand. Without it Pages tries to run
+      # a Jekyll build over the SchemaSpy output, which this repo's Actions policy does not allow, and the
+      # site never publishes. It survives later runs because this step only replaces schema-spy-report/.
       - name: Publish to GitHub Pages
         if: ${{ inputs.publish }}
         uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f # v4.8.0
