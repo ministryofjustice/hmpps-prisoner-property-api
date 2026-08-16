@@ -8,12 +8,18 @@
 -- Every column comment ends with a sensitivity classification:
 --
 --   [Sensitivity: NONE]                - not personal data in itself
---   [Sensitivity: PERSONAL]            - identifies or locates a person (prisoner *or* staff), or is
---                                        free text that could name one
+--   [Sensitivity: PERSONAL]            - personal data about a prisoner: identifies or locates them,
+--                                        or is free text that could
+--   [Sensitivity: STAFF]               - personal data about a member of staff, typically the username
+--                                        that performed an action
 --   [Sensitivity: SPECIAL-CATEGORY]    - UK GDPR Article 9 data (health, sexuality, religion, race),
 --                                        or criminal offence data under Article 10
 --   [Sensitivity: OFFICIAL-SENSITIVE]  - not personal data, but damaging if disclosed (e.g. security
 --                                        arrangements)
+--
+-- STAFF is still personal data and still in scope for a staff member's own subject access request. It is
+-- separated from PERSONAL so that an extract about prisoners can be reasoned about without staff columns
+-- inflating the count, and so staff data can be dropped or pseudonymised independently.
 --
 -- Two things to understand before using these classifications:
 --
@@ -36,7 +42,7 @@ COMMENT ON COLUMN property_container.prisoner_number IS 'NOMIS offender number (
 COMMENT ON COLUMN property_container.prison_id IS 'Agency (prison) code holding the container. Read with prisoner_number it indicates where that prisoner''s property is, and normally where the prisoner is. Not reassigned on a transfer out - the receiving prison creates its own record. [Sensitivity: PERSONAL]';
 COMMENT ON COLUMN property_container.container_type IS 'What kind of property the container holds. One of STANDARD, EXCESS, VALUABLES, CONFISCATED. [Sensitivity: NONE]';
 COMMENT ON COLUMN property_container.create_datetime IS 'When the container record was created in this service. For containers migrated from NOMIS this is the migration run, not the original prison event. [Sensitivity: NONE]';
-COMMENT ON COLUMN property_container.created_by_user_id IS 'DPS username of the member of staff who created the container. Identifies a member of staff. [Sensitivity: PERSONAL]';
+COMMENT ON COLUMN property_container.created_by_user_id IS 'DPS username of the member of staff who created the container. Identifies a member of staff. [Sensitivity: STAFF]';
 COMMENT ON COLUMN property_container.proposed_disposal_date IS 'Date the container is proposed for disposal. Disposal status is derived by comparing this with today rather than being stored, so a container becomes DISPOSAL_REQUIRED without anything writing to it. [Sensitivity: NONE]';
 COMMENT ON COLUMN property_container.current_seal_number IS 'Seal number currently on the container. Stored rather than derived because uniqueness across containers in storage is checked in SQL. Freed for re-use once the container leaves active storage. [Sensitivity: NONE]';
 COMMENT ON COLUMN property_container.removal_outcome IS 'Why the container left active storage: DISPOSED, RETURNED, TRANSFERRED, COMBINED, CREATED_IN_ERROR or REMOVED. Null while the container is in active storage. All are terminal except REMOVED, which a REACTIVATED event reverses - which is why there is no archived flag. [Sensitivity: NONE]';
@@ -58,7 +64,7 @@ COMMENT ON COLUMN property_event.event_type IS 'What happened. One of CREATED_SE
 COMMENT ON COLUMN property_event.seal_number IS 'Seal number recorded by this event, on the event types that carry one (creation and reseal). Null on events that do not change the seal. [Sensitivity: NONE]';
 COMMENT ON COLUMN property_event.event_datetime IS 'When the event happened. Events are ordered by this; where two share a timestamp the later-appended one wins. [Sensitivity: NONE]';
 COMMENT ON COLUMN property_event.event_date IS 'The date the underlying prison activity happened, where it differs from when it was recorded (for example a disposal logged after the event). Null when the recorded timestamp is the date. [Sensitivity: NONE]';
-COMMENT ON COLUMN property_event.event_user_id IS 'DPS username of the member of staff who performed the action, or the system user for events raised by NOMIS sync or the prisoner movement listener. Identifies a member of staff. [Sensitivity: PERSONAL]';
+COMMENT ON COLUMN property_event.event_user_id IS 'DPS username of the member of staff who performed the action, or the system user for events raised by NOMIS sync or the prisoner movement listener. Identifies a member of staff. [Sensitivity: STAFF]';
 COMMENT ON COLUMN property_event.from_internal_location_id IS 'Storage location the container moved from - a location UUID in hmpps-locations-inside-prison-api. Null when the event does not move it. [Sensitivity: NONE]';
 COMMENT ON COLUMN property_event.to_internal_location_id IS 'Storage location the container moved to - a location UUID in hmpps-locations-inside-prison-api. Null when the event does not move it, or when it moved offsite to Branston (which has no internal location id). [Sensitivity: NONE]';
 COMMENT ON COLUMN property_event.to_storage_location_type IS 'The kind of location the container moved to: INTERNAL or BRANSTON. Older events recorded an internal location id without an explicit type, and are read as INTERNAL. [Sensitivity: NONE]';
@@ -77,4 +83,4 @@ COMMENT ON TABLE active_agency IS 'One row per prison that has ever been switche
 COMMENT ON COLUMN active_agency.agency_id IS 'Primary key. Agency (prison) code. [Sensitivity: NONE]';
 COMMENT ON COLUMN active_agency.active IS 'Whether the prison is currently switched on. False means it was switched on at some point and has since been switched off. [Sensitivity: NONE]';
 COMMENT ON COLUMN active_agency.updated_at IS 'When the prison was last switched on or off. [Sensitivity: NONE]';
-COMMENT ON COLUMN active_agency.updated_by IS 'DPS username of the member of staff who last changed the switch. Identifies a member of staff. [Sensitivity: PERSONAL]';
+COMMENT ON COLUMN active_agency.updated_by IS 'DPS username of the member of staff who last changed the switch. Identifies a member of staff. [Sensitivity: STAFF]';

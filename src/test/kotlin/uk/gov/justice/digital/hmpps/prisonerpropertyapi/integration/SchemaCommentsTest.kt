@@ -74,6 +74,6 @@ class SchemaCommentsTest : IntegrationTestBase() {
   ) { rs, _ -> ColumnComment(rs.getString("name"), rs.getString("comment")) }
 
   private companion object {
-    val SENSITIVITY = Regex("""\[Sensitivity: (NONE|PERSONAL|SPECIAL-CATEGORY|OFFICIAL-SENSITIVE)]$""")
+    val SENSITIVITY = Regex("""\[Sensitivity: (NONE|PERSONAL|STAFF|SPECIAL-CATEGORY|OFFICIAL-SENSITIVE)]$""")
   }
 }

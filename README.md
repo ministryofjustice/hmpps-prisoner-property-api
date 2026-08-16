@@ -194,9 +194,14 @@ same source of truth. Each column description ends with a sensitivity classifica
 | Tag | Meaning |
 | --- | --- |
 | `[Sensitivity: NONE]` | Not personal data in itself |
-| `[Sensitivity: PERSONAL]` | Identifies or locates a person — prisoner *or* staff |
+| `[Sensitivity: PERSONAL]` | Personal data about a prisoner — identifies or locates them |
+| `[Sensitivity: STAFF]` | Personal data about a member of staff, typically the username that acted |
 | `[Sensitivity: SPECIAL-CATEGORY]` | UK GDPR Article 9 data, or offence data under Article 10 |
 | `[Sensitivity: OFFICIAL-SENSITIVE]` | Not personal data, but damaging if disclosed |
+
+`STAFF` is still personal data, and still in scope for a staff member's own subject access request. It is
+separated from `PERSONAL` so an extract about prisoners can be reasoned about without staff columns
+inflating the count, and so staff data can be dropped or pseudonymised independently.
 
 The tag describes the column's own content, not the row's: every container and event belongs to a
 prisoner via `property_container.prisoner_number`, so the whole record is personal data about that
