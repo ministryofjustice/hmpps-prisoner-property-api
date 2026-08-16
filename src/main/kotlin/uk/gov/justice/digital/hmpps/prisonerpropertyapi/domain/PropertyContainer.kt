@@ -184,6 +184,6 @@ class PropertyContainer(
   }
 
   private fun latestLocationEvent(): PropertyEvent? = events
-    .filter { it.toInternalLocationId != null || it.toStorageLocationType != null || it.eventType == PropertyEventType.TRANSFERRED }
+    .filter { it.affectsLocation() }
     .maxByOrNull { it.eventDateTime }
 }

@@ -50,6 +50,16 @@ data class PropertyEventDto(
   @Schema(description = "The container's type as at the time of this event (snapshotted for the durable history)", example = "STANDARD")
   val containerType: ContainerType,
 
+  @Schema(
+    description = "The container's type immediately before this event, so a type change can be described as " +
+      "\"changed from X to Y\". Derived at read time from the preceding event's snapshot, so it is null when " +
+      "there is no earlier event, and null when the two agree - which is the case for events predating the " +
+      "snapshot column, whose backfill gave every event the container's then-current type",
+    example = "EXCESS",
+    nullable = true,
+  )
+  val previousContainerType: ContainerType? = null,
+
   @Schema(description = "Business date the event relates to (e.g. proposed disposal or removal date), if any", example = "2026-09-15", nullable = true)
   val eventDate: LocalDate?,
 
@@ -72,8 +82,16 @@ data class PropertyEventDto(
   val relatedContainerSealNumber: String? = null,
 ) {
   companion object {
-    /** [prisonNames] resolves prison ids to names (from prison-register); pass an empty map to skip resolution. */
-    fun from(event: PropertyEvent, prisonNames: Map<String, String> = emptyMap()) = PropertyEventDto(
+    /**
+     * [prisonNames] resolves prison ids to names (from prison-register); pass an empty map to skip resolution.
+     * [previousContainerType] is the type carried by the preceding event, supplied by the caller because a
+     * single event cannot know its own predecessor; it is ignored when it matches this event's type.
+     */
+    fun from(
+      event: PropertyEvent,
+      prisonNames: Map<String, String> = emptyMap(),
+      previousContainerType: ContainerType? = null,
+    ) = PropertyEventDto(
       id = event.id!!,
       eventType = event.eventType,
       eventDateTime = event.eventDateTime,
@@ -87,6 +105,7 @@ data class PropertyEventDto(
       toPrisonId = event.toPrisonId,
       toPrisonName = event.toPrisonId?.let { prisonNames[it] },
       containerType = event.containerType,
+      previousContainerType = previousContainerType?.takeUnless { it == event.containerType },
       eventDate = event.eventDate,
       relatedContainerId = event.relatedContainerId,
       relatedContainerSealNumber = event.relatedContainerSealNumber,
