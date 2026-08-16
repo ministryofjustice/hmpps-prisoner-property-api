@@ -79,3 +79,86 @@ SELECT count(*) FROM property_event WHERE event_type = 'DISPOSED';
 Spot-check a previously-inactive prisoner in the UI: the container shows the grey **Removed** tag, and the
 timeline reads "… marked as removed from the establishment" (not "disposed"). Reactivating it in NOMIS
 (`ACTIVE_FLAG='Y'`) on the next sync should clear the outcome and add a **Reactivated** timeline entry.
+
+---
+
+## Datahub ingestion: create the `digital_prison_reporting` user
+
+**Ticket:** MAPB-763 · **Run once per environment**, after the RDS terraform in
+[cloud-platform-environments](https://github.com/ministryofjustice/cloud-platform-environments) has applied
+and the instance has been rebooted.
+
+### Why
+
+HMPPS Datahub ingests property data into the data mart via AWS DMS. It connects as its own database user
+rather than the application's, and in production it reads from the **read replica** so its change-capture
+reads never touch the operational database.
+
+The [Datahub setup guide](https://dsdmoj.atlassian.net/wiki/spaces/DPR/pages/4461494352) still says to grant
+`rds_superuser`. **Don't.** Follow
+[Data Hub ingestion configuration amendments](https://dsdmoj.atlassian.net/wiki/spaces/moveandimprove/pages/6217335041)
+instead: the Move and Improve team proved the ingestion works identically with read-only permissions, and
+these credentials sit in AWS Secrets Manager where anyone with access to that instance can read them. A
+superuser grant there would put every property table one leaked secret away from being dropped.
+
+### Prerequisites
+
+- The terraform in [cloud-platform-environments#44929](https://github.com/ministryofjustice/cloud-platform-environments/pull/44929)
+  applied for the environment, **and the RDS instance rebooted** — `rds.logical_replication` and
+  `shared_preload_libraries` are `pending-reboot`, so nothing below works until it has been.
+- A password with no `;`, `+` or `%` — the Datahub ingestion rejects those characters.
+- Run against the **primary**, not the replica. The role replicates to the replica automatically.
+
+### Procedure
+
+Connect as the master user (`./gradlew portForwardRDS`, or an SSM session) and run:
+
+```sql
+-- 1. Create the user
+CREATE ROLE digital_prison_reporting WITH LOGIN PASSWORD '<generated>';
+
+-- 2. Read-only, not superuser. pg_read_all_data covers every current and future table, so a new
+--    migration cannot silently leave a table out of the ingestion.
+GRANT pg_read_all_data TO digital_prison_reporting;
+GRANT rds_replication  TO digital_prison_reporting;
+
+-- 3. Lets Datahub create its own replication slots
+GRANT CONNECT, CREATE ON DATABASE prisoner_property TO digital_prison_reporting;
+
+-- 4. Required by the DMS process
+CREATE EXTENSION IF NOT EXISTS pglogical;
+```
+
+### Verification
+
+```sql
+-- Should list pg_read_all_data and rds_replication, and NOT rds_superuser
+SELECT r.rolname AS user_name, g.rolname AS granted_role
+FROM pg_auth_members m
+  JOIN pg_roles r ON m.member = r.oid
+  JOIN pg_roles g ON m.roleid = g.oid
+WHERE r.rolname = 'digital_prison_reporting';
+
+-- Must return 'logical'. 'replica' means the instance has not been rebooted since the parameter
+-- group changed - reboot it and check again.
+SHOW wal_level;
+
+-- pglogical should be listed
+SELECT extname FROM pg_catalog.pg_extension;
+```
+
+If this user already exists with the old grants, revoke the superuser role rather than recreating it:
+
+```sql
+REVOKE rds_superuser FROM digital_prison_reporting;
+```
+
+### Afterwards
+
+Share the credentials with Datahub following
+[their instructions](https://dsdmoj.atlassian.net/wiki/spaces/DPR/pages/5350129665) — do not paste them into
+Slack or a ticket. In production, give them the **read replica** endpoint
+(`prisoner-property-rds-read-replica-output`), not the primary.
+
+Datahub also needs the replication slot creating manually on a read replica, just before they start the DMS
+task — that is their step, not ours, but it is the usual reason a production task fails first time.
