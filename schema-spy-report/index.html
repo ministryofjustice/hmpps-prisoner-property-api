@@ -78,7 +78,7 @@
                         <div class="col-md-12">
                             <div class="callout callout-info">
                                 <h4>SchemaSpy Analysis of prisoner_property.public</h4>
-                                <p>Generated on Sun Aug 16 07:46 UTC 2026</p>
+                                <p>Generated on Sun Aug 16 08:29 UTC 2026</p>
                             </div>
                         </div>
                     </div>
@@ -212,7 +212,7 @@
                                         <td class="detail" align="right">15</td>
                                         <td class="detail" align="right">-1</td>
                                         <td class="detail" align="right">Table</td>
-                                        <td class="comment detail" style="display: table-cell;"></td>
+                                        <td class="comment detail" style="display: table-cell;"><p>One thing that happened to a container, in an ordered history. This is the authoritative record: the container&rsquo;s current seal, status and location are derived from the most recent relevant event, and the columns on property_container are mirrors of that derivation. Events are appended, never amended, so this table is also the audit trail.</p></td>
                                     </tr>
                                     <tr class="tbl even" valign="top">
                                         <td class="detail"><a href="tables/flyway_schema_history.html">flyway_schema_history</a></td>
@@ -230,7 +230,7 @@
                                         <td class="detail" align="right">14</td>
                                         <td class="detail" align="right">-1</td>
                                         <td class="detail" align="right">Table</td>
-                                        <td class="comment detail" style="display: table-cell;"></td>
+                                        <td class="comment detail" style="display: table-cell;"><p>A sealed container of one prisoner&rsquo;s property. The record is event-sourced: its history lives in property_event and its current status and location are derived from the most recent relevant event. Five values are mirrored into columns here (seal number, status, internal location, storage location type, receiving prison) so the establishment-wide list can filter and page in SQL; the derivation stays authoritative and every write refreshes the mirrors.</p></td>
                                     </tr>
                                     <tr class="tbl even" valign="top">
                                         <td class="detail"><a href="tables/active_agency.html">active_agency</a></td>
@@ -239,7 +239,7 @@
                                         <td class="detail" align="right">4</td>
                                         <td class="detail" align="right">-1</td>
                                         <td class="detail" align="right">Table</td>
-                                        <td class="comment detail" style="display: table-cell;"></td>
+                                        <td class="comment detail" style="display: table-cell;"><p>One row per prison that has ever been switched on for managing property in DPS rather than NOMIS. The list is published on the public actuator /info payload, which is how the front end decides whether to offer the service at a prison. Switching a prison off flips the flag rather than deleting the row, so deactivation stays auditable and the toggle is idempotent.</p></td>
                                     </tr>
                             </table>
                         </div>

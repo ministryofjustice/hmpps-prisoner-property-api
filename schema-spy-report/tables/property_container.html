@@ -74,6 +74,19 @@
                 <!-- Content Header (Page header) -->
                 <section class="content-header">
                     <h1>property_container</h1><p><span id="recordNumber">-1</span> rows</p><br />
+                    <div class="box box-primary">
+                        <div class="box-header with-border">
+                            <i class="fa fa-file-text-o"></i>
+                            <h3 id="Description" class="box-title">Description</h3>
+                            <div class="box-tools pull-right">
+                                <button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+                                <button type="button" class="btn btn-box-tool" data-widget="remove"><i class="fa fa-times"></i></button>
+                            </div>
+                        </div><!-- /.box-header -->
+                        <div class="box-body clearfix">
+                            <p>A sealed container of one prisoner&rsquo;s property. The record is event-sourced: its history lives in property_event and its current status and location are derived from the most recent relevant event. Five values are mirrored into columns here (seal number, status, internal location, storage location type, receiving prison) so the establishment-wide list can filter and page in SQL; the derivation stays authoritative and every write refreshes the mirrors.</p>
+                        </div><!-- /.box-body -->
+                    </div>
                 </section>
                 <!-- Main content -->
                 <section class="content">
@@ -128,7 +141,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>Primary key. Time-ordered UUID v7, so insert order matches id order. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td class='indexedColumn' title='Indexed'><i class='fa fa-sitemap fa-rotate-120' style='padding-right: 5px;'></i><span id="prisoner_number">prisoner_number</span></td>
@@ -145,7 +158,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>NOMIS offender number (noms id) of the prisoner whose property this is. The link that makes every row here personal data about that prisoner. <a href="./../null">Sensitivity: PERSONAL</a></p></td>
                                 </tr>
                                 <tr>
                                     <td class='indexedColumn' title='Indexed'><i class='fa fa-sitemap fa-rotate-120' style='padding-right: 5px;'></i><span id="prison_id">prison_id</span></td>
@@ -162,7 +175,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>Agency (prison) code holding the container. Read with prisoner_number it indicates where that prisoner&rsquo;s property is, and normally where the prisoner is. Not reassigned on a transfer out - the receiving prison creates its own record. <a href="./../null">Sensitivity: PERSONAL</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="container_type">container_type</span></td>
@@ -179,7 +192,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>What kind of property the container holds. One of STANDARD, EXCESS, VALUABLES, CONFISCATED. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="create_datetime">create_datetime</span></td>
@@ -196,7 +209,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>When the container record was created in this service. For containers migrated from NOMIS this is the migration run, not the original prison event. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="created_by_user_id">created_by_user_id</span></td>
@@ -213,7 +226,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>DPS username of the member of staff who created the container. Identifies a member of staff. <a href="./../null">Sensitivity: STAFF</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="proposed_disposal_date">proposed_disposal_date</span></td>
@@ -230,7 +243,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>Date the container is proposed for disposal. Disposal status is derived by comparing this with today rather than being stored, so a container becomes DISPOSAL_REQUIRED without anything writing to it. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td class='indexedColumn' title='Indexed'><i class='fa fa-sitemap fa-rotate-120' style='padding-right: 5px;'></i><span id="current_seal_number">current_seal_number</span></td>
@@ -247,7 +260,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>Seal number currently on the container. Stored rather than derived because uniqueness across containers in storage is checked in SQL. Freed for re-use once the container leaves active storage. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="removal_outcome">removal_outcome</span></td>
@@ -264,7 +277,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>Why the container left active storage: DISPOSED, RETURNED, TRANSFERRED, COMBINED, CREATED_IN_ERROR or REMOVED. Null while the container is in active storage. All are terminal except REMOVED, which a REACTIVATED event reverses - which is why there is no archived flag. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="removal_date">removal_date</span></td>
@@ -281,7 +294,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>Date the container left active storage. Null while it is still held. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td class='indexedColumn' title='Indexed'><i class='fa fa-sitemap fa-rotate-120' style='padding-right: 5px;'></i><span id="current_status">current_status</span></td>
@@ -298,7 +311,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>Denormalised mirror of the derived status, excluding the time-based disposal overlay so the column stays stable over time. One of STORED, DUE_FOR_TRANSFER_OUT, DUE_FOR_RETURN, DISPOSAL_REQUIRED, DISPOSED, RETURNED, TRANSFER, COMBINED, CREATED_IN_ERROR, REMOVED. Read the events, not this column, if you need the authoritative status. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td class='indexedColumn' title='Indexed'><i class='fa fa-sitemap fa-rotate-120' style='padding-right: 5px;'></i><span id="current_internal_location_id">current_internal_location_id</span></td>
@@ -315,7 +328,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>Denormalised mirror of the container&rsquo;s current storage location - a location UUID in hmpps-locations-inside-prison-api. Null when the container is offsite at Branston, has no recorded location, or has left active storage. This is where the property is kept, not where the prisoner is. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="current_storage_location_type">current_storage_location_type</span></td>
@@ -332,7 +345,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>Denormalised mirror of where the container is stored: INTERNAL (a location within the prison) or BRANSTON (the offsite warehouse, which has no internal location id). <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td class='indexedColumn' title='Indexed'><i class='fa fa-sitemap fa-rotate-120' style='padding-right: 5px;'></i><span id="receiving_prison_id">receiving_prison_id</span></td>
@@ -349,7 +362,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td></td>
+                                    <td><p>Agency code of the prison this container is due to be transferred in to, denormalised so the establishment list can surface incoming property. Set only while the container is due for transfer out, or transferred but not yet reconciled with the receiving prison&rsquo;s record. Indicates where the owning prisoner has moved to. <a href="./../null">Sensitivity: PERSONAL</a></p></td>
                                 </tr>
                                 </tbody>
                             </table>
