@@ -8,6 +8,9 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import org.springdoc.core.annotations.ParameterObject
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.http.MediaType.APPLICATION_JSON_VALUE
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.validation.annotation.Validated
@@ -93,4 +96,21 @@ class SyncPropertyContainerResource(
     @PathVariable
     id: UUID,
   ): PropertyContainerDto = propertyContainerService.getById(id)
+
+  @GetMapping("/ids")
+  @Operation(
+    summary = "Get a page of all property container ids, for reconciliation",
+    description = "Used by the NOMIS sync to page through every DPS property container id, to reconcile Nomis " +
+      "records against what DPS holds. Ids are returned in a stable order so pages do not overlap or skip " +
+      "entries as long as no containers are deleted between requests. Requires role ROLE_PRISONER_PROPERTY__SYNC.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Page of property container ids returned"),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__SYNC role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun getAllIds(
+    @ParameterObject
+    pageable: Pageable,
+  ): Page<UUID> = propertyContainerService.getAllIds(pageable)
 }

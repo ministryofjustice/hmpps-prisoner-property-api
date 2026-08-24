@@ -1,5 +1,7 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain
 
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.EntityGraph
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
@@ -102,6 +104,13 @@ interface PropertyContainerRepository :
 
   /** As above, excluding a given container (so a container amending its own seal does not clash with itself). */
   fun existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot(currentSealNumber: String, id: UUID): Boolean
+
+  /**
+   * A page of every property container id, ordered by id for a stable, deterministic sequence across pages.
+   * Used by the NOMIS sync reconciliation to iterate all DPS containers without loading their full detail.
+   */
+  @Query("select c.id from PropertyContainer c order by c.id")
+  fun findAllIds(pageable: Pageable): Page<UUID>
 }
 
 /** Projection for [PropertyContainerRepository.countContainersByLocation]: a location id and its container count. */

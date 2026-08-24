@@ -315,6 +315,42 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .expectStatus().isForbidden
   }
 
+  @Test
+  fun `returns a page of all container ids`() {
+    val first = upsert(request(sealMark = "SEAL1")).dpsId
+    upsert(request(sealMark = "SEAL2")).dpsId
+
+    getIds(size = 1, page = 0)
+      .jsonPath("$.totalElements").isEqualTo(2)
+      .jsonPath("$.totalPages").isEqualTo(2)
+      .jsonPath("$.content.length()").isEqualTo(1)
+      .jsonPath("$.content[0]]").isEqualTo(first)
+      .returnResult().responseBody!!
+  }
+
+  @Test
+  fun `returns unauthorized for ids when no token is presented`() {
+    webTestClient.get().uri("/sync/property-containers/ids")
+      .exchange()
+      .expectStatus().isUnauthorized
+  }
+
+  @Test
+  fun `returns forbidden for ids without the sync role`() {
+    webTestClient.get().uri("/sync/property-containers/ids")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isForbidden
+  }
+
+  private fun getIds(size: Int = 20, page: Int = 0) = webTestClient
+    .get()
+    .uri("/sync/property-containers/ids?page={page}&size={size}", page, size)
+    .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+    .exchange()
+    .expectStatus().isOk
+    .expectBody()
+
   private fun upsert(request: SyncPropertyContainerRequest): SyncPropertyContainerResponse = webTestClient.post()
     .uri("/sync/property-containers/upsert")
     .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))

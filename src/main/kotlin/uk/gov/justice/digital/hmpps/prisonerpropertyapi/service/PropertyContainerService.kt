@@ -339,6 +339,10 @@ class PropertyContainerService(
     .map(PropertyContainerDto::from)
     .orElseThrow { PropertyContainerNotFoundException(id) }
 
+  /** A page of every property container id, for the NOMIS sync to reconcile its records against DPS. */
+  @Transactional(readOnly = true)
+  fun getAllIds(pageable: Pageable): Page<UUID> = repository.findAllIds(pageable)
+
   /** A container's full history, newest event first. Throws [PropertyContainerNotFoundException] if the container does not exist. */
   @Transactional(readOnly = true)
   fun getEvents(id: UUID): List<PropertyEventDto> {
