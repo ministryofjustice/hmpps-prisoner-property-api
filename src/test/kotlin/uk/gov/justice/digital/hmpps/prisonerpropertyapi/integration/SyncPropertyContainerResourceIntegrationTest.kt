@@ -324,8 +324,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.totalElements").isEqualTo(2)
       .jsonPath("$.totalPages").isEqualTo(2)
       .jsonPath("$.content.length()").isEqualTo(1)
-      .jsonPath("$.content[0]]").isEqualTo(first)
-      .returnResult().responseBody!!
+      .jsonPath("$.content[0]").isEqualTo(first)
   }
 
   @Test
