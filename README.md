@@ -130,6 +130,7 @@ same list is published on the actuator `/info` payload, which is how the front e
 | `POST /upsert` | SYNC | Create or update a container from an ongoing NOMIS change (raises a domain event) |
 | `POST /migrate` | SYNC | Bulk-migrate a container from NOMIS (raises no domain event) |
 | `GET /{id}` | SYNC | Read a synced container by DPS id, for reconciliation |
+| `GET /ids` | SYNC | Page through every DPS container id, in a stable order, to reconcile against NOMIS |
 
 ### NOMIS synchronisation
 
@@ -157,7 +158,8 @@ NOMIS sync services above.
 
 | Doc | For |
 | --- | --- |
-| [Business overview](docs/business-overview.md) | What the service does and why, in plain English. Start here. |
+| [Getting started](docs/getting-started.md) | **New to the project? Start here.** How the two repos fit together, and the state model behind property containers. |
+| [Business overview](docs/business-overview.md) | What the service does and why, in plain English. |
 | [Architecture](docs/architecture.md) | The whole service — both repos, diagrams, messaging, domain model. |
 | [Technical implementation](docs/technical-implementation.md) | This API's internals: packages, patterns, dependencies. |
 | [Establishment summary counts](docs/establishment-summary-counts.md) | How the summary tiles are counted. |

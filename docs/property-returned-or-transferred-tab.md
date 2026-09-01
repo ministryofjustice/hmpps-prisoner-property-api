@@ -1,8 +1,10 @@
 # "Property returned or transferred" tab
 
-> **Status: built and live** (MAPB-677). This document was written as a roadmap while the tab was still a
-> design; it now records what was built and, more usefully, how each of the open questions was answered.
-> The answers are the interesting part — several went the opposite way to the original design.
+> **Status: built and live** (MAPB-677) — *point-in-time record, last reviewed 1 September 2026.* This
+> document was written as a roadmap while the tab was still a design; it now records what was built and,
+> more usefully, how each of the open questions was answered. The answers are the interesting part —
+> several went the opposite way to the original design. It is not maintained as the tab changes; for
+> current state read the code it names.
 
 ## Purpose
 
