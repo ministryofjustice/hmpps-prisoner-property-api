@@ -1,8 +1,7 @@
 # Getting started — a developer's guide to the prisoner property service
 
 **Who this is for:** you have just joined the project and have both repos checked out. This guide
-takes you from "what is this service" to understanding the one thing that confuses everybody —
-**why the status on the screen is not the status in the database column**.
+takes you from "what is this service" to understanding the complexities of the status of a container.
 
 It is a guided tour, not a reference. Where a reference already exists it links out rather than
 repeating it: [architecture.md](architecture.md) for the diagrams and messaging topology,
@@ -53,11 +52,6 @@ Follow a single action all the way through: *staff move a container to a differe
 Two things in that list are the house style, and section 6 explains why both matter:
 **every write appends an event and then refreshes derived state**, and
 **services never publish — resources do.**
-
-> A trap worth knowing early: the API *also* has a dedicated `POST /property-containers/{id}/move`
-> endpoint, but **the UI does not call it** — a location change goes through `updateContainer` / `PUT`,
-> which appends the same `MOVED` event. If you are tracing a move from the front end, follow `update()`,
-> not `move()`.
 
 ---
 
@@ -269,7 +263,7 @@ derive it the same way.
 
 ---
 
-## 6. Five things that will bite you
+## 6. Four key things to watch out for
 
 1. **Every write path must call `refreshDerivedState()`** after mutating events or removal state.
    Forgetting it compiles, passes its own unit test, and silently breaks the establishment list and the
@@ -282,12 +276,7 @@ derive it the same way.
 
 3. **`statusFor` and `persistedStatusesReadingAs` are inverses.** See 4.4.
 
-4. **The API has no active-prison gate on writes.** The per-prison rollout gate is enforced in the
-   **UI only**; `ActiveAgenciesService.isActive()` has no production callers, and the API's write
-   endpoints are gated on `ROLE_PRISONER_PROPERTY__RW` alone. A known gap, tracked in
-   [property-snags.md](property-snags.md) — don't assume the API is protecting you.
-
-5. **A removed container's seal number is freed for re-use.** Uniqueness is checked only against
+4**A removed container's seal number is freed for re-use.** Uniqueness is checked only against
    containers where `removal_outcome is null`. Two containers can therefore share a seal if one has
    left active storage.
 
