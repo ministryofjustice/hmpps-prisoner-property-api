@@ -1,5 +1,12 @@
 # Property snag issues — tracking
 
+> **Point-in-time record — last reviewed 1 September 2026.** This is a working backlog, not a
+> description of how the service behaves today. **Status** columns and PR links were accurate when
+> written and are not kept in step with `main`; check the tickets and git history before relying on
+> any row. The lasting value here is the *reasoning* recorded against each item. For current state see
+> [architecture.md](architecture.md), [technical-implementation.md](technical-implementation.md) and
+> [getting-started.md](getting-started.md).
+
 Backlog for the **[MAPB-709](https://dsdmoj.atlassian.net/browse/MAPB-709) — Property snag issues**
 epic: bugs, an establishment-vs-prisoner view consistency gap, and a few enhancements found in testing
 and review. All ten items from the original batch are implemented; a second round (MAPB-725 to MAPB-727, then

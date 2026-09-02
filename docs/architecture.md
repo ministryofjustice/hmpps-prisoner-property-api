@@ -4,7 +4,8 @@
 (`hmpps-prisoner-property-ui`) — and everything they talk to. This is the only architecture document;
 each repo's technical doc describes its own internals and links back here for the diagrams.
 
-**Related docs:** [Business overview](business-overview.md) (what the service does and why) ·
+**Related docs:** [Getting started](getting-started.md) (new to the project? start there) ·
+[Business overview](business-overview.md) (what the service does and why) ·
 [API technical implementation](technical-implementation.md) ·
 [UI technical implementation](https://github.com/ministryofjustice/hmpps-prisoner-property-ui/blob/main/docs/technical-implementation.md) ·
 [API README](../README.md) (endpoint table, domain model, tech stack, run/deploy)
@@ -59,7 +60,7 @@ flowchart LR
     api -- "publishes<br/>container.created / updated" --> events
     events -- "prisoner.received / released" --> api
     events --> nomissync
-    nomissync -- "/sync · /migrate" --> api
+    nomissync -- "/sync · /migrate · reconcile" --> api
 
     classDef mine fill:#d8eeff,stroke:#1d70b8,color:#0b0c0c
     class ui,api,db mine
@@ -83,7 +84,10 @@ Two things this diagram is deliberately explicit about:
 
 - **This service never calls NOMIS, and NOMIS never calls it directly.** The two are kept in step by
   separate sync/migration services, which react to our published events and call our `/sync` endpoints.
-  That decoupling is why NOMIS appears only at the far edge.
+  That decoupling is why NOMIS appears only at the far edge. Traffic runs three ways over `/sync`:
+  `upsert` for an ongoing NOMIS change, `migrate` for the bulk initial load, and a read pair
+  (`GET /ids` then `GET /{id}`) that lets the sync service page through every DPS container and
+  reconcile it against what NOMIS holds.
 - **The UI does not call Locations Inside Prison.** Storage locations reach the front end only through
   the API. It is a natural wrong assumption, so it is worth stating.
 

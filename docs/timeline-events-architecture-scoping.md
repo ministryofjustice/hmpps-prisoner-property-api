@@ -2,10 +2,19 @@
 
 > ## ⚠️ Superseded — historical record only
 >
+> *Written before the timeline work; last reviewed 1 September 2026.*
+>
 > This was a decision aid written *before* the timeline work. Most of what it proposes has since been
-> built, and **some of its current-state claims are now false** — it says there is no prison-api /
-> movements client (§4.3), but `client/PrisonApiClient.kt` exists and powers the timeline's movement
-> items. Do not read this as a description of how things work today.
+> built, and **several of its current-state claims are now false**:
+>
+> - §4.3 says there is no prison-api / movements client. `client/PrisonApiClient.kt` exists and powers
+>   the timeline's movement items.
+> - §2 lists `PropertyEventType` as having **12 values**. There are now **15** — `DIED_IN_CUSTODY`,
+>   `REMOVED` and `REACTIVATED` were added after this was written.
+> - §2 says `ActiveAgenciesService.setActive` "evicts the cache". There is no cache; the rollout flag is
+>   deliberately read live (see [technical-implementation.md](technical-implementation.md)).
+>
+> Do not read this as a description of how things work today.
 >
 > It is kept because it still explains **why** the timeline was built the way it was, and records the
 > options that were rejected. For current state see [architecture.md](architecture.md) and
