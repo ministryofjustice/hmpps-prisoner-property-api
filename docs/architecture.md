@@ -520,6 +520,7 @@ API refuses it:
 | Rollout console | `PRISONERPROP__ADMIN` | `ROLE_PRISONER_PROPERTY__ADMIN` |
 | Manage storage locations | `PRISONERPROP__LOCATION_ADMIN` | `ROLE_PRISONER_PROPERTY__LOCATION_ADMIN` |
 | NOMIS sync | *(n/a — service to service)* | `ROLE_PRISONER_PROPERTY__SYNC` |
+| Subject access request | *(n/a — the SAR tool, not this service's UI)* | `ROLE_SAR_DATA_ACCESS` |
 
 **Rollout** is the `active_agency` flag. A prison is either managing property in DPS or in NOMIS, never
 both — so the UI blocks write journeys for staff whose active caseload is a prison that isn't switched
