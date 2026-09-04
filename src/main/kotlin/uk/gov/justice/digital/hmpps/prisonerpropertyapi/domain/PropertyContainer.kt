@@ -23,8 +23,13 @@ import java.util.UUID
 @Table(name = "property_container")
 @NamedEntityGraph(name = "PropertyContainer.withEvents", attributeNodes = [NamedAttributeNode("events")])
 class PropertyContainer(
+  /**
+   * The prisoner this container belongs to. A `var` because a NOMIS prisoner-number merge reassigns it:
+   * when two numbers for the same person are merged, the retired one is deleted from NOMIS and everything
+   * held against it moves to the survivor. Nothing else ever changes it.
+   */
   @Column(name = "prisoner_number", nullable = false)
-  val prisonerNumber: String,
+  var prisonerNumber: String,
 
   @Column(name = "prison_id", nullable = false)
   var prisonId: String,

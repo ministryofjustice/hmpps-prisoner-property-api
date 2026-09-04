@@ -33,13 +33,19 @@ object PropertyContainerEventFactory {
   /**
    * Event for a change originating in DPS (staff write or an internal event handler such as prisoner
    * received/released) - these are DPS-side changes, not NOMIS property syncs, so they are sourced as DPS.
+   *
+   * [additional] carries anything the change itself needs a subscriber to know beyond the container id.
+   * A prisoner-number merge uses it for `removedNomsNumber`: the envelope's own `prisonerNumber` is the
+   * *new* owner, so without it a subscriber holding data keyed on the old number has nothing to re-key
+   * from - and no event is ever published against the retired number itself.
    */
   fun changeEvent(
     eventType: PropertyDomainEventType,
     dpsId: UUID,
     prisonerNumber: String,
     changedFields: List<String>?,
-  ): HmppsDomainEvent = event(eventType, dpsId, prisonerNumber, PropertyEventSource.DPS, CHANGE_DESCRIPTION, changedFields)
+    additional: Map<String, Any?> = emptyMap(),
+  ): HmppsDomainEvent = event(eventType, dpsId, prisonerNumber, PropertyEventSource.DPS, CHANGE_DESCRIPTION, changedFields, additional)
 
   private fun event(
     eventType: PropertyDomainEventType,
