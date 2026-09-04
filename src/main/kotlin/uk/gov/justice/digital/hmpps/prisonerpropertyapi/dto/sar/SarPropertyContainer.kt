@@ -1,10 +1,7 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sar
 
 import io.swagger.v3.oas.annotations.media.Schema
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import java.time.LocalDate
 import java.time.LocalDateTime
 
@@ -30,14 +27,14 @@ data class SarPropertyContainer(
   @Schema(description = "Prison number of the prisoner whose property this is", example = "A1234AA")
   val prisonerNumber: String,
 
-  @Schema(description = "The kind of container", example = "STANDARD")
-  val containerType: ContainerType,
+  @Schema(description = "The kind of container", example = "Standard property")
+  val containerType: String,
 
   @Schema(description = "Prison holding the container", example = "LEI")
   val prisonId: String,
 
-  @Schema(description = "The container's current status", example = "STORED")
-  val status: ContainerStatus,
+  @Schema(description = "The container's current status", example = "In storage")
+  val status: String,
 
   @Schema(description = "The container's current seal number", example = "SEAL12345", nullable = true)
   val sealNumber: String?,
@@ -51,8 +48,8 @@ data class SarPropertyContainer(
   @Schema(description = "Date the container is proposed for disposal, if one has been set", example = "2026-09-15", nullable = true)
   val proposedDisposalDate: LocalDate?,
 
-  @Schema(description = "Why the container left active storage, if it has", example = "RETURNED", nullable = true)
-  val removalOutcome: RemovalOutcome?,
+  @Schema(description = "Why the container left active storage, if it has", example = "Returned", nullable = true)
+  val removalOutcome: String?,
 
   @Schema(description = "Date the container left active storage, if it has", example = "2026-09-20", nullable = true)
   val removalDate: LocalDate?,
@@ -67,14 +64,14 @@ data class SarPropertyContainer(
      */
     fun from(container: PropertyContainer) = SarPropertyContainer(
       prisonerNumber = container.prisonerNumber,
-      containerType = container.containerType,
+      containerType = container.containerType.sarLabel,
       prisonId = container.prisonId,
-      status = container.currentStatus(),
+      status = container.currentStatus().sarLabel,
       sealNumber = container.currentSealNumber,
       createdDateTime = container.createDateTime,
       createdByUsername = container.createdByUserId,
       proposedDisposalDate = container.proposedDisposalDate,
-      removalOutcome = container.removalOutcome,
+      removalOutcome = container.removalOutcome?.sarLabel,
       removalDate = container.removalDate,
       events = container.events.sortedBy { it.eventDateTime }.map { SarPropertyEvent.from(it) },
     )

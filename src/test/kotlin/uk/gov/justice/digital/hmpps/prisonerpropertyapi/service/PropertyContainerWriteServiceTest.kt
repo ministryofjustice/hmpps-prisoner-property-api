@@ -918,7 +918,7 @@ class PropertyContainerWriteServiceTest {
   }
 
   private fun stubSaveAssigningId() {
-    whenever(repository.save(any())).thenAnswer { invocation ->
+    whenever(repository.save(any<PropertyContainer>())).thenAnswer { invocation ->
       (invocation.arguments[0] as PropertyContainer).apply { if (id == null) id = UUID.randomUUID() }
     }
   }

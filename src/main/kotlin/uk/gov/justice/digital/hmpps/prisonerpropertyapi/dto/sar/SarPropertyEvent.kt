@@ -1,10 +1,7 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sar
 
 import io.swagger.v3.oas.annotations.media.Schema
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -19,11 +16,14 @@ import java.util.UUID
  * Codes and usernames are carried raw, each in its own attribute, and resolved to names by the SAR template
  * helpers (`getPrisonName`, `getLocationNameByDpsId`, `getUserLastName`) at render time - the service must not
  * resolve them itself, because the resulting names are data owned by other services.
+ *
+ * Enum codes are the exception: they mean nothing outside this service, so they are decoded here to the
+ * wording in [sarLabel] rather than disclosed raw.
  */
 @Schema(description = "A single event in a property container's history")
 data class SarPropertyEvent(
-  @Schema(description = "What happened to the container", example = "MOVED")
-  val eventType: PropertyEventType,
+  @Schema(description = "What happened to the container", example = "Moved to a different storage location")
+  val eventType: String,
 
   @Schema(description = "When the event happened")
   val eventDateTime: LocalDateTime,
@@ -43,8 +43,8 @@ data class SarPropertyEvent(
   @Schema(description = "Internal location the container moved to, for move events", example = "22222222-2222-2222-2222-222222222222", nullable = true)
   val toLocationId: UUID?,
 
-  @Schema(description = "Whether the container moved to a location inside the prison or to the offsite Branston warehouse", example = "INTERNAL", nullable = true)
-  val toStorageLocationType: StorageLocationType?,
+  @Schema(description = "Whether the container moved to a location inside the prison or to the offsite national store", example = "In the establishment", nullable = true)
+  val toStorageLocationType: String?,
 
   @Schema(description = "Prison the container moved from, for transfer events", example = "LEI", nullable = true)
   val fromPrisonId: String?,
@@ -52,8 +52,8 @@ data class SarPropertyEvent(
   @Schema(description = "Prison the container moved to, for transfer events", example = "MDI", nullable = true)
   val toPrisonId: String?,
 
-  @Schema(description = "The container's type as at the time of this event", example = "STANDARD")
-  val containerType: ContainerType,
+  @Schema(description = "The container's type as at the time of this event", example = "Standard property")
+  val containerType: String,
 
   @Schema(
     description = "Seal number of the container this one was combined into, or of the matching record at the " +
@@ -66,17 +66,17 @@ data class SarPropertyEvent(
 ) {
   companion object {
     fun from(event: PropertyEvent) = SarPropertyEvent(
-      eventType = event.eventType,
+      eventType = event.eventType.sarLabel,
       eventDateTime = event.eventDateTime,
       eventDate = event.eventDate,
       eventUsername = event.eventUserId,
       sealNumber = event.sealNumber,
       fromLocationId = event.fromInternalLocationId,
       toLocationId = event.toInternalLocationId,
-      toStorageLocationType = event.toStorageLocationType,
+      toStorageLocationType = event.toStorageLocationType?.sarLabel,
       fromPrisonId = event.fromPrisonId,
       toPrisonId = event.toPrisonId,
-      containerType = event.containerType,
+      containerType = event.containerType.sarLabel,
       relatedContainerSealNumber = event.relatedContainerSealNumber,
     )
   }
