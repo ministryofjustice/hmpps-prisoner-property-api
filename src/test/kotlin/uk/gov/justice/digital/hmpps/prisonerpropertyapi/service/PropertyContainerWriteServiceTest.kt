@@ -1,5 +1,6 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 
+import com.microsoft.applicationinsights.TelemetryClient
 import jakarta.validation.ValidationException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -7,6 +8,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.eq
+import org.mockito.kotlin.isNull
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.times
@@ -37,7 +40,8 @@ class PropertyContainerWriteServiceTest {
 
   private val repository = mock<PropertyContainerRepository>()
   private val locationsClient = mock<LocationsClient>()
-  private val service = PropertyContainerWriteService(repository, locationsClient)
+  private val telemetryClient = mock<TelemetryClient>()
+  private val service = PropertyContainerWriteService(repository, locationsClient, telemetryClient)
 
   @BeforeEach
   fun stubLocationsResolveByDefault() {
@@ -836,6 +840,35 @@ class PropertyContainerWriteServiceTest {
 
     assertThat(secondCallEvents).isEmpty()
     assertThat(container.events.count { it.eventType == PropertyEventType.DIED_IN_CUSTODY }).isEqualTo(1)
+  }
+
+  @Test
+  fun `a merge moves every container to the retained number and raises one event each`() {
+    val first = sourceContainer("A9999ZZ", "SEAL1")
+    val second = sourceContainer("A9999ZZ", "SEAL2")
+    whenever(repository.findByPrisonerNumber("A9999ZZ")).thenReturn(listOf(first, second))
+
+    val events = service.prisonerMerged(retainedPrisonerNumber = "A1234BC", removedPrisonerNumber = "A9999ZZ")
+
+    assertThat(first.prisonerNumber).isEqualTo("A1234BC")
+    assertThat(second.prisonerNumber).isEqualTo("A1234BC")
+    assertThat(events).hasSize(2)
+    assertThat(events.map { it.prisonerNumber }).containsOnly("A1234BC")
+    assertThat(events.map { it.additionalInformation?.get("removedNomsNumber") }).containsOnly("A9999ZZ")
+    assertThat(events.map { it.additionalInformation?.get("changedFields") }).containsOnly(listOf("prisonerNumber"))
+  }
+
+  @Test
+  fun `a merge for a number holding no property does nothing and raises nothing`() {
+    whenever(repository.findByPrisonerNumber("A9999ZZ")).thenReturn(emptyList())
+
+    val events = service.prisonerMerged(retainedPrisonerNumber = "A1234BC", removedPrisonerNumber = "A9999ZZ")
+
+    assertThat(events).isEmpty()
+    verify(repository, never()).save(any())
+    // The redelivery path must still leave a trace, or it is indistinguishable from the handler not running.
+    verify(telemetryClient).trackEvent(eq("prison-property-merge-no-op"), any(), isNull())
+    verify(telemetryClient, never()).trackEvent(eq("prison-property-merge"), any(), isNull())
   }
 
   private fun containerAt(prisonId: String, seal: String): PropertyContainer {

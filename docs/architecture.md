@@ -4,7 +4,8 @@
 (`hmpps-prisoner-property-ui`) — and everything they talk to. This is the only architecture document;
 each repo's technical doc describes its own internals and links back here for the diagrams.
 
-**Related docs:** [Business overview](business-overview.md) (what the service does and why) ·
+**Related docs:** [Getting started](getting-started.md) (new to the project? start there) ·
+[Business overview](business-overview.md) (what the service does and why) ·
 [API technical implementation](technical-implementation.md) ·
 [UI technical implementation](https://github.com/ministryofjustice/hmpps-prisoner-property-ui/blob/main/docs/technical-implementation.md) ·
 [API README](../README.md) (endpoint table, domain model, tech stack, run/deploy)
@@ -57,9 +58,9 @@ flowchart LR
     ui --> deps
     api --> deps
     api -- "publishes<br/>container.created / updated" --> events
-    events -- "prisoner.received / released" --> api
+    events -- "prisoner.received / released / merged" --> api
     events --> nomissync
-    nomissync -- "/sync · /migrate" --> api
+    nomissync -- "/sync · /migrate · reconcile" --> api
 
     classDef mine fill:#d8eeff,stroke:#1d70b8,color:#0b0c0c
     class ui,api,db mine
@@ -83,7 +84,10 @@ Two things this diagram is deliberately explicit about:
 
 - **This service never calls NOMIS, and NOMIS never calls it directly.** The two are kept in step by
   separate sync/migration services, which react to our published events and call our `/sync` endpoints.
-  That decoupling is why NOMIS appears only at the far edge.
+  That decoupling is why NOMIS appears only at the far edge. Traffic runs three ways over `/sync`:
+  `upsert` for an ongoing NOMIS change, `migrate` for the bulk initial load, and a read pair
+  (`GET /ids` then `GET /{id}`) that lets the sync service page through every DPS container and
+  reconcile it against what NOMIS holds.
 - **The UI does not call Locations Inside Prison.** Storage locations reach the front end only through
   the API. It is a natural wrong assumption, so it is worth stating.
 
@@ -253,7 +257,7 @@ flowchart LR
         queue{{"prisonerproperty<br/>SQS (+ DLQ)"}}
         listener["PrisonerEventListener"]
         write["PropertyContainerWriteService"]
-        topic -- "filter:<br/>prisoner.received<br/>prisoner.released" --> queue --> listener --> write
+        topic -- "filter:<br/>prisoner.received<br/>prisoner.released<br/>prisoner.merged" --> queue --> listener --> write
     end
 
     subgraph out["Outbound — telling everyone else"]
@@ -280,7 +284,20 @@ infer origin from the payload.
 transfer out. `prison-offender-events.prisoner.released` flags property due for return — but only for
 reason `RELEASED`, since the same event also fires for court, temporary absence and transfers. A death
 in custody arrives as a release too, distinguished only by NOMIS movement reason code `DEC`, and is
-recorded as a distinct event so the history reads correctly. Any other event type is logged and ignored.
+recorded as a distinct event so the history reads correctly.
+
+`prison-offender-events.prisoner.merged` moves every container from the retired prisoner number to the
+surviving one. NOMIS merges two numbers when the same person is held under both; the oldest survives and
+the newer is deleted outright, so anything left under it becomes unreachable. Containers are independent
+per person, so both sets simply coexist under the survivor — there is nothing to reconcile — and removed
+containers move too, since their history belongs to the person rather than to active storage. **No
+`PropertyEvent` is appended**: every `PropertyEventType` carries a `ContainerStatus`, so a merge event
+would overwrite the container's derived status, and `receivingPrison()` and `isAlreadyDueForTransferOut`
+both read the latest event unfiltered, so it would also blank `receivingPrisonId` and break the received
+handler's idempotency guard. The merge is a column change; the record of it is `removedNomsNumber` on the
+resulting `.updated` event.
+
+Any other event type is logged and ignored.
 
 ### The payload
 
@@ -328,6 +345,7 @@ filters on `changedFields` must therefore match on the field it cares about, not
 | update / move / dispose / remove | one `.updated` — or **none**, when the write changed nothing observable |
 | combine | one `.created` for the new container **plus one `.updated` per source**, each naming its own `dpsId` |
 | prisoner received / released / died | one `.updated` per container actually changed; none for containers already in that state |
+| prisoner merged | one `.updated` per container moved, `changedFields: ["prisonerNumber"]` and `removedNomsNumber` in `additionalInformation`; none when the retired number held nothing |
 | sync upsert | one `.created` or `.updated`, `source: NOMIS`; none when the snapshot changed nothing |
 | sync migrate | **none, ever** — bulk replay must not flood the topic |
 
@@ -502,6 +520,7 @@ API refuses it:
 | Rollout console | `PRISONERPROP__ADMIN` | `ROLE_PRISONER_PROPERTY__ADMIN` |
 | Manage storage locations | `PRISONERPROP__LOCATION_ADMIN` | `ROLE_PRISONER_PROPERTY__LOCATION_ADMIN` |
 | NOMIS sync | *(n/a — service to service)* | `ROLE_PRISONER_PROPERTY__SYNC` |
+| Subject access request | *(n/a — the SAR tool, not this service's UI)* | `ROLE_SAR_DATA_ACCESS` |
 
 **Rollout** is the `active_agency` flag. A prison is either managing property in DPS or in NOMIS, never
 both — so the UI blocks write journeys for staff whose active caseload is a prison that isn't switched

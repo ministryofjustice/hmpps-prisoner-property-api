@@ -49,6 +49,11 @@ role, and keeping them apart is what stops staff endpoints and machine endpoints
 > **Convention (enforced by tests):** every endpoint needs full springdoc `@Operation`/`@ApiResponse`
 > annotations **and** a `@PreAuthorize` role, or `OpenApiDocsTest` / `ResourceSecurityTest` fail the build.
 
+`SyncPropertyContainerResource` also serves reconciliation: `GET /sync/property-containers/ids` pages
+through every container id via `PropertyContainerRepository.findAllIds`, ordered by id so pages neither
+overlap nor skip. It returns ids only — the NOMIS sync fetches detail per id from `GET /{id}` — so the
+reconciliation sweep never loads events for the whole estate.
+
 ---
 
 ## Services — three paths, one event factory
@@ -150,6 +155,30 @@ Disposal is deliberately excluded from the mirror: it is time-based, so a contai
 no write occurring. `V9__reset_denormalised_disposal_status.sql` exists precisely because it *was* once
 denormalised and went stale.
 
+### History reads as at each event, not as the container is now
+
+Derived state answers "what is this container *now*". The history and timeline answer a different
+question — "what was true *then*" — and must not be built from the live container. A container created as
+`STANDARD` and later changed to `EXCESS` has to read `STANDARD` on the entry recording it being added to
+storage.
+
+So each entry's details are walked forward through the container's events rather than read off the
+container. Two fields on `PropertyEventDto` carry this:
+
+| Field | Source |
+| --- | --- |
+| `containerType` | **Stored** on the event (`property_event.container_type`, added by `V10`). A durable snapshot of the type as at that event. |
+| `previousContainerType` | **Derived at read time** from the preceding event's snapshot, so a type change can be described as "changed from X to Y". |
+
+`previousContainerType` is null when there is no earlier event, and also null when the two agree — which
+is the case for every event predating `V10`, whose backfill gave each event the container's then-current
+type. That suppression is deliberate: without it, migrated history would claim a change from a type to
+itself.
+
+The same walk-forward applies to the seal and the acting establishment, which were already derived this
+way. If you add a new detail to the history, derive it the same way — reading it from the container is
+the bug this section exists to prevent.
+
 ---
 
 ## External dependencies
@@ -204,11 +233,13 @@ leaking a sequence.
 `findById` uses the `PropertyContainer.withEvents` entity graph: deriving state touches every event, so
 loading them lazily would be an N+1 on every read.
 
-**Schema changes go in a new `V{n}__*.sql` Flyway migration — never an entity-only DDL change.** Fourteen
+**Schema changes go in a new `V{n}__*.sql` Flyway migration — never an entity-only DDL change.** Fifteen
 migrations so far (`src/main/resources/db/migration/`); their names describe the change, and reading them
-in order is the fastest way to understand how the model arrived where it is. The last two are instructive:
-`V13` adds a seal snapshot to combine events so history names the right destination even after a reseal,
-and `V14` drops `archived` in favour of the reversible `REMOVED` outcome.
+in order is the fastest way to understand how the model arrived where it is. The last three are
+instructive: `V13` adds a seal snapshot to combine events so history names the right destination even
+after a reseal, `V14` drops `archived` in favour of the reversible `REMOVED` outcome, and `V15` carries
+the `COMMENT ON` data dictionary for every table and column — see the
+[README](../README.md#table-and-column-descriptions) for the sensitivity vocabulary it establishes.
 
 ### The establishment-list query
 
@@ -241,6 +272,6 @@ Full check: `./gradlew check`. See the [README](../README.md) for the rest.
   draft**. It was a decision aid written before the timeline work; most of what it proposes is now built,
   and some of its current-state claims are false (it says there is no prison-api client — there is). It is
   kept for the *why*. Do not read it as current state.
-- `server/routes/index.test.ts` in the UI is a single ~2,500-line route test, even though the routes
+- `server/routes/index.test.ts` in the UI is a single ~3,000-line route test, even though the routes
   themselves were split into one file per journey. Noted here because someone crossing over from this repo
   will go looking for `establishmentList.test.ts` and not find it.

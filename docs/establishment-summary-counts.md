@@ -67,7 +67,8 @@ than failing.
 
 ## Where the current-state columns come from
 
-Four of the five tiles read denormalised mirrors on `property_container`:
+Four of the five tiles are answered from denormalised mirrors on `property_container` — between them
+they read just two columns:
 
 | Column | Mirrors | Refreshed by |
 | --- | --- | --- |
