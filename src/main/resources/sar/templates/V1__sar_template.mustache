@@ -3,32 +3,32 @@
 {{#.}}
 <h2>Property container</h2>
 <table class="summary-list">
-<tr><td>Container type</td><td>{{ optionalValue (convertCamelCase containerType) }}</td></tr>
-<tr><td>Seal number</td><td>{{ optionalValue sealNumber }}</td></tr>
-<tr><td>Status</td><td>{{ optionalValue (convertCamelCase status) }}</td></tr>
-<tr><td>Establishment</td><td>{{ optionalValue (getPrisonName prisonId) }}</td></tr>
-<tr><td>Created</td><td>{{ optionalValue (formatDate createdDateTime) }}</td></tr>
-<tr><td>Created by</td><td>{{ getUserLastName createdByUsername }}</td></tr>
-<tr><td>Proposed disposal date</td><td>{{ optionalValue (formatDate proposedDisposalDate) }}</td></tr>
-<tr><td>Reason it left storage</td><td>{{ optionalValue (convertCamelCase removalOutcome) }}</td></tr>
-<tr><td>Date it left storage</td><td>{{ optionalValue (formatDate removalDate) }}</td></tr>
+<tr><td>Type of property</td><td>{{ optionalValue this.containerType }}</td></tr>
+<tr><td>Seal number</td><td>{{ optionalValue this.sealNumber }}</td></tr>
+<tr><td>Status</td><td>{{ optionalValue this.status }}</td></tr>
+<tr><td>Establishment</td><td>{{ optionalValue (getPrisonName this.prisonId) }}</td></tr>
+<tr><td>Sealed into storage</td><td>{{ optionalValue (formatDate this.createdDateTime) }}</td></tr>
+<tr><td>Recorded by</td><td>{{ getUserLastName this.createdByUsername }}</td></tr>
+<tr><td>Proposed disposal date</td><td>{{ optionalValue (formatDate this.proposedDisposalDate) }}</td></tr>
+<tr><td>Reason it left storage</td><td>{{ optionalValue this.removalOutcome }}</td></tr>
+<tr><td>Date it left storage</td><td>{{ optionalValue (formatDate this.removalDate) }}</td></tr>
 </table>
 <h3>History</h3>
 {{^events}}<p>No Data Held</p>{{/events}}
 {{#events}}
 <table class="summary-list">
-<tr><td>What happened</td><td>{{ optionalValue (convertCamelCase eventType) }}</td></tr>
-<tr><td>Date and time</td><td>{{ optionalValue (formatDate eventDateTime) }}</td></tr>
-<tr><td>Date it relates to</td><td>{{ optionalValue (formatDate eventDate) }}</td></tr>
-<tr><td>Recorded by</td><td>{{ getUserLastName eventUsername }}</td></tr>
-<tr><td>Container type at the time</td><td>{{ optionalValue (convertCamelCase containerType) }}</td></tr>
-<tr><td>Seal number</td><td>{{ optionalValue sealNumber }}</td></tr>
-<tr><td>Moved from</td><td>{{ optionalValue (getLocationNameByDpsId fromLocationId) }}</td></tr>
-<tr><td>Moved to</td><td>{{ optionalValue (getLocationNameByDpsId toLocationId) }}</td></tr>
-<tr><td>Where it was stored</td><td>{{ optionalValue (convertCamelCase toStorageLocationType) }}</td></tr>
-<tr><td>Establishment it came from</td><td>{{ optionalValue (getPrisonName fromPrisonId) }}</td></tr>
-<tr><td>Establishment it went to</td><td>{{ optionalValue (getPrisonName toPrisonId) }}</td></tr>
-<tr><td>Seal number of the related container</td><td>{{ optionalValue relatedContainerSealNumber }}</td></tr>
+<tr><td>What happened</td><td>{{ optionalValue this.eventType }}</td></tr>
+<tr><td>Date and time</td><td>{{ optionalValue (formatDate this.eventDateTime) }}</td></tr>
+<tr><td>Date it relates to</td><td>{{ optionalValue (formatDate this.eventDate) }}</td></tr>
+<tr><td>Recorded by</td><td>{{ getUserLastName this.eventUsername }}</td></tr>
+<tr><td>Type of property at the time</td><td>{{ optionalValue this.containerType }}</td></tr>
+<tr><td>Seal number</td><td>{{ optionalValue this.sealNumber }}</td></tr>
+<tr><td>Moved from</td><td>{{ optionalValue (getLocationNameByDpsId this.fromLocationId) }}</td></tr>
+<tr><td>Moved to</td><td>{{ optionalValue (getLocationNameByDpsId this.toLocationId) }}</td></tr>
+<tr><td>Where it was stored</td><td>{{ optionalValue this.toStorageLocationType }}</td></tr>
+<tr><td>Establishment it came from</td><td>{{ optionalValue (getPrisonName this.fromPrisonId) }}</td></tr>
+<tr><td>Establishment it went to</td><td>{{ optionalValue (getPrisonName this.toPrisonId) }}</td></tr>
+<tr><td>Seal number of the related container</td><td>{{ optionalValue this.relatedContainerSealNumber }}</td></tr>
 </table>
 {{/events}}
 {{/.}}
