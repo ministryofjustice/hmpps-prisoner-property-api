@@ -1,5 +1,6 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 
+import com.microsoft.applicationinsights.TelemetryClient
 import jakarta.validation.ValidationException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -23,6 +24,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.ContainerState
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyContainerEventFactory
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyDomainEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyTelemetry
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.changedFieldsSince
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -41,6 +43,7 @@ import java.util.UUID
 class PropertyContainerWriteService(
   private val repository: PropertyContainerRepository,
   private val locationsClient: LocationsClient,
+  private val telemetryClient: TelemetryClient,
 ) {
 
   /**
@@ -499,7 +502,16 @@ class PropertyContainerWriteService(
   @Transactional
   fun prisonerMerged(retainedPrisonerNumber: String, removedPrisonerNumber: String): List<HmppsDomainEvent> {
     val containers = repository.findByPrisonerNumber(removedPrisonerNumber)
-    if (containers.isEmpty()) return emptyList()
+    if (containers.isEmpty()) {
+      // The retired number held no property - the common case, and also every redelivery of a merge we
+      // have already handled. Silent otherwise, and indistinguishable from the handler never running.
+      telemetryClient.trackEvent(
+        PropertyTelemetry.MERGE_NO_OP,
+        mapOf("NOMS-MERGE-FROM" to removedPrisonerNumber, "NOMS-MERGE-TO" to retainedPrisonerNumber),
+        null,
+      )
+      return emptyList()
+    }
 
     val events = containers.map { container ->
       val before = ContainerState.of(container)
@@ -514,10 +526,19 @@ class PropertyContainerWriteService(
       )
     }
 
-    // Logged rather than sent to App Insights: this service has no TelemetryClient and no audit queue -
-    // its record of what happened is the domain events plus the log. The events carry removedNomsNumber,
-    // so the merge is reconstructable from the domain-events archive without this line.
     log.info("Prisoner merge {} -> {} moved {} container(s)", removedPrisonerNumber, retainedPrisonerNumber, containers.size)
+    // A merge is a bulk reassignment driven by NOMIS with no staff member behind it, so the per-container
+    // events do not on their own say "a merge happened" - only that a lot of containers changed owner at
+    // once. This is the record of the merge itself, and how many containers it moved.
+    telemetryClient.trackEvent(
+      PropertyTelemetry.MERGE,
+      mapOf(
+        "NOMS-MERGE-FROM" to removedPrisonerNumber,
+        "NOMS-MERGE-TO" to retainedPrisonerNumber,
+        "containersMoved" to containers.size.toString(),
+      ),
+      null,
+    )
     return events
   }
 
