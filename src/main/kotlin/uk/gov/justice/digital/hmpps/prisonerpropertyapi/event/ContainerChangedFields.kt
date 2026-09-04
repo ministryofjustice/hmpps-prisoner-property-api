@@ -21,6 +21,7 @@ import java.util.UUID
  * it actually cared about. Nothing in a hand-written list makes the omission visible; a diff cannot omit.
  */
 data class ContainerState(
+  val prisonerNumber: String,
   val sealNumber: String?,
   val containerType: ContainerType,
   val status: ContainerStatus,
@@ -33,6 +34,7 @@ data class ContainerState(
 ) {
   companion object {
     fun of(container: PropertyContainer) = ContainerState(
+      prisonerNumber = container.prisonerNumber,
       sealNumber = container.currentSealNumber,
       containerType = container.containerType,
       // The read-time status, not the denormalised currentStatusValue, so this matches what a subscriber
@@ -60,6 +62,9 @@ data class ContainerState(
 fun PropertyContainer.changedFieldsSince(before: ContainerState): List<String> {
   val after = ContainerState.of(this)
   return buildList {
+    // Only a NOMIS prisoner-number merge can move a container between people; every other write path
+    // leaves the owner alone, so this can never fire spuriously.
+    if (after.prisonerNumber != before.prisonerNumber) add("prisonerNumber")
     if (after.sealNumber != before.sealNumber) add("sealNumber")
     if (after.containerType != before.containerType) add("containerType")
     if (after.internalLocationId != before.internalLocationId || after.storageLocationType != before.storageLocationType) {

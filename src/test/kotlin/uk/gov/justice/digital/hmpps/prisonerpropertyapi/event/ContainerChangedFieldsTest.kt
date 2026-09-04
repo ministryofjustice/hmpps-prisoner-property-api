@@ -23,6 +23,19 @@ class ContainerChangedFieldsTest {
   }
 
   @Test
+  fun `a prisoner-number merge reports only the owner`() {
+    val container = storedContainer()
+    val before = ContainerState.of(container)
+
+    container.prisonerNumber = "A9999ZZ"
+    container.refreshDerivedState()
+
+    // A merge moves the container between people and changes nothing else about it - not its status, not
+    // its location, not where it is bound. Anything more in this list means the merge did too much.
+    assertThat(container.changedFieldsSince(before)).containsExactly("prisonerNumber")
+  }
+
+  @Test
   fun `a removal reports the status and location it gives up, not just the outcome`() {
     val container = storedContainer()
     val before = ContainerState.of(container)

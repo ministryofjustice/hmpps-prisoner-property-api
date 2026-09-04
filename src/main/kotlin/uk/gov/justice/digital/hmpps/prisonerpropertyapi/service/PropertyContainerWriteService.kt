@@ -1,6 +1,8 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 
+import com.microsoft.applicationinsights.TelemetryClient
 import jakarta.validation.ValidationException
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
@@ -22,6 +24,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.ContainerState
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyContainerEventFactory
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyDomainEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyTelemetry
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.changedFieldsSince
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -40,6 +43,7 @@ import java.util.UUID
 class PropertyContainerWriteService(
   private val repository: PropertyContainerRepository,
   private val locationsClient: LocationsClient,
+  private val telemetryClient: TelemetryClient,
 ) {
 
   /**
@@ -475,6 +479,70 @@ class PropertyContainerWriteService(
     events.maxByOrNull { it.eventDateTime }?.toPrisonId == newPrisonId
 
   /**
+   * Handle a NOMIS prisoner-number merge: everything held under [removedPrisonerNumber] moves to
+   * [retainedPrisonerNumber].
+   *
+   * NOMIS merges two prisoner numbers when the same person is held under both - typically because
+   * reception booked a returning prisoner in under a new number. The *oldest* number survives; the newer
+   * one is deleted outright and never exists again. Containers are independent per person and nothing
+   * constrains a prisoner to one, so both sets simply coexist under the survivor - there is no conflict to
+   * resolve. **Removed containers move too**: their history belongs to the person, not to active storage.
+   *
+   * No [PropertyEvent] is appended, deliberately. Every [PropertyEventType] carries a [ContainerStatus] as
+   * a constant of the enum, so there is no way to express "an event whose status is whatever the container
+   * already has" - a merge event would overwrite the derived status, silently un-flagging property that is
+   * due for return. Filtering a new type out of [PropertyContainer.baseEventStatus] would not be enough
+   * either: [PropertyContainer.receivingPrison] and [isAlreadyDueForTransferOut] both read the latest event
+   * *unfiltered*, so a merge event would null `receivingPrisonId` (the container vanishes from the
+   * receiving prison's incoming list) and break the received handler's idempotency guard. The merge is
+   * therefore a column change, and the record of it is the outbound domain event's `removedNomsNumber`.
+   *
+   * Idempotent for free: a redelivery finds nothing under the removed number and returns an empty list.
+   */
+  @Transactional
+  fun prisonerMerged(retainedPrisonerNumber: String, removedPrisonerNumber: String): List<HmppsDomainEvent> {
+    val containers = repository.findByPrisonerNumber(removedPrisonerNumber)
+    if (containers.isEmpty()) {
+      // The retired number held no property - the common case, and also every redelivery of a merge we
+      // have already handled. Silent otherwise, and indistinguishable from the handler never running.
+      telemetryClient.trackEvent(
+        PropertyTelemetry.MERGE_NO_OP,
+        mapOf("NOMS-MERGE-FROM" to removedPrisonerNumber, "NOMS-MERGE-TO" to retainedPrisonerNumber),
+        null,
+      )
+      return emptyList()
+    }
+
+    val events = containers.map { container ->
+      val before = ContainerState.of(container)
+      container.prisonerNumber = retainedPrisonerNumber
+      container.refreshDerivedState()
+      PropertyContainerEventFactory.changeEvent(
+        PropertyDomainEventType.CONTAINER_UPDATED,
+        container.id!!,
+        retainedPrisonerNumber,
+        container.changedFieldsSince(before),
+        mapOf("removedNomsNumber" to removedPrisonerNumber),
+      )
+    }
+
+    log.info("Prisoner merge {} -> {} moved {} container(s)", removedPrisonerNumber, retainedPrisonerNumber, containers.size)
+    // A merge is a bulk reassignment driven by NOMIS with no staff member behind it, so the per-container
+    // events do not on their own say "a merge happened" - only that a lot of containers changed owner at
+    // once. This is the record of the merge itself, and how many containers it moved.
+    telemetryClient.trackEvent(
+      PropertyTelemetry.MERGE,
+      mapOf(
+        "NOMS-MERGE-FROM" to removedPrisonerNumber,
+        "NOMS-MERGE-TO" to retainedPrisonerNumber,
+        "containersMoved" to containers.size.toString(),
+      ),
+      null,
+    )
+    return events
+  }
+
+  /**
    * Handle a prisoner being released from custody. Every active container the prisoner still has - at any
    * prison - is flagged due for return; see [flagDueForReturn].
    */
@@ -552,6 +620,7 @@ class PropertyContainerWriteService(
   private companion object {
     /** Event user id recorded for changes driven by an external domain event rather than a member of staff. */
     private const val SYSTEM_USER = "PRISONER_PROPERTY_API"
+    private val log = LoggerFactory.getLogger(PropertyContainerWriteService::class.java)
   }
 }
 

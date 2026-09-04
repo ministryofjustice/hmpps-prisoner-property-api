@@ -17,6 +17,14 @@ object PropertyTelemetry {
   /** An inbound domain event we received but deliberately did nothing with; carries a `reason`. */
   const val PRISONER_EVENT_IGNORED = "prison-property-prisoner-event-ignored"
 
+  /**
+   * A NOMIS prisoner-number merge moved a prisoner's containers onto their surviving number, and the
+   * no-op form for a merge whose retired number held no property (which is also every redelivery).
+   * Key names match non-associations and CSRA so estate-wide merge dashboards line up.
+   */
+  const val MERGE = "prison-property-merge"
+  const val MERGE_NO_OP = "prison-property-merge-no-op"
+
   /** A NOMIS bulk migrate, which raises no domain event by design and is otherwise invisible. */
   const val MIGRATED = "prison-property-migrated"
 
