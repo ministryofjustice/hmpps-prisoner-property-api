@@ -58,7 +58,7 @@ flowchart LR
     ui --> deps
     api --> deps
     api -- "publishes<br/>container.created / updated" --> events
-    events -- "prisoner.received / released" --> api
+    events -- "prisoner.received / released / merged" --> api
     events --> nomissync
     nomissync -- "/sync · /migrate · reconcile" --> api
 
@@ -257,7 +257,7 @@ flowchart LR
         queue{{"prisonerproperty<br/>SQS (+ DLQ)"}}
         listener["PrisonerEventListener"]
         write["PropertyContainerWriteService"]
-        topic -- "filter:<br/>prisoner.received<br/>prisoner.released" --> queue --> listener --> write
+        topic -- "filter:<br/>prisoner.received<br/>prisoner.released<br/>prisoner.merged" --> queue --> listener --> write
     end
 
     subgraph out["Outbound — telling everyone else"]
@@ -284,7 +284,20 @@ infer origin from the payload.
 transfer out. `prison-offender-events.prisoner.released` flags property due for return — but only for
 reason `RELEASED`, since the same event also fires for court, temporary absence and transfers. A death
 in custody arrives as a release too, distinguished only by NOMIS movement reason code `DEC`, and is
-recorded as a distinct event so the history reads correctly. Any other event type is logged and ignored.
+recorded as a distinct event so the history reads correctly.
+
+`prison-offender-events.prisoner.merged` moves every container from the retired prisoner number to the
+surviving one. NOMIS merges two numbers when the same person is held under both; the oldest survives and
+the newer is deleted outright, so anything left under it becomes unreachable. Containers are independent
+per person, so both sets simply coexist under the survivor — there is nothing to reconcile — and removed
+containers move too, since their history belongs to the person rather than to active storage. **No
+`PropertyEvent` is appended**: every `PropertyEventType` carries a `ContainerStatus`, so a merge event
+would overwrite the container's derived status, and `receivingPrison()` and `isAlreadyDueForTransferOut`
+both read the latest event unfiltered, so it would also blank `receivingPrisonId` and break the received
+handler's idempotency guard. The merge is a column change; the record of it is `removedNomsNumber` on the
+resulting `.updated` event.
+
+Any other event type is logged and ignored.
 
 ### The payload
 
@@ -332,6 +345,7 @@ filters on `changedFields` must therefore match on the field it cares about, not
 | update / move / dispose / remove | one `.updated` — or **none**, when the write changed nothing observable |
 | combine | one `.created` for the new container **plus one `.updated` per source**, each naming its own `dpsId` |
 | prisoner received / released / died | one `.updated` per container actually changed; none for containers already in that state |
+| prisoner merged | one `.updated` per container moved, `changedFields: ["prisonerNumber"]` and `removedNomsNumber` in `additionalInformation`; none when the retired number held nothing |
 | sync upsert | one `.created` or `.updated`, `source: NOMIS`; none when the snapshot changed nothing |
 | sync migrate | **none, ever** — bulk replay must not flood the topic |
 

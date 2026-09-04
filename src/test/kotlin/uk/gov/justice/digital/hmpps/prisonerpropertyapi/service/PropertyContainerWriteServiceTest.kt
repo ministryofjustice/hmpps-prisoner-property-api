@@ -838,6 +838,32 @@ class PropertyContainerWriteServiceTest {
     assertThat(container.events.count { it.eventType == PropertyEventType.DIED_IN_CUSTODY }).isEqualTo(1)
   }
 
+  @Test
+  fun `a merge moves every container to the retained number and raises one event each`() {
+    val first = sourceContainer("A9999ZZ", "SEAL1")
+    val second = sourceContainer("A9999ZZ", "SEAL2")
+    whenever(repository.findByPrisonerNumber("A9999ZZ")).thenReturn(listOf(first, second))
+
+    val events = service.prisonerMerged(retainedPrisonerNumber = "A1234BC", removedPrisonerNumber = "A9999ZZ")
+
+    assertThat(first.prisonerNumber).isEqualTo("A1234BC")
+    assertThat(second.prisonerNumber).isEqualTo("A1234BC")
+    assertThat(events).hasSize(2)
+    assertThat(events.map { it.prisonerNumber }).containsOnly("A1234BC")
+    assertThat(events.map { it.additionalInformation?.get("removedNomsNumber") }).containsOnly("A9999ZZ")
+    assertThat(events.map { it.additionalInformation?.get("changedFields") }).containsOnly(listOf("prisonerNumber"))
+  }
+
+  @Test
+  fun `a merge for a number holding no property does nothing and raises nothing`() {
+    whenever(repository.findByPrisonerNumber("A9999ZZ")).thenReturn(emptyList())
+
+    val events = service.prisonerMerged(retainedPrisonerNumber = "A1234BC", removedPrisonerNumber = "A9999ZZ")
+
+    assertThat(events).isEmpty()
+    verify(repository, never()).save(any())
+  }
+
   private fun containerAt(prisonId: String, seal: String): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
