@@ -1,11 +1,13 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 
+import com.microsoft.applicationinsights.TelemetryClient
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonRegisterClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ActiveAgency
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ActiveAgencyRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.AgencyStatusDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyTelemetry
 import java.time.LocalDateTime
 import kotlin.jvm.optionals.getOrNull
 
@@ -18,6 +20,7 @@ import kotlin.jvm.optionals.getOrNull
 class ActiveAgenciesService(
   private val repository: ActiveAgencyRepository,
   private val prisonRegisterClient: PrisonRegisterClient,
+  private val telemetryClient: TelemetryClient,
 ) {
 
   fun getActiveAgencies(): List<String> = repository.findAllByActiveTrue().map { it.agencyId }.sorted()
@@ -54,6 +57,14 @@ class ActiveAgenciesService(
       }
       ?: ActiveAgency(agencyId = agencyId, active = active, updatedAt = LocalDateTime.now(), updatedBy = username)
     val saved = repository.save(agency)
+    // Rollout raises no domain event and wrote no log line, so switching a prison on or off left no
+    // trace anywhere. "When did this prison go live?" is a question that gets asked, and this is the
+    // only place that can answer it.
+    telemetryClient.trackEvent(
+      PropertyTelemetry.PRISON_ROLLOUT_CHANGED,
+      mapOf("prisonId" to saved.agencyId, "active" to saved.active.toString(), "updatedBy" to username),
+      null,
+    )
     val name = prisonRegisterClient.getPrisonNames()[saved.agencyId] ?: saved.agencyId
     return AgencyStatusDto(agencyId = saved.agencyId, name = name, active = saved.active)
   }
