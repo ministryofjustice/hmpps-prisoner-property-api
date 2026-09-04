@@ -86,6 +86,9 @@ All endpoints are JSON and require an HMPPS Auth bearer token. Reads require
 require `ROLE_PRISONER_PROPERTY__SYNC`; the rollout console requires `ROLE_PRISONER_PROPERTY__ADMIN` and
 storage-location management `ROLE_PRISONER_PROPERTY__LOCATION_ADMIN`.
 
+The subject access request endpoints are separate from all of these and require `ROLE_SAR_DATA_ACCESS` —
+see [Subject access requests](#subject-access-requests).
+
 **Property containers** (`/property-containers`)
 
 | Method & path | Role | Description |
@@ -153,6 +156,38 @@ TypeScript/Express/Nunjucks app built from the
 [hmpps-template-typescript](https://github.com/ministryofjustice/hmpps-template-typescript). It consumes
 this API to let staff manage prisoner property, and is the only caller of these endpoints other than the
 NOMIS sync services above.
+
+### Subject access requests
+
+Everything this service stores belongs to a prisoner, so all of it is disclosable in a subject access
+request — see [Table and column descriptions](#table-and-column-descriptions) for why the sensitivity tag
+on an individual column does not change that.
+
+| Method & path | Role | Description |
+| --- | --- | --- |
+| `GET /subject-access-request` | `ROLE_SAR_DATA_ACCESS` | Everything held about one prisoner, optionally within a date range |
+
+The endpoint is not written in this repo. `hmpps-kotlin-spring-boot-starter` registers it automatically
+when a bean implementing `HmppsPrisonSubjectAccessRequestService` is present, and guards it with the role
+above — `PrisonerPropertySubjectAccessRequestService` is that bean. It returns `204` when the prisoner has
+no property and `209` when asked for a probation case reference, which this service never holds.
+
+Two things about it are load-bearing and easy to undo by accident:
+
+- It reads the database directly rather than through `PropertyContainerService`. The product read paths
+  enrich what they return from prisoner-search, prison-register, locations-inside-prison and prison-api,
+  and a SAR response must contain only data this service owns.
+- A date range selects *containers*, not events. A container created before the range but touched inside
+  it is returned with its full history, because a partial history reads as a misleading account of what
+  happened to someone's property.
+
+The response deliberately omits internal ids and the denormalised `current*` columns, and carries prison
+codes, DPS location ids and staff usernames as raw values in dedicated attributes — the SAR report
+template resolves them to names at render time.
+
+Changing what the endpoint returns is not a routine code change: it is governed by the
+[Central SAR Change Control Process](https://dsdmoj.atlassian.net/wiki/spaces/NDSS/pages/6057492803) and
+needs sign-off from the Offender SAR team before it can reach pre-production. See epic MAPB-764.
 
 ## Documentation
 

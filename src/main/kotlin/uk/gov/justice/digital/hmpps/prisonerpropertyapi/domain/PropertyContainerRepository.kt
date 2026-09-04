@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.util.Optional
 import java.util.UUID
 
@@ -19,6 +20,41 @@ interface PropertyContainerRepository :
   override fun findById(id: UUID): Optional<PropertyContainer>
 
   fun findByPrisonerNumber(prisonerNumber: String): List<PropertyContainer>
+
+  /**
+   * Every container belonging to a prisoner that falls within an optional date range, for the subject access
+   * request endpoint. A container is in range when it was created in the range or when any of its events
+   * happened in the range - the date test is an `exists` rather than a condition on the fetch join precisely
+   * so that the events collection is never filtered: once a container is in scope its whole history is
+   * returned, because a partial history reads as a misleading account of what happened to someone's property.
+   *
+   * [from] is inclusive, [to] exclusive - callers pass the start of the day after the requested end date.
+   * Both are optional; a null bound is open-ended (the `cast` is needed for Hibernate to type a null parameter).
+   */
+  @Query(
+    """
+    select c from PropertyContainer c
+    left join fetch c.events
+    where c.prisonerNumber = :prisonerNumber
+    and (
+      (
+        (cast(:from as LocalDateTime) is null or c.createDateTime >= :from)
+        and (cast(:to as LocalDateTime) is null or c.createDateTime < :to)
+      )
+      or exists (
+        select 1 from PropertyEvent e
+        where e.container = c
+        and (cast(:from as LocalDateTime) is null or e.eventDateTime >= :from)
+        and (cast(:to as LocalDateTime) is null or e.eventDateTime < :to)
+      )
+    )
+    """,
+  )
+  fun findSarContent(
+    @Param("prisonerNumber") prisonerNumber: String,
+    @Param("from") from: LocalDateTime?,
+    @Param("to") to: LocalDateTime?,
+  ): List<PropertyContainer>
 
   /**
    * How many containers are currently held in each internal location of a prison, read straight from the

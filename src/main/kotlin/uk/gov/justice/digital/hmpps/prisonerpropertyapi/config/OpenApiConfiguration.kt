@@ -8,6 +8,7 @@ import io.swagger.v3.oas.models.security.SecurityRequirement
 import io.swagger.v3.oas.models.security.SecurityScheme
 import io.swagger.v3.oas.models.servers.Server
 import io.swagger.v3.oas.models.tags.Tag
+import org.springdoc.core.customizers.OpenApiCustomizer
 import org.springframework.boot.info.BuildProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -47,4 +48,21 @@ class OpenApiConfiguration(buildProperties: BuildProperties) {
       ),
     )
     .addSecurityItem(SecurityRequirement().addList("bearer-jwt", listOf("read", "write")))
+
+  /**
+   * The subject access request endpoints come from hmpps-kotlin-spring-boot-starter. They are secured there
+   * with @PreAuthorize, but the library does not add the @SecurityRequirement annotation our own resources
+   * carry, so without this they would appear in the OpenAPI document as though they needed no token.
+   *
+   * Declaring it here rather than relaxing OpenApiDocsTest is deliberate: that test exists to catch an
+   * endpoint of ours shipped without an auth requirement, and it can only keep doing that if it stays strict.
+   */
+  @Bean
+  fun subjectAccessRequestSecurityCustomiser(): OpenApiCustomizer = OpenApiCustomizer { openApi ->
+    openApi.paths
+      ?.filterKeys { it.startsWith("/subject-access-request") }
+      ?.values
+      ?.flatMap { it.readOperations() }
+      ?.forEach { it.addSecurityItem(SecurityRequirement().addList("bearer-jwt")) }
+  }
 }
