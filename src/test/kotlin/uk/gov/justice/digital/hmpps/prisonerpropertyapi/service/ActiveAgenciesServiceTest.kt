@@ -1,5 +1,6 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 
+import com.microsoft.applicationinsights.TelemetryClient
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
@@ -16,7 +17,8 @@ import java.util.Optional
 class ActiveAgenciesServiceTest {
   private val repository: ActiveAgencyRepository = mock()
   private val prisonRegisterClient: PrisonRegisterClient = mock()
-  private val service = ActiveAgenciesService(repository, prisonRegisterClient)
+  private val telemetryClient: TelemetryClient = mock()
+  private val service = ActiveAgenciesService(repository, prisonRegisterClient, telemetryClient)
 
   @Test
   fun `getActiveAgencies returns the active agency ids sorted`() {

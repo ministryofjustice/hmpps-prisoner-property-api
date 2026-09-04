@@ -1,5 +1,6 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 
+import com.microsoft.applicationinsights.TelemetryClient
 import jakarta.validation.ValidationException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -7,6 +8,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.eq
+import org.mockito.kotlin.isNull
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.times
@@ -37,7 +40,8 @@ class PropertyContainerWriteServiceTest {
 
   private val repository = mock<PropertyContainerRepository>()
   private val locationsClient = mock<LocationsClient>()
-  private val service = PropertyContainerWriteService(repository, locationsClient)
+  private val telemetryClient = mock<TelemetryClient>()
+  private val service = PropertyContainerWriteService(repository, locationsClient, telemetryClient)
 
   @BeforeEach
   fun stubLocationsResolveByDefault() {
@@ -862,6 +866,9 @@ class PropertyContainerWriteServiceTest {
 
     assertThat(events).isEmpty()
     verify(repository, never()).save(any())
+    // The redelivery path must still leave a trace, or it is indistinguishable from the handler not running.
+    verify(telemetryClient).trackEvent(eq("prison-property-merge-no-op"), any(), isNull())
+    verify(telemetryClient, never()).trackEvent(eq("prison-property-merge"), any(), isNull())
   }
 
   private fun containerAt(prisonId: String, seal: String): PropertyContainer {

@@ -1,9 +1,14 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration
 
+import com.microsoft.applicationinsights.TelemetryClient
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.extension.ExtendWith
+import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.atLeast
+import org.mockito.kotlin.eq
+import org.mockito.kotlin.isNull
+import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -13,6 +18,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.web.reactive.server.WebTestClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.config.LocalStackContainer
@@ -62,6 +68,27 @@ abstract class IntegrationTestBase {
   protected fun publishedEvents(): List<HmppsDomainEvent> = argumentCaptor<HmppsDomainEvent>()
     .apply { verify(domainEventPublisher, atLeast(0)).publish(capture()) }
     .allValues
+
+  /**
+   * The App Insights client, mocked so tests can assert what was tracked.
+   *
+   * Mocked rather than spied: without the java agent the real client is an inert no-op anyway, so there
+   * is no behaviour to preserve - only the calls matter.
+   */
+  @MockitoBean
+  protected lateinit var telemetryClient: TelemetryClient
+
+  /** The properties of the single custom event tracked under [name]. Fails if it was not tracked exactly once. */
+  protected fun trackedEvent(name: String): Map<String, String> {
+    val properties = argumentCaptor<Map<String, String>>()
+    verify(telemetryClient).trackEvent(eq(name), properties.capture(), isNull())
+    return properties.firstValue
+  }
+
+  /** Assert a custom event was never tracked - the other half of every no-change assertion. */
+  protected fun assertNotTracked(name: String) {
+    verify(telemetryClient, never()).trackEvent(eq(name), any(), isNull())
+  }
 
   /**
    * Assert nothing was published. Worth stating explicitly on every no-op path: a write that turns out to

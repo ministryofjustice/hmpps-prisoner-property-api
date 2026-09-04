@@ -1,5 +1,6 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.resource
 
+import com.microsoft.applicationinsights.TelemetryClient
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.media.Content
@@ -24,6 +25,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyTelemetry
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.SyncPropertyContainerService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.SyncResult
@@ -40,13 +42,40 @@ class SyncPropertyContainerResource(
   private val syncPropertyContainerService: SyncPropertyContainerService,
   private val propertyContainerService: PropertyContainerService,
   private val domainEventPublisher: DomainEventPublisher,
+  private val telemetryClient: TelemetryClient,
 ) {
 
-  /** Publishes the domain event (if any) after the service transaction has committed. */
+  /**
+   * Publishes the domain event (if any) after the service transaction has committed.
+   *
+   * No event means the NOMIS snapshot matched what we already held, so nothing was written and nothing
+   * announced. That is the right behaviour and it is also completely silent, so it is tracked - the
+   * proportion of syncs that change nothing is the useful signal about how noisy the NOMIS feed is.
+   */
   private fun SyncResult.publishAfterCommit(): SyncPropertyContainerResponse {
-    event?.let(domainEventPublisher::publish)
+    event?.let(domainEventPublisher::publish) ?: telemetryClient.trackEvent(
+      PropertyTelemetry.SYNC_NO_CHANGE,
+      response.telemetryProperties(),
+      null,
+    )
     return response
   }
+
+  /**
+   * Records a migrated container. Migration raises no domain event by design - a bulk replay must not
+   * flood the topic - which leaves the entire migration invisible. This is the only trace it has, so it
+   * is tracked unconditionally rather than only when something changed.
+   */
+  private fun SyncResult.migrated(): SyncPropertyContainerResponse {
+    telemetryClient.trackEvent(PropertyTelemetry.MIGRATED, response.telemetryProperties(), null)
+    return response
+  }
+
+  private fun SyncPropertyContainerResponse.telemetryProperties() = mapOf(
+    "dpsId" to dpsId.toString(),
+    "nomisPropertyContainerId" to nomisPropertyContainerId.toString(),
+    "mappingType" to mappingType.name,
+  )
 
   @PostMapping("/upsert")
   @Operation(
@@ -78,7 +107,7 @@ class SyncPropertyContainerResource(
       ApiResponse(responseCode = "404", description = "The supplied DPS id does not exist", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )
-  fun migrate(@Valid @RequestBody request: SyncPropertyContainerRequest): SyncPropertyContainerResponse = syncPropertyContainerService.migrate(request).publishAfterCommit()
+  fun migrate(@Valid @RequestBody request: SyncPropertyContainerRequest): SyncPropertyContainerResponse = syncPropertyContainerService.migrate(request).migrated()
 
   @GetMapping("/{id}")
   @Operation(
