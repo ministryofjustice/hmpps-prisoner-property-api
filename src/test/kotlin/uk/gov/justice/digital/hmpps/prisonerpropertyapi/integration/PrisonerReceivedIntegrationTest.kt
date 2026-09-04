@@ -62,6 +62,22 @@ class PrisonerReceivedIntegrationTest : IntegrationTestBase() {
     // Nothing changed, so nothing beyond the container's own create may be published.
     assertThat(publishedEventsFor(container.id).map { it.eventType })
       .containsExactly("prison-property.container.created")
+    // ...and the fact that it did nothing is itself recorded, so a listener doing nothing is
+    // distinguishable from a listener that never ran.
+    assertThat(trackedEvent("prison-property-prisoner-event-no-change"))
+      .containsEntry("prisonerNumber", "A1234BC")
+      .containsEntry("eventType", "prison-offender-events.prisoner.received")
+    assertNotTracked("prison-property-container-updated")
+  }
+
+  @Test
+  fun `a received event with no prisoner number is recorded as ignored`() {
+    publishRawPrisonerReceived(prisonerNumber = null, prisonId = "MDI")
+
+    await untilAsserted {
+      assertThat(trackedEvent("prison-property-prisoner-event-ignored"))
+        .containsEntry("reason", "missing prisoner number or prisonId")
+    }
   }
 
   private fun createContainer(prisonId: String): PropertyContainerDto = webTestClient.post().uri("/property-containers")
@@ -79,6 +95,29 @@ class PrisonerReceivedIntegrationTest : IntegrationTestBase() {
     .expectStatus().isCreated
     .expectBody(PropertyContainerDto::class.java)
     .returnResult().responseBody!!
+
+  private fun publishRawPrisonerReceived(prisonerNumber: String?, prisonId: String) {
+    val topic = hmppsQueueService.findByTopicId("domainevents")!!
+    val event = HmppsDomainEvent(
+      eventType = "prison-offender-events.prisoner.received",
+      additionalInformation = buildMap {
+        prisonerNumber?.let { put("nomsNumber", it) }
+        put("prisonId", prisonId)
+        put("reason", "TRANSFERRED")
+      },
+    )
+    topic.snsClient.publish(
+      PublishRequest.builder()
+        .topicArn(topic.arn)
+        .message(objectMapper.writeValueAsString(event))
+        .messageAttributes(
+          mapOf(
+            "eventType" to MessageAttributeValue.builder().dataType("String").stringValue(event.eventType).build(),
+          ),
+        )
+        .build(),
+    ).get()
+  }
 
   private fun publishPrisonerReceived(prisonerNumber: String, prisonId: String) {
     val topic = hmppsQueueService.findByTopicId("domainevents")!!

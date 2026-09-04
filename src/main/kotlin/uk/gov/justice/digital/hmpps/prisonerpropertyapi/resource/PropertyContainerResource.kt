@@ -1,5 +1,6 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.resource
 
+import com.microsoft.applicationinsights.TelemetryClient
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.media.Content
@@ -45,6 +46,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyEventDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyTelemetry
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.BoxLocationService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.CombineResult
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.CreateResult
@@ -66,12 +68,24 @@ class PropertyContainerResource(
   private val propertyContainerWriteService: PropertyContainerWriteService,
   private val boxLocationService: BoxLocationService,
   private val domainEventPublisher: DomainEventPublisher,
+  private val telemetryClient: TelemetryClient,
   private val authenticationHolder: HmppsAuthenticationHolder,
 ) {
 
-  /** Publishes the domain event (if any) after the service transaction has committed. */
+  /**
+   * Publishes the domain event (if any) after the service transaction has committed.
+   *
+   * A write that produced no event changed nothing a subscriber can see - an update whose diff came out
+   * empty, or a move to the location the container is already in. That is correct behaviour, but it is
+   * silent, so it is tracked instead: the rate of writes that turn out to be no-ops is the sort of thing
+   * only telemetry can tell you.
+   */
   private fun WriteResult.publishAfterCommit(): PropertyContainerDto {
-    event?.let(domainEventPublisher::publish)
+    event?.let(domainEventPublisher::publish) ?: telemetryClient.trackEvent(
+      PropertyTelemetry.WRITE_NO_CHANGE,
+      mapOf("dpsId" to container.id.toString(), "prisonerNumber" to container.prisonerNumber),
+      null,
+    )
     return container
   }
 
