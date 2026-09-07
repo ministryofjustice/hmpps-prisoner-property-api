@@ -20,6 +20,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicateSealNum
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.InvalidLocationException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PreviousSealNumberNotFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerNotFoundException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainersNotFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationCapacityBelowUsageException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationInUseException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationNotFoundException
@@ -37,6 +38,17 @@ class PrisonerPropertyApiExceptionHandler {
         developerMessage = e.message,
       ),
     ).also { log.info("Property container not found: {}", e.message) }
+
+  @ExceptionHandler(PropertyContainersNotFoundException::class)
+  fun handlePropertyContainersNotFoundException(e: PropertyContainersNotFoundException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(NOT_FOUND)
+    .body(
+      ErrorResponse(
+        status = NOT_FOUND,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Property containers not found: {}", e.message) }
 
   @ExceptionHandler(ValidationException::class)
   fun handleValidationException(e: ValidationException): ResponseEntity<ErrorResponse> = ResponseEntity
