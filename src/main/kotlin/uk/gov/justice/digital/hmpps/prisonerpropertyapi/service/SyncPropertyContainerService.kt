@@ -1,5 +1,8 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 
+import jakarta.validation.ValidationException
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
@@ -16,6 +19,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyDomainEven
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.sync.NomisContainerTransformer
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.util.UUID
 
 /**
  * Ingests NOMIS property container snapshots, applying the business transform and translating each
@@ -30,6 +34,9 @@ class SyncPropertyContainerService(
   private val repository: PropertyContainerRepository,
   private val transformer: NomisContainerTransformer,
 ) {
+  companion object {
+    val log: Logger = LoggerFactory.getLogger(this::class.java)
+  }
 
   /** Ongoing event-driven sync of a single NOMIS change. */
   @Transactional
@@ -38,6 +45,23 @@ class SyncPropertyContainerService(
   /** Initial bulk migration of a NOMIS container. */
   @Transactional
   fun migrate(request: SyncPropertyContainerRequest): SyncResult = upsert(request, migrating = true)
+
+  @Transactional
+  fun moveToPrisoner(prisonerNumber: String, propertyIds: List<UUID>) {
+    if (propertyIds.isEmpty()) {
+      throw ValidationException("propertyIds must not be empty")
+    }
+    val containers = repository.findAllById(propertyIds)
+    if (containers.size != propertyIds.size) {
+      val missing = propertyIds - containers.map { it.id }.toSet()
+      log.error("Cannot move property containers to prisoner $prisonerNumber: missing containers $missing")
+      throw PropertyContainersNotFoundException(missing)
+    }
+    containers.forEach { container ->
+      log.info("Moving property container ${container.id} from ${container.prisonerNumber} to $prisonerNumber")
+      container.prisonerNumber = prisonerNumber
+    }
+  }
 
   private fun upsert(request: SyncPropertyContainerRequest, migrating: Boolean): SyncResult {
     val existing = request.dpsId?.let {

@@ -3,10 +3,12 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.data.repository.findByIdOrNull
 import org.springframework.http.MediaType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventRepository
@@ -315,31 +317,98 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .expectStatus().isForbidden
   }
 
-  @Test
-  fun `returns a page of all container ids`() {
-    val first = upsert(request(sealMark = "SEAL1")).dpsId
-    upsert(request(sealMark = "SEAL2")).dpsId
+  @Nested
+  inner class AllIds {
+    @Test
+    fun `returns a page of all container ids`() {
+      val first = upsert(request(sealMark = "SEAL1")).dpsId
+      upsert(request(sealMark = "SEAL2")).dpsId
 
-    getIds(size = 1, page = 0)
-      .jsonPath("$.totalElements").isEqualTo(2)
-      .jsonPath("$.totalPages").isEqualTo(2)
-      .jsonPath("$.content.length()").isEqualTo(1)
-      .jsonPath("$.content[0]").isEqualTo(first)
+      getIds(size = 1, page = 0)
+        .jsonPath("$.totalElements").isEqualTo(2)
+        .jsonPath("$.totalPages").isEqualTo(2)
+        .jsonPath("$.content.length()").isEqualTo(1)
+        .jsonPath("$.content[0]").isEqualTo(first)
+    }
+
+    @Test
+    fun `returns unauthorized for ids when no token is presented`() {
+      webTestClient.get().uri("/sync/property-containers/ids")
+        .exchange()
+        .expectStatus().isUnauthorized
+    }
+
+    @Test
+    fun `returns forbidden for ids without the sync role`() {
+      webTestClient.get().uri("/sync/property-containers/ids")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+        .exchange()
+        .expectStatus().isForbidden
+    }
   }
 
-  @Test
-  fun `returns unauthorized for ids when no token is presented`() {
-    webTestClient.get().uri("/sync/property-containers/ids")
-      .exchange()
-      .expectStatus().isUnauthorized
-  }
+  @Nested
+  inner class Move {
+    @Test
+    fun `returns a page of all container ids`() {
+      val p1 = upsert(request(prisonerNumber = "A0001AA")).dpsId
+      val p2 = upsert(request(prisonerNumber = "A0001AA")).dpsId
+      val p3 = upsert(request(prisonerNumber = "A0001ZZ")).dpsId
 
-  @Test
-  fun `returns forbidden for ids without the sync role`() {
-    webTestClient.get().uri("/sync/property-containers/ids")
-      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
-      .exchange()
-      .expectStatus().isForbidden
+      webTestClient.put().uri("/sync/property-containers/move/to/A2222BB")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .bodyValue(listOf(p1, p2))
+        .exchange()
+        .expectStatus().isOk
+
+      assertThat(repository.findByIdOrNull(p1)?.prisonerNumber).isEqualTo("A2222BB")
+      assertThat(repository.findByIdOrNull(p2)?.prisonerNumber).isEqualTo("A2222BB")
+      assertThat(repository.findByIdOrNull(p3)?.prisonerNumber).isEqualTo("A0001ZZ")
+    }
+
+    @Test
+    fun `returns an error when not all ids are found`() {
+      val p1 = upsert(request(prisonerNumber = "A0001AA")).dpsId
+      val p2 = upsert(request(prisonerNumber = "A0001AA")).dpsId
+
+      val extra1 = UUID.randomUUID()
+      val extra2 = UUID.randomUUID()
+      webTestClient.put().uri("/sync/property-containers/move/to/A2222BB")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .bodyValue(listOf(p1, p2, extra1, extra2))
+        .exchange()
+        .expectStatus().isNotFound
+        .expectBody()
+        .jsonPath("$.userMessage").isEqualTo("Property containers not found: [$extra1, $extra2]")
+    }
+
+    @Test
+    fun `returns an error when no ids are provided`() {
+      webTestClient.put().uri("/sync/property-containers/move/to/A2222BB")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .bodyValue(emptyList<UUID>())
+        .exchange()
+        .expectStatus().isBadRequest
+        .expectBody()
+        .jsonPath("$.userMessage").isEqualTo("Validation failure: propertyIds must not be empty")
+    }
+
+    @Test
+    fun `returns unauthorized when no token is presented`() {
+      webTestClient.put().uri("/sync/property-containers/move/to/A1234AA")
+        .bodyValue(emptyList<UUID>())
+        .exchange()
+        .expectStatus().isUnauthorized
+    }
+
+    @Test
+    fun `returns forbidden without the sync role`() {
+      webTestClient.put().uri("/sync/property-containers/move/to/A1234AA")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+        .bodyValue(emptyList<UUID>())
+        .exchange()
+        .expectStatus().isForbidden
+    }
   }
 
   private fun getIds(size: Int = 20, page: Int = 0) = webTestClient
@@ -394,10 +463,11 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     proposedDisposalDate: LocalDate? = null,
     expiryDate: LocalDate? = null,
     active: Boolean = true,
+    prisonerNumber: String = "A1234BC",
   ) = SyncPropertyContainerRequest(
     nomisPropertyContainerId = 123,
     dpsId = dpsId,
-    prisonerNumber = "A1234BC",
+    prisonerNumber = prisonerNumber,
     prisonId = "LEI",
     containerCode = containerCode,
     internalLocationId = internalLocationId,
