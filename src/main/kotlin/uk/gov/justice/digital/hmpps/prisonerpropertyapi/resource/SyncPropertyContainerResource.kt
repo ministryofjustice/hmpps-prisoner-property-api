@@ -144,10 +144,11 @@ class SyncPropertyContainerResource(
     pageable: Pageable,
   ): Page<UUID> = propertyContainerService.getAllIds(pageable)
 
-  @PutMapping("/move/to/{prisonerNumber}")
+  @PutMapping("/move/from/{source}/to/{target}")
   @Operation(
-    summary = "Move property containers from one prisoner to another",
+    summary = "Move property containers from the source prisoner to the target prisoner",
     description = "Called by Nomis sync to implement the <i>prison-offender-events.prisoner.booking.moved</i> Nomis event to correct DPS property." +
+      "The containers must initially belong to the source prisoner, or already belong to the target prisoner." +
       "Requires role ROLE_PRISONER_PROPERTY__SYNC.",
     responses = [
       ApiResponse(responseCode = "200", description = "Containers moved"),
@@ -157,12 +158,15 @@ class SyncPropertyContainerResource(
     ],
   )
   fun moveToPrisoner(
+    @Parameter(description = "Source prisoner", example = "A1234FG", required = true)
+    @PathVariable
+    source: String,
     @Parameter(description = "Target prisoner", example = "A1234FG", required = true)
     @PathVariable
-    prisonerNumber: String,
+    target: String,
     @RequestBody
     propertyIds: List<UUID>,
   ) {
-    syncPropertyContainerService.moveToPrisoner(prisonerNumber, propertyIds)
+    syncPropertyContainerService.moveToPrisoner(source, target, propertyIds)
   }
 }

@@ -47,7 +47,7 @@ class SyncPropertyContainerService(
   fun migrate(request: SyncPropertyContainerRequest): SyncResult = upsert(request, migrating = true)
 
   @Transactional
-  fun moveToPrisoner(prisonerNumber: String, propertyIds: List<UUID>) {
+  fun moveToPrisoner(fromPrisoner: String, toPrisoner: String, propertyIds: List<UUID>) {
     if (propertyIds.isEmpty()) {
       throw ValidationException("propertyIds must not be empty")
     }
@@ -55,12 +55,16 @@ class SyncPropertyContainerService(
     val containers = repository.findAllById(requestedIds)
     if (containers.size != requestedIds.size) {
       val missing = requestedIds - containers.map { it.id }.toSet()
-      log.error("Cannot move property containers to prisoner $prisonerNumber: missing containers $missing")
+      log.error("Cannot move property containers to prisoner $toPrisoner: missing containers $missing")
       throw PropertyContainersNotFoundException(missing)
     }
     containers.forEach { container ->
-      log.info("Moving property container ${container.id} from ${container.prisonerNumber} to $prisonerNumber")
-      container.prisonerNumber = prisonerNumber
+      val thisPrisonerNumber = container.prisonerNumber
+      if (fromPrisoner != thisPrisonerNumber && toPrisoner != thisPrisonerNumber) {
+        throw ValidationException("Property container ${container.id} belongs to $thisPrisonerNumber, which is neither $fromPrisoner nor $toPrisoner")
+      }
+      log.info("Moving property container ${container.id} from $thisPrisonerNumber to $toPrisoner")
+      container.prisonerNumber = toPrisoner
     }
   }
 

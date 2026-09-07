@@ -352,10 +352,10 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     @Test
     fun `moves containers to the target prisoner`() {
       val p1 = upsert(request(prisonerNumber = "A0001AA")).dpsId
-      val p2 = upsert(request(prisonerNumber = "A0001AA")).dpsId
+      val p2 = upsert(request(prisonerNumber = "A2222BB")).dpsId
       val p3 = upsert(request(prisonerNumber = "A0001ZZ")).dpsId
 
-      webTestClient.put().uri("/sync/property-containers/move/to/A2222BB")
+      webTestClient.put().uri("/sync/property-containers/move/from/A0001AA/to/A2222BB")
         .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
         .bodyValue(listOf(p1, p2))
         .exchange()
@@ -373,7 +373,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
       val extra1 = UUID.randomUUID()
       val extra2 = UUID.randomUUID()
-      webTestClient.put().uri("/sync/property-containers/move/to/A2222BB")
+      webTestClient.put().uri("/sync/property-containers/move/from/A0001AA/to/A2222BB")
         .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
         .bodyValue(listOf(p1, p2, extra1, extra2))
         .exchange()
@@ -384,7 +384,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
     @Test
     fun `returns an error when no ids are provided`() {
-      webTestClient.put().uri("/sync/property-containers/move/to/A2222BB")
+      webTestClient.put().uri("/sync/property-containers/move/from/A0001AA/to/A2222BB")
         .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
         .bodyValue(emptyList<UUID>())
         .exchange()
@@ -394,8 +394,22 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     }
 
     @Test
+    fun `returns an error when source id is incorrect`() {
+      val p1 = upsert(request(prisonerNumber = "A0001AA")).dpsId
+
+      webTestClient.put().uri("/sync/property-containers/move/from/A9999AA/to/A2222BB")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .bodyValue(listOf(p1))
+        .exchange()
+        .expectStatus().isBadRequest
+        .expectBody()
+        .jsonPath("$.userMessage")
+        .isEqualTo("Validation failure: Property container $p1 belongs to A0001AA, which is neither A9999AA nor A2222BB")
+    }
+
+    @Test
     fun `returns unauthorized when no token is presented`() {
-      webTestClient.put().uri("/sync/property-containers/move/to/A1234AA")
+      webTestClient.put().uri("/sync/property-containers/move/from/A0001AA/to/A1234AA")
         .bodyValue(emptyList<UUID>())
         .exchange()
         .expectStatus().isUnauthorized
@@ -403,7 +417,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
     @Test
     fun `returns forbidden without the sync role`() {
-      webTestClient.put().uri("/sync/property-containers/move/to/A1234AA")
+      webTestClient.put().uri("/sync/property-containers/move/from/A0001AA/to/A1234AA")
         .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
         .bodyValue(emptyList<UUID>())
         .exchange()
