@@ -35,7 +35,7 @@ class SyncPropertyContainerService(
   private val transformer: NomisContainerTransformer,
 ) {
   companion object {
-    val log: Logger = LoggerFactory.getLogger(this::class.java)
+    private val log: Logger = LoggerFactory.getLogger(this::class.java)
   }
 
   /** Ongoing event-driven sync of a single NOMIS change. */
@@ -51,9 +51,10 @@ class SyncPropertyContainerService(
     if (propertyIds.isEmpty()) {
       throw ValidationException("propertyIds must not be empty")
     }
-    val containers = repository.findAllById(propertyIds)
-    if (containers.size != propertyIds.size) {
-      val missing = propertyIds - containers.map { it.id }.toSet()
+    val requestedIds = propertyIds.distinct()
+    val containers = repository.findAllById(requestedIds)
+    if (containers.size != requestedIds.size) {
+      val missing = requestedIds - containers.map { it.id }.toSet()
       log.error("Cannot move property containers to prisoner $prisonerNumber: missing containers $missing")
       throw PropertyContainersNotFoundException(missing)
     }

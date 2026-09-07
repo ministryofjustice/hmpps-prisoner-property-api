@@ -350,7 +350,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   @Nested
   inner class Move {
     @Test
-    fun `returns a page of all container ids`() {
+    fun `moves containers to the target prisoner`() {
       val p1 = upsert(request(prisonerNumber = "A0001AA")).dpsId
       val p2 = upsert(request(prisonerNumber = "A0001AA")).dpsId
       val p3 = upsert(request(prisonerNumber = "A0001ZZ")).dpsId
