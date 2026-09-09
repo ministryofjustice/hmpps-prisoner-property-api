@@ -76,10 +76,12 @@ class PropertyContainerRepositoryImpl(
     if (filter.containerTypes.isNotEmpty()) predicates += root.get<ContainerType>("containerType").`in`(filter.containerTypes)
 
     // Free-text search matches (OR) prisoner number, seal number, or the term's resolved storage location.
+    // The seal match is partial: staff read a number off a box or a paper log and often have only part of it.
+    // The prison number stays exact - it is a fixed-format identifier, so a partial one only adds noise.
     filter.search?.let { term ->
       val matches = mutableListOf(
         cb.equal(root.get<String>("prisonerNumber"), term.uppercase()),
-        cb.equal(cb.lower(root.get<String>("currentSealNumber")), term.lowercase()),
+        cb.like(cb.lower(root.get<String>("currentSealNumber")), SearchTerm.toLikePattern(term.lowercase()), SearchTerm.LIKE_ESCAPE),
       )
       if (filter.searchBranston) matches += cb.equal(root.get<StorageLocationType>("currentStorageLocationType"), StorageLocationType.BRANSTON)
       if (filter.searchLocationIds.isNotEmpty()) matches += root.get<UUID>("currentInternalLocationId").`in`(filter.searchLocationIds)

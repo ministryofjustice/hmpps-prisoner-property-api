@@ -178,13 +178,13 @@ class PropertyContainerResource(
     @Pattern(regexp = "^[A-Z]{2}I|ZZGHI$", message = "Prison id must be 3 characters ending in an I, or ZZGHI")
     @PathVariable
     prisonId: String,
-    @Parameter(description = "Free-text search matched against prisoner number, seal number or storage location", example = "A1234BC")
+    @Parameter(description = "Free-text search matched against prisoner number (exact), or part of a seal number or storage location. * and ? are wildcards.", example = "A1234BC")
     @RequestParam(required = false)
     query: String?,
     @Parameter(description = "Filter to a single prisoner number", example = "A1234BC")
     @RequestParam(required = false)
     prisonerNumber: String?,
-    @Parameter(description = "Filter to a single seal number", example = "SN8842K1")
+    @Parameter(description = "Filter to a single seal number, matched in full. Use query for a partial seal search.", example = "SN8842K1")
     @RequestParam(required = false)
     sealNumber: String?,
     @Parameter(description = "Filter to these container types (repeatable). Omit for all types.", example = "STANDARD")
@@ -193,7 +193,7 @@ class PropertyContainerResource(
     @Parameter(description = "Filter to these statuses (repeatable). Omit to hide containers that have left active storage.", example = "STORED")
     @RequestParam(required = false)
     status: List<ContainerStatus>?,
-    @Parameter(description = "Filter to a storage location code (e.g. PB5638), or BRANSTON for offsite storage", example = "PB5638")
+    @Parameter(description = "Filter to storage locations matching this term - part of a code, local name or path hierarchy (* and ? are wildcards) - or BRANSTON for offsite storage", example = "PB5638")
     @RequestParam(required = false)
     storageLocation: String?,
     @Parameter(description = "Also include containers that have been removed, returned or disposed of", example = "false")

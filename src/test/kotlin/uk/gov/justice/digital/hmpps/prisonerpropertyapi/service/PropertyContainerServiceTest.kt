@@ -663,6 +663,83 @@ class PropertyContainerServiceTest {
   }
 
   @Test
+  fun `getPrisonProperty resolves a partial storage-location term, matching every box it appears in`() {
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
+      listOf(
+        PropertyLocation(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638", localName = "Reception Box A", locationType = "BOX", capacity = 10),
+        PropertyLocation(id = LOCATION_B, prisonId = "LEI", code = "PB0200", pathHierarchy = "PROP-PB0200", localName = "Reception Box B", locationType = "BOX", capacity = 10),
+      ),
+    )
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    // part of a code finds the one box it belongs to
+    service.getPrisonProperty("LEI", storageLocation = "5638", pageable = PAGE)
+
+    verify(repository).findPrisonerNumbersPage(
+      eq("LEI"),
+      check<PrisonPropertyFilter> { assertThat(it.locationIds).containsExactly(LOCATION_A) },
+      any(),
+    )
+  }
+
+  @Test
+  fun `getPrisonProperty resolves a partial term to every location it matches`() {
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
+      listOf(
+        PropertyLocation(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638", localName = "Reception Box A", locationType = "BOX", capacity = 10),
+        PropertyLocation(id = LOCATION_B, prisonId = "LEI", code = "PB0200", pathHierarchy = "PROP-PB0200", localName = "Reception Box B", locationType = "BOX", capacity = 10),
+      ),
+    )
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    // a term both boxes share returns both, rather than requiring the whole value
+    service.getPrisonProperty("LEI", storageLocation = "reception box", pageable = PAGE)
+
+    verify(repository).findPrisonerNumbersPage(
+      eq("LEI"),
+      check<PrisonPropertyFilter> { assertThat(it.locationIds).containsExactlyInAnyOrder(LOCATION_A, LOCATION_B) },
+      any(),
+    )
+  }
+
+  @Test
+  fun `getPrisonProperty resolves a storage-location term with wildcards`() {
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
+      listOf(
+        PropertyLocation(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638", localName = "Reception Property Store", locationType = "BOX", capacity = 10),
+        PropertyLocation(id = LOCATION_B, prisonId = "LEI", code = "PB0200", pathHierarchy = "PROP-PB0200", localName = "Reception Box B", locationType = "BOX", capacity = 10),
+      ),
+    )
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    service.getPrisonProperty("LEI", storageLocation = "re*store", pageable = PAGE)
+
+    verify(repository).findPrisonerNumbersPage(
+      eq("LEI"),
+      check<PrisonPropertyFilter> { assertThat(it.locationIds).containsExactly(LOCATION_A) },
+      any(),
+    )
+  }
+
+  @Test
+  fun `getPrisonProperty resolves a storage-location term matching nothing to no locations`() {
+    whenever(locationsClient.getPropertyLocations("LEI")).thenReturn(
+      listOf(
+        PropertyLocation(id = LOCATION_A, prisonId = "LEI", code = "PB5638", pathHierarchy = "PROP-PB5638", localName = "Reception Box A", locationType = "BOX", capacity = 10),
+      ),
+    )
+    whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
+
+    service.getPrisonProperty("LEI", storageLocation = "no-such-box", pageable = PAGE)
+
+    verify(repository).findPrisonerNumbersPage(
+      eq("LEI"),
+      check<PrisonPropertyFilter> { assertThat(it.locationIds).isEmpty() },
+      any(),
+    )
+  }
+
+  @Test
   fun `getPrisonProperty treats the BRANSTON search term as an offsite filter`() {
     whenever(repository.findPrisonerNumbersPage(eq("LEI"), any(), any())).thenReturn(PageImpl(emptyList(), PAGE, 0))
 
