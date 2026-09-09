@@ -95,6 +95,7 @@ class PropertyContainerRepositoryImpl(
     val heldHereSelected = filter.statuses.isNotEmpty() || filter.includeRemoved || !filter.includeTransferIn
     if (heldHereSelected) scopes += heldHereScope(cb, root, prisonId, filter)
     if (filter.includeTransferIn) scopes += incomingScope(cb, root, prisonId, filter)
+    if (heldHereSelected) sealSearchScope(cb, root, prisonId, filter)?.let { scopes += it }
     predicates += cb.or(*scopes.toTypedArray())
 
     return predicates
@@ -135,11 +136,48 @@ class PropertyContainerRepositoryImpl(
     }
     parts += if (filter.includeRemoved) cb.or(statusPredicate, noLongerHeld) else statusPredicate
 
-    when {
-      filter.branstonOnly -> parts += cb.equal(root.get<StorageLocationType>("currentStorageLocationType"), StorageLocationType.BRANSTON)
-      filter.locationIds != null ->
-        parts += if (filter.locationIds.isEmpty()) cb.disjunction() else root.get<UUID>("currentInternalLocationId").`in`(filter.locationIds)
-    }
+    parts += locationParts(cb, root, filter)
+    return cb.and(*parts.toTypedArray())
+  }
+
+  /**
+   * The storage-location restriction, shared by every scope that has to honour it so they cannot disagree.
+   * Branston takes precedence over resolved location ids; a term that resolved to no location matches nothing
+   * rather than everything.
+   */
+  private fun locationParts(cb: CriteriaBuilder, root: Root<PropertyContainer>, filter: PrisonPropertyFilter): List<Predicate> = when {
+    filter.branstonOnly -> listOf(cb.equal(root.get<StorageLocationType>("currentStorageLocationType"), StorageLocationType.BRANSTON))
+    filter.locationIds != null ->
+      listOf(if (filter.locationIds.isEmpty()) cb.disjunction() else root.get<UUID>("currentInternalLocationId").`in`(filter.locationIds))
+    else -> emptyList()
+  }
+
+  /**
+   * Predicate for a container at [prisonId] whose seal the search names, whatever has since become of it.
+   *
+   * A seal number identifies one box, and someone typing one is asking where that box went - not whether it is
+   * still in storage. Without this, property returned to the person, transferred on or disposed of is
+   * unfindable by the only identifier written on it, which is exactly when staff need to look it up. So a seal
+   * search escapes the "still held here" rule that [heldHereScope] applies by default.
+   *
+   * Only by default, though: an explicit status filter is the user narrowing deliberately, so it still narrows
+   * - hence null when one is set. The storage-location restriction still applies, since asking for a box in a
+   * particular location is also deliberate (and a container that has left storage has no location, so it falls
+   * out of its own accord).
+   */
+  private fun sealSearchScope(cb: CriteriaBuilder, root: Root<PropertyContainer>, prisonId: String, filter: PrisonPropertyFilter): Predicate? {
+    if (filter.statuses.isNotEmpty()) return null
+    val seal = cb.lower(root.get<String>("currentSealNumber"))
+    val sealMatches = mutableListOf<Predicate>()
+    filter.sealNumber?.let { sealMatches += cb.equal(seal, it.lowercase()) }
+    filter.search?.let { sealMatches += cb.like(seal, SearchTerm.toLikePattern(it.lowercase()), SearchTerm.LIKE_ESCAPE) }
+    if (sealMatches.isEmpty()) return null
+
+    val parts = mutableListOf(
+      cb.equal(root.get<String>("prisonId"), prisonId),
+      cb.or(*sealMatches.toTypedArray()),
+    )
+    parts += locationParts(cb, root, filter)
     return cb.and(*parts.toTypedArray())
   }
 

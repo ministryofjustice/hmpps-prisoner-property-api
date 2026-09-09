@@ -178,13 +178,13 @@ class PropertyContainerResource(
     @Pattern(regexp = "^[A-Z]{2}I|ZZGHI$", message = "Prison id must be 3 characters ending in an I, or ZZGHI")
     @PathVariable
     prisonId: String,
-    @Parameter(description = "Free-text search matched against prisoner number (exact), or part of a seal number or storage location. * and ? are wildcards.", example = "A1234BC")
+    @Parameter(description = "Free-text search matched against prisoner number (exact), or part of a seal number or storage location. * and ? are wildcards. A term matching a seal number also finds property that has left storage.", example = "A1234BC")
     @RequestParam(required = false)
     query: String?,
     @Parameter(description = "Filter to a single prisoner number", example = "A1234BC")
     @RequestParam(required = false)
     prisonerNumber: String?,
-    @Parameter(description = "Filter to a single seal number, matched in full. Use query for a partial seal search.", example = "SN8842K1")
+    @Parameter(description = "Filter to a single seal number, matched in full, including property that has left storage. Use query for a partial seal search.", example = "SN8842K1")
     @RequestParam(required = false)
     sealNumber: String?,
     @Parameter(description = "Filter to these container types (repeatable). Omit for all types.", example = "STANDARD")
