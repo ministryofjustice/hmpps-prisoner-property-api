@@ -557,6 +557,38 @@ class PropertyContainerWriteService(
   fun prisonerDied(prisonerNumber: String): List<HmppsDomainEvent> = flagDueForReturn(prisonerNumber, PropertyEventType.DIED_IN_CUSTODY)
 
   /**
+   * Handle a prisoner being transferred out of an establishment. Every active container they still have - at
+   * any prison - is flagged due for transfer out, because the property has to follow the person wherever they
+   * end up.
+   *
+   * The status this writes is what the screens already show, via the owner-location overlay in
+   * `ContainerStatusResolver`. Writing it down is the point: the overlay depends on a live prisoner-search
+   * lookup and leaves nothing in the container's history, so between a person leaving and arriving there was
+   * no record that anything had happened and no domain event for anyone downstream.
+   *
+   * No destination is recorded. The transfer-out movement does not say where the person is going, so
+   * `toPrisonId` stays null and `receivingPrisonId` with it; the later reception is what fills that in.
+   *
+   * Idempotent on status rather than event type, like [flagDueForReturn]: a container already due for transfer
+   * out is skipped, so redelivered movement events are safe no-ops. A subsequent release still overrides this,
+   * since that guard tests for due-for-return.
+   */
+  @Transactional
+  fun prisonerTransferredOut(prisonerNumber: String): List<HmppsDomainEvent> {
+    val now = LocalDateTime.now()
+    return repository.findByPrisonerNumber(prisonerNumber)
+      .filter { !it.isRemoved() && it.baseStatus() != ContainerStatus.DUE_FOR_TRANSFER_OUT }
+      .map { container ->
+        val before = ContainerState.of(container)
+        container.events.add(
+          PropertyEvent(container, PropertyEventType.PRISONER_TRANSFERRED_OUT, now, SYSTEM_USER, fromPrisonId = container.prisonId),
+        )
+        container.refreshDerivedState()
+        PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, container.changedFieldsSince(before))
+      }
+  }
+
+  /**
    * Flag every active container the prisoner still has - at any prison - as due for return by appending
    * [eventType]; the container stays where it is, only its derived status and history change. Idempotent:
    * containers already due for return are skipped, so the delayed and potentially duplicated release

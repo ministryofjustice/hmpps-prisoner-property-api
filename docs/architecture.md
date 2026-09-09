@@ -281,10 +281,17 @@ NOMIS change syncs in, publishes, and syncs straight back out again. Filter on i
 infer origin from the payload.
 
 **Consumed:** `prison-offender-events.prisoner.received` flags property held elsewhere as due for
-transfer out. `prison-offender-events.prisoner.released` flags property due for return — but only for
-reason `RELEASED`, since the same event also fires for court, temporary absence and transfers. A death
-in custody arrives as a release too, distinguished only by NOMIS movement reason code `DEC`, and is
-recorded as a distinct event so the history reads correctly.
+transfer out, and records the destination. `prison-offender-events.prisoner.released` fires whenever
+someone leaves, so its reason decides what it means: `RELEASED` flags property due for return,
+`TRANSFERRED` flags it due for transfer out — the sending half of a move, carrying no destination,
+because the movement does not say where the person is going. Anything else is a temporary movement
+(court, temporary absence, hospital) and is ignored: the person is coming back. A death in custody
+arrives as a release too, distinguished only by NOMIS movement reason code `DEC`, and is recorded as a
+distinct event so the history reads correctly.
+
+One move therefore leaves two events against a container — the transfer out when the person leaves, the
+reception when they arrive — and both are true. Writing the transfer out down is what makes the status
+survive without a live prisoner-search lookup, and what puts the movement in the container's history.
 
 `prison-offender-events.prisoner.merged` moves every container from the retired prisoner number to the
 surviving one. NOMIS merges two numbers when the same person is held under both; the oldest survives and

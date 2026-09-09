@@ -47,6 +47,7 @@ class ExportReferenceData {
         PropertyEventType.CONTAINER_TYPE_CHANGE to "The container's type was changed.",
         PropertyEventType.MOVED to "The container was moved to another storage location - internal, or offsite to Branston.",
         PropertyEventType.PRISONER_RECEIVED to "The owner was received at another establishment, so the property is due to follow them.",
+        PropertyEventType.PRISONER_TRANSFERRED_OUT to "The owner was transferred out of the establishment, so the property is due to follow them. Carries no destination - the transfer-out movement does not say where they are going.",
         PropertyEventType.PRISONER_RELEASED to "The owner was released, so the property is due to be returned to them.",
         PropertyEventType.DIED_IN_CUSTODY to "The owner died in custody, so the property is due to be returned.",
         PropertyEventType.TRANSFERRED to "The container was transferred out to another prison. This removes it from the sending prison; the receiving prison holds a separate record, reconciled via related_container_id.",
