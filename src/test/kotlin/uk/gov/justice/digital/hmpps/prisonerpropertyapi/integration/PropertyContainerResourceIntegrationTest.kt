@@ -345,6 +345,177 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `a seal search finds property that has left storage (MAPB-846)`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PB5638", "Reception Property Store")))
+    repository.save(
+      containerWithStatus("SEAL-DISPOSED") {
+        removalOutcome = RemovalOutcome.DISPOSED
+        removalDate = baseTime.toLocalDate()
+      },
+    )
+    repository.save(
+      containerWithStatus("SEAL-GONE") {
+        removalOutcome = RemovalOutcome.TRANSFERRED
+        removalDate = baseTime.toLocalDate()
+      },
+    )
+
+    // an unfiltered list still hides both - only a search for the seal itself brings one back
+    webTestClient.get().uri("/property-containers/prison/LEI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].containers.length()").isEqualTo(1)
+
+    // disposed property is findable by its seal
+    webTestClient.get().uri("/property-containers/prison/LEI?query=SEAL-DISPOSED")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].containers.length()").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentSealNumber").isEqualTo("SEAL-DISPOSED")
+
+    // so is property transferred on, which includeRemoved deliberately never surfaces
+    webTestClient.get().uri("/property-containers/prison/LEI?query=SEAL-GONE")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].containers.length()").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentSealNumber").isEqualTo("SEAL-GONE")
+
+    // and by the explicit seal filter
+    webTestClient.get().uri("/property-containers/prison/LEI?sealNumber=SEAL-GONE")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].containers.length()").isEqualTo(1)
+  }
+
+  @Test
+  fun `a seal search that has left storage still respects an explicit status filter (MAPB-846)`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PB5638", "Reception Property Store")))
+    repository.save(
+      containerWithStatus("SEAL-DISPOSED") {
+        removalOutcome = RemovalOutcome.DISPOSED
+        removalDate = baseTime.toLocalDate()
+      },
+    )
+
+    // narrowing to a status is the user narrowing deliberately, so the seal search does not widen past it
+    webTestClient.get().uri("/property-containers/prison/LEI?query=SEAL-DISPOSED&status=STORED")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(0)
+  }
+
+  @Test
+  fun `a location search is not widened to property that has left storage (MAPB-846)`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PB5638", "Reception Property Store")))
+    repository.save(
+      containerWithStatus("SEAL-DISPOSED") {
+        removalOutcome = RemovalOutcome.DISPOSED
+        removalDate = baseTime.toLocalDate()
+      },
+    )
+
+    // only a seal names one box and asks where it went; a location term keeps its ordinary meaning
+    webTestClient.get().uri("/property-containers/prison/LEI?query=PB5638")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].containers.length()").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentSealNumber").isEqualTo("SEAL002")
+  }
+
+  @Test
+  fun `free-text query matches part of a seal number (MAPB-856)`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PB5638", "Reception Property Store")))
+
+    // the seed container's seal is SEAL002 - staff reading part of it off a box still find the record
+    webTestClient.get().uri("/property-containers/prison/LEI?query=AL002")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentSealNumber").isEqualTo("SEAL002")
+
+    // case does not matter either
+    webTestClient.get().uri("/property-containers/prison/LEI?query=al00")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+
+    // a partial term matching no seal, prisoner number or location still returns nothing
+    webTestClient.get().uri("/property-containers/prison/LEI?query=ZZZZ")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(0)
+  }
+
+  @Test
+  fun `filters the prison list by a partial storage location (MAPB-856)`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PB5638", "Reception Property Store")))
+
+    // part of the code
+    webTestClient.get().uri("/property-containers/prison/LEI?storageLocation=5638")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentLocation").isEqualTo(LOCATION_B.toString())
+
+    // part of the local name
+    webTestClient.get().uri("/property-containers/prison/LEI?storageLocation=property")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+      .jsonPath("$.content[0].containers[0].currentLocation").isEqualTo(LOCATION_B.toString())
+
+    // and the free-text search resolves a partial location the same way
+    webTestClient.get().uri("/property-containers/prison/LEI?query=property sto")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.totalElements").isEqualTo(1)
+  }
+
+  @Test
   fun `free-text query matches a seal number across the prison list`() {
     hmppsAuth.stubGrantToken()
     prisonerSearch.stubFindByNumbers("A1234BC" to "LEI")
