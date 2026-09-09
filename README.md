@@ -166,8 +166,9 @@ on an individual column does not change that.
 | Method & path | Role | Description |
 | --- | --- | --- |
 | `GET /subject-access-request` | `ROLE_SAR_DATA_ACCESS` | Everything held about one prisoner, optionally within a date range |
+| `GET /subject-access-request/template` | `ROLE_SAR_DATA_ACCESS` | The mustache template the SAR tool renders that data with |
 
-The endpoint is not written in this repo. `hmpps-kotlin-spring-boot-starter` registers it automatically
+Neither endpoint is written in this repo. `hmpps-kotlin-spring-boot-starter` registers it automatically
 when a bean implementing `HmppsPrisonSubjectAccessRequestService` is present, and guards it with the role
 above — `PrisonerPropertySubjectAccessRequestService` is that bean. It returns `204` when the prisoner has
 no property and `209` when asked for a probation case reference, which this service never holds.
@@ -185,9 +186,35 @@ The response deliberately omits internal ids and the denormalised `current*` col
 codes, DPS location ids and staff usernames as raw values in dedicated attributes — the SAR report
 template resolves them to names at render time.
 
-Changing what the endpoint returns is not a routine code change: it is governed by the
-[Central SAR Change Control Process](https://dsdmoj.atlassian.net/wiki/spaces/NDSS/pages/6057492803) and
-needs sign-off from the Offender SAR team before it can reach pre-production. See epic MAPB-764.
+#### The report template
+
+`src/main/resources/sar/templates/V1__sar_template.mustache` is the report the prisoner actually receives.
+It is Handlebars-flavoured mustache, and it carries no `<style>` block or `<html>` wrapper of its own — the
+SAR service prepends its own stylesheet, so the template only uses the classes that stylesheet defines
+(`title`, `summary-list`, `data-table`). Helpers such as `getPrisonName`, `getLocationNameByDpsId` and
+`getUserLastName` turn the raw codes in the API response into names at render time; `optionalValue`
+substitutes "No data held".
+
+The prison number is deliberately not rendered — the SAR tool prints it in the header of every page.
+
+`hmpps.sar.template.enabled` is set in `application.yml` rather than only in helm so that every profile
+validates the path on startup. The library resolves it as a classpath resource in a `@PostConstruct` and
+refuses to start if it is wrong, which is much better found in CI than in a deploy. The path itself is
+overridden per environment (`HMPPS_SAR_TEMPLATE_PATH`) so a new version can be rolled out one environment
+at a time — the granularity the SAR tool's register-before-deploy rule needs.
+
+#### Changing any of this
+
+Not a routine code change. It is governed by the
+[Central SAR Change Control Process](https://dsdmoj.atlassian.net/wiki/spaces/NDSS/pages/6057492803), and
+two ordering rules bite:
+
+1. No code or template reaches preprod or prod until the Offender SAR team have signed off the test report.
+2. The template must be registered with the SAR tool in an environment **before** the code deploys there.
+   The tool hashes the pending template, and an unknown hash suspends the product — after which there are
+   48 hours to fix it before the report is marked failed.
+
+Ask the HAA team on `#haa-sar-functionality-change-request` to register a template. See epic MAPB-764.
 
 ## Documentation
 
