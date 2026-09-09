@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.LocationsClient
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.SearchTerm
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.BoxLocationDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.BoxLocationSort
 
@@ -44,7 +45,7 @@ class BoxLocationService(
     val countsByLocation = repository.countContainersByLocation(prisonId)
       .associate { it.locationId to it.count.toInt() }
 
-    val matcher = query?.trim()?.takeIf { it.isNotEmpty() }?.let { toWildcardRegex(it) }
+    val matcher = query?.trim()?.takeIf { it.isNotEmpty() }?.let { SearchTerm.toWildcardRegex(it) }
     val rows = locations.asSequence()
       .map { BoxLocationDto.from(it, countsByLocation[it.id] ?: 0) }
       .filter { it.availableSpaces > 0 }
@@ -63,21 +64,4 @@ class BoxLocationService(
   }
 
   private fun BoxLocationDto.matches(matcher: Regex) = matcher.containsMatchIn(code) || matcher.containsMatchIn(pathHierarchy) || (localName?.let { matcher.containsMatchIn(it) } ?: false)
-
-  /**
-   * Turn a user search term into a case-insensitive regex, escaping regex metacharacters but honouring
-   * `*` (any run of characters) and `?` (a single character) as wildcards.
-   */
-  private fun toWildcardRegex(query: String): Regex {
-    val pattern = buildString {
-      query.forEach { ch ->
-        when (ch) {
-          '*' -> append(".*")
-          '?' -> append('.')
-          else -> append(Regex.escape(ch.toString()))
-        }
-      }
-    }
-    return Regex(pattern, RegexOption.IGNORE_CASE)
-  }
 }
