@@ -786,6 +786,62 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
+  fun `prisonerTransferredOut flags all active containers as due for transfer out, wherever held`() {
+    val here = containerAt("LEI", "SEAL1")
+    val elsewhere = containerAt("MDI", "SEAL2")
+    val removed = containerAt("LEI", "SEAL3").apply { removalOutcome = RemovalOutcome.RETURNED }
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(here, elsewhere, removed))
+
+    val events = service.prisonerTransferredOut("A1234BC")
+
+    assertThat(here.currentStatus()).isEqualTo(ContainerStatus.DUE_FOR_TRANSFER_OUT)
+    assertThat(elsewhere.currentStatus()).isEqualTo(ContainerStatus.DUE_FOR_TRANSFER_OUT)
+    assertThat(here.events.last().eventType).isEqualTo(PropertyEventType.PRISONER_TRANSFERRED_OUT)
+    // the removed container is untouched
+    assertThat(removed.events.map { it.eventType }).doesNotContain(PropertyEventType.PRISONER_TRANSFERRED_OUT)
+    assertThat(events).hasSize(2).allSatisfy { assertThat(it.eventType).isEqualTo("prison-property.container.updated") }
+  }
+
+  @Test
+  fun `prisonerTransferredOut records no destination - the movement does not say where they are going`() {
+    val container = containerAt("LEI", "SEAL1")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+
+    service.prisonerTransferredOut("A1234BC")
+
+    assertThat(container.events.last().fromPrisonId).isEqualTo("LEI")
+    assertThat(container.events.last().toPrisonId).isNull()
+    // ...so the container is not yet claimed by any receiving prison; the later reception fills that in.
+    assertThat(container.receivingPrisonId).isNull()
+  }
+
+  @Test
+  fun `prisonerTransferredOut is idempotent - a repeat does nothing`() {
+    val container = containerAt("LEI", "SEAL1")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+
+    service.prisonerTransferredOut("A1234BC")
+    val secondCallEvents = service.prisonerTransferredOut("A1234BC")
+
+    assertThat(secondCallEvents).isEmpty()
+    assertThat(container.events.count { it.eventType == PropertyEventType.PRISONER_TRANSFERRED_OUT }).isEqualTo(1)
+  }
+
+  @Test
+  fun `a release after a transfer out still flags the property due for return`() {
+    // The person left on transfer but was then released instead - the property is due back to them, not
+    // following them anywhere.
+    val container = containerAt("LEI", "SEAL1")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+
+    service.prisonerTransferredOut("A1234BC")
+    val releaseEvents = service.prisonerReleased("A1234BC")
+
+    assertThat(releaseEvents).hasSize(1)
+    assertThat(container.currentStatus()).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+  }
+
+  @Test
   fun `prisonerReleased flags all active containers as due for return, wherever held`() {
     val here = containerAt("LEI", "SEAL1")
     // A container already due for transfer out flips to due for return on release.

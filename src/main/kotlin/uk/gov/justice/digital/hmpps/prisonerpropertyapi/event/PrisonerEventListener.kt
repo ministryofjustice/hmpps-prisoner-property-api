@@ -53,15 +53,22 @@ class PrisonerEventListener(
   }
 
   /**
-   * The release event also fires for temporary movements (court, TAP, hospital) and transfers, so only a
-   * permanent release (reason RELEASED) flags property due for return. A death in custody arrives as a
-   * RELEASED event too, distinguished only by the NOMIS movement reason code DEC; it is handled like a
-   * release but recorded with a distinct DIED_IN_CUSTODY event so the history reads correctly.
+   * The release event fires whenever someone leaves an establishment, so the reason decides what it means for
+   * their property:
+   *
+   *  - RELEASED, a permanent release, flags property due for return. A death in custody arrives as a RELEASED
+   *    event too, distinguished only by the NOMIS movement reason code DEC; it is handled the same way but
+   *    recorded with a distinct DIED_IN_CUSTODY event so the history reads correctly.
+   *  - TRANSFERRED flags property due for transfer out, because it has to follow the person to wherever they
+   *    are received. This is the sending half of a move; the destination is not known until the matching
+   *    received event arrives.
+   *  - anything else is a temporary movement - court, TAP, hospital - and is ignored. The person is coming
+   *    back, so their property is going nowhere.
    */
   private fun handlePrisonerReleased(event: HmppsDomainEvent) {
     val reason = event.additionalInformation?.get("reason") as? String
-    if (reason != RELEASED_REASON) {
-      log.info("Ignoring {} with reason {} - only a permanent release flags property due for return", event.eventType, reason)
+    if (reason != RELEASED_REASON && reason != TRANSFERRED_REASON) {
+      log.info("Ignoring {} with reason {} - only a permanent release or a transfer changes property status", event.eventType, reason)
       ignored(event, "reason $reason")
       return
     }
@@ -72,10 +79,10 @@ class PrisonerEventListener(
       return
     }
     val movementReasonCode = event.additionalInformation?.get("nomisMovementReasonCode") as? String
-    val results = if (movementReasonCode == DIED_REASON_CODE) {
-      propertyContainerWriteService.prisonerDied(prisonerNumber)
-    } else {
-      propertyContainerWriteService.prisonerReleased(prisonerNumber)
+    val results = when {
+      reason == TRANSFERRED_REASON -> propertyContainerWriteService.prisonerTransferredOut(prisonerNumber)
+      movementReasonCode == DIED_REASON_CODE -> propertyContainerWriteService.prisonerDied(prisonerNumber)
+      else -> propertyContainerWriteService.prisonerReleased(prisonerNumber)
     }
     results.publishOrTrackNoChange(event, prisonerNumber)
   }
@@ -143,6 +150,9 @@ class PrisonerEventListener(
     private const val PRISONER_RELEASED_EVENT_TYPE = "prison-offender-events.prisoner.released"
     private const val PRISONER_MERGED_EVENT_TYPE = "prison-offender-events.prisoner.merged"
     private const val RELEASED_REASON = "RELEASED"
+
+    /** The released-event reason for a move between establishments, as opposed to a permanent release. */
+    private const val TRANSFERRED_REASON = "TRANSFERRED"
 
     /** NOMIS movement reason code for a death in custody, carried on the released event's additionalInformation. */
     private const val DIED_REASON_CODE = "DEC"
