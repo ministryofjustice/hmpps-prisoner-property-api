@@ -8,6 +8,7 @@ column_ref,code,description,notes
 "property_event.event_type","CONTAINER_TYPE_CHANGE","The container's type was changed.","status=STORED; carriesSeal=false"
 "property_event.event_type","MOVED","The container was moved to another storage location - internal, or offsite to Branston.","status=STORED; carriesSeal=false"
 "property_event.event_type","PRISONER_RECEIVED","The owner was received at another establishment, so the property is due to follow them.","status=DUE_FOR_TRANSFER_OUT; carriesSeal=false"
+"property_event.event_type","PRISONER_TRANSFERRED_OUT","The owner was transferred out of the establishment, so the property is due to follow them. Carries no destination - the transfer-out movement does not say where they are going.","status=DUE_FOR_TRANSFER_OUT; carriesSeal=false"
 "property_event.event_type","PRISONER_RELEASED","The owner was released, so the property is due to be returned to them.","status=DUE_FOR_RETURN; carriesSeal=false"
 "property_event.event_type","DIED_IN_CUSTODY","The owner died in custody, so the property is due to be returned.","status=DUE_FOR_RETURN; carriesSeal=false"
 "property_event.event_type","TRANSFERRED","The container was transferred out to another prison. This removes it from the sending prison; the receiving prison holds a separate record, reconciled via related_container_id.","status=TRANSFER; carriesSeal=false"
