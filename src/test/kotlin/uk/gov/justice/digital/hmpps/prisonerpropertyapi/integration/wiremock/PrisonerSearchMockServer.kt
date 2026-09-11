@@ -91,6 +91,22 @@ class PrisonerSearchMockServer : WireMockServer(WIREMOCK_PORT) {
   }
 
   /**
+   * Stub the bulk number lookup with full movement detail per prisoner - what the legacy clean-up rule reads.
+   * Anyone not listed is absent from the response, which is how prisoner-search reports an unknown number.
+   */
+  fun stubFindByNumbersDetailed(vararg prisoners: PrisonerStub) {
+    val body = prisoners.joinToString(prefix = "[", postfix = "]") { it.toJson() }
+    stubFor(
+      post(urlPathEqualTo("/prisoner-search/prisoner-numbers")).willReturn(
+        aResponse()
+          .withHeader("Content-Type", "application/json")
+          .withStatus(200)
+          .withBody(body),
+      ),
+    )
+  }
+
+  /**
    * Stub the bulk number lookup failing. The client degrades a failed chunk to no prisoners rather than an
    * error, so this is how "prisoner-search unavailable" is exercised: statuses and counts then fall back to
    * what each container itself records.
@@ -201,5 +217,30 @@ class PrisonerSearchMockServer : WireMockServer(WIREMOCK_PORT) {
           .withBody("""{"status":404,"userMessage":"$prisonerNumber not found"}"""),
       ),
     )
+  }
+}
+
+/** A prisoner as prisoner-search would return them, with only the fields this service requests. */
+data class PrisonerStub(
+  val prisonerNumber: String,
+  val prisonId: String,
+  val lastMovementTypeCode: String = "ADM",
+  val lastMovementReasonCode: String? = null,
+  val lastMovementDate: String? = null,
+  val previousPrisonId: String? = null,
+  val previousPrisonLeavingDate: String? = null,
+  val lastAdmissionDate: String? = null,
+  val confirmedReleaseDate: String? = null,
+) {
+  fun toJson(): String {
+    val optional = listOfNotNull(
+      lastMovementReasonCode?.let { """"lastMovementReasonCode": "$it"""" },
+      lastMovementDate?.let { """"lastMovementDate": "$it"""" },
+      previousPrisonId?.let { """"previousPrisonId": "$it"""" },
+      previousPrisonLeavingDate?.let { """"previousPrisonLeavingDate": "$it"""" },
+      lastAdmissionDate?.let { """"lastAdmissionDate": "$it"""" },
+      confirmedReleaseDate?.let { """"confirmedReleaseDate": "$it"""" },
+    ).joinToString("") { ", $it" }
+    return """{"prisonerNumber": "$prisonerNumber", "firstName": "JOHN", "lastName": "SMITH", "prisonId": "$prisonId", "lastMovementTypeCode": "$lastMovementTypeCode"$optional}"""
   }
 }

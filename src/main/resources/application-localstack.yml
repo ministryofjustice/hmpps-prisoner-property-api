@@ -6,6 +6,9 @@ hmpps.sqs:
       dlqName: ${random.uuid}
       subscribeTopicId: domainevents
       subscribeFilter: '{"eventType":["prison-offender-events.prisoner.released","prison-offender-events.prisoner.received","prison-offender-events.prisoner.merged"]}'
+    prisonerpropertycleanup:
+      queueName: ${random.uuid}
+      dlqName: ${random.uuid}
   topics:
     domainevents:
       arn: arn:aws:sns:eu-west-2:000000000000:${random.uuid}

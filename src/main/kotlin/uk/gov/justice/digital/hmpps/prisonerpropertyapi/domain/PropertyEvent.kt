@@ -68,6 +68,13 @@ class PropertyEvent(
   @Column(name = "related_container_seal_number")
   var relatedContainerSealNumber: String? = null,
 
+  // Set when a legacy clean-up job wrote this RETURNED / TRANSFERRED event rather than a member of staff. The
+  // timeline uses it to say the closure was automatic, and PropertyContainer.receivingPrison() uses it to keep a
+  // clean-up transfer - which records where the person went but was never physically sent on - from being
+  // advertised at that prison as property awaiting arrival.
+  @Column(name = "legacy_cleanup_job_id")
+  val legacyCleanupJobId: UUID? = null,
+
   // Snapshot of the container's type at the moment of the event, so the history stays a self-contained,
   // audit-durable record. Defaulted from the container (Kotlin allows a default to reference an earlier
   // param), so every call site captures the type automatically; for a type change the container's type is

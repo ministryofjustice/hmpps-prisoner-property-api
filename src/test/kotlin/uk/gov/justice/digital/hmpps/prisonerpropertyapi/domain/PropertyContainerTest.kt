@@ -1,6 +1,7 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain
 
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -119,6 +120,49 @@ class PropertyContainerTest {
     container.refreshDerivedState()
     assertThat(container.receivingPrison()).isNull()
     assertThat(container.receivingPrisonId).isNull()
+  }
+
+  @Nested
+  inner class ReceivingPrison {
+    private fun transferredOut(legacyCleanupJobId: UUID? = null, relatedContainerId: UUID? = null): PropertyContainer {
+      val container = container()
+      container.events.add(
+        PropertyEvent(
+          container,
+          PropertyEventType.TRANSFERRED,
+          BASE_TIME.plusDays(1),
+          "USER1",
+          fromPrisonId = "LEI",
+          toPrisonId = "MDI",
+          relatedContainerId = relatedContainerId,
+          legacyCleanupJobId = legacyCleanupJobId,
+        ),
+      )
+      container.removalOutcome = RemovalOutcome.TRANSFERRED
+      container.refreshDerivedState()
+      return container
+    }
+
+    @Test
+    fun `a staff transfer not yet logged at the destination is awaiting arrival there`() {
+      val container = transferredOut()
+      assertThat(container.receivingPrison()).isEqualTo("MDI")
+      assertThat(container.receivingPrisonId).isEqualTo("MDI")
+    }
+
+    @Test
+    fun `a reconciled transfer is no longer awaiting`() {
+      assertThat(transferredOut(relatedContainerId = UUID.randomUUID()).receivingPrison()).isNull()
+    }
+
+    @Test
+    fun `a legacy clean-up transfer records the destination but is never awaiting arrival`() {
+      val container = transferredOut(legacyCleanupJobId = UUID.randomUUID())
+      assertThat(container.latestTransferEvent()?.toPrisonId).isEqualTo("MDI")
+      assertThat(container.receivingPrison()).isNull()
+      assertThat(container.receivingPrisonId).isNull()
+      assertThat(container.currentLocation()).isNull()
+    }
   }
 
   private companion object {

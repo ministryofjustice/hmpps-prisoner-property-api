@@ -128,6 +128,11 @@ hmpps.sqs:
       dlqName: ${HMPPS_SQS_QUEUES_PRISONERPROPERTY_DLQ_NAME:}
       subscribeTopicId: domainevents
       subscribeFilter: '{"eventType":["prison-offender-events.prisoner.released","prison-offender-events.prisoner.received","prison-offender-events.prisoner.merged"]}'
+    # Work queue for the legacy clean-up job: the service sends the start message to it itself after committing
+    # a job (LegacyCleanupService) and consumes it in LegacyCleanupListener. Not subscribed to any topic.
+    prisonerpropertycleanup:
+      queueName: ${HMPPS_SQS_QUEUES_PRISONERPROPERTYCLEANUP_QUEUE_NAME:}
+      dlqName: ${HMPPS_SQS_QUEUES_PRISONERPROPERTYCLEANUP_DLQ_NAME:}
   topics:
     domainevents:
       arn: ${HMPPS_SQS_TOPICS_DOMAINEVENTS_ARN:}

@@ -32,6 +32,21 @@ object PropertyTelemetry {
   const val PRISON_ROLLOUT_CHANGED = "prison-property-prison-rollout-changed"
 
   /**
+   * The legacy clean-up job: requested by an admin (with the window and what it set out to close), and
+   * finished (with what it actually did). The per-container `.updated` events it publishes are tracked by the
+   * publisher like any other; these two bracket the run so its size and duration are queryable.
+   */
+  const val LEGACY_CLEANUP_REQUESTED = "prison-property-legacy-cleanup-requested"
+  const val LEGACY_CLEANUP_FINISHED = "prison-property-legacy-cleanup-finished"
+
+  /** An item the clean-up left alone or could not close; carries the `reason`. */
+  const val LEGACY_CLEANUP_ITEM_SKIPPED = "prison-property-legacy-cleanup-item-skipped"
+  const val LEGACY_CLEANUP_ITEM_FAILED = "prison-property-legacy-cleanup-item-failed"
+
+  /** A clean-up start message arrived for a job already running or finished - a redelivery, deliberately ignored. */
+  const val LEGACY_CLEANUP_DUPLICATE_MESSAGE = "prison-property-legacy-cleanup-duplicate-message"
+
+  /**
    * The SNS publish failed *after* the transaction committed - the data change is durable but the event
    * is gone. Without this the loss is invisible in both logs and telemetry.
    */
