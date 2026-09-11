@@ -29,8 +29,67 @@
             <column ascending="true" name="success"/>
          </index>
       </table>
+      <table name="legacy_cleanup_item" remarks="One container a legacy clean-up job intends to close, snapshotted with the action decided at request time. Processed one per transaction; the status records what happened to it." schema="public" type="TABLE">
+         <column autoUpdated="false" defaultValue="null" digits="0" id="0" name="id" nullable="false" remarks="Primary key. Time-ordered UUID v7. [Sensitivity: NONE]" size="2147483647" type="uuid" typeCode="1111"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="1" name="legacy_cleanup_job_id" nullable="false" remarks="The job this item belongs to. [Sensitivity: NONE]" size="2147483647" type="uuid" typeCode="1111">
+            <parent column="id" foreignKey="legacy_cleanup_item_legacy_cleanup_job_id_fkey" implied="false" onDeleteCascade="true" schema="public" table="legacy_cleanup_job"/>
+         </column>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="2" name="property_container_id" nullable="false" remarks="The container to close. [Sensitivity: NONE]" size="2147483647" type="uuid" typeCode="1111">
+            <parent column="id" foreignKey="legacy_cleanup_item_property_container_id_fkey" implied="false" onDeleteCascade="true" schema="public" table="property_container"/>
+         </column>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="3" name="prisoner_number" nullable="false" remarks="The prisoner number the container belonged to when the job was requested, so the item can be re-checked against prisoner-search without loading the container. Identifies a prisoner. [Sensitivity: PERSONAL]" size="10" type="varchar" typeCode="12"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="4" name="action" nullable="false" remarks="RETURN (the person was released: mark returned) or TRANSFER (the person is at another prison: mark transferred there). [Sensitivity: NONE]" size="16" type="varchar" typeCode="12"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="5" name="planned_event_date" nullable="false" remarks="The date the closing event will be dated to: the release date, or the date the person left this prison. Taken from prisoner-search when the job was requested. [Sensitivity: PERSONAL]" size="13" type="date" typeCode="91"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="6" name="planned_to_prison_id" nullable="true" remarks="For TRANSFER, the prison the person is now at, which becomes the destination on the TRANSFERRED event. Null for RETURN. Locates a prisoner. [Sensitivity: PERSONAL]" size="6" type="varchar" typeCode="12"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="7" name="status" nullable="false" remarks="PENDING, PROCESSED (the container was closed), SKIPPED (already removed, or no longer qualified on re-check) or FAILED (an error; the container is unchanged). [Sensitivity: NONE]" size="16" type="varchar" typeCode="12"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="8" name="message" nullable="true" remarks="Why the item was skipped or failed, or a note that the domain event could not be published after the change was committed. Null when processed cleanly. [Sensitivity: NONE]" size="255" type="varchar" typeCode="12"/>
+         <column autoUpdated="false" defaultValue="null" digits="6" id="9" name="processed_at" nullable="true" remarks="When the item reached its final status. Null while PENDING. [Sensitivity: NONE]" size="29" type="timestamp" typeCode="93"/>
+         <primaryKey column="id" sequenceNumberInPK="1"/>
+         <index name="legacy_cleanup_item_pkey" unique="true">
+            <column ascending="true" name="id"/>
+         </index>
+         <index name="idx_legacy_cleanup_item_container" unique="false">
+            <column ascending="true" name="property_container_id"/>
+         </index>
+         <index name="idx_legacy_cleanup_item_job_status" unique="false">
+            <column ascending="true" name="legacy_cleanup_job_id"/>
+            <column ascending="true" name="status"/>
+         </index>
+      </table>
+      <table name="legacy_cleanup_job" remarks="One admin-requested run of the legacy property clean-up for a prison: closes containers still held there for people released or transferred out before a cut-off date, marking each RETURNED or TRANSFERRED. Processed asynchronously from an SQS work queue, one container per transaction; the counters are updated as it goes so progress can be watched." schema="public" type="TABLE">
+         <column autoUpdated="false" defaultValue="null" digits="0" id="0" name="id" nullable="false" remarks="Primary key. Time-ordered UUID v7. [Sensitivity: NONE]" size="2147483647" type="uuid" typeCode="1111">
+            <child column="legacy_cleanup_job_id" foreignKey="legacy_cleanup_item_legacy_cleanup_job_id_fkey" implied="false" onDeleteCascade="true" schema="public" table="legacy_cleanup_item"/>
+            <child column="legacy_cleanup_job_id" foreignKey="property_event_legacy_cleanup_job_id_fkey" implied="false" onDeleteCascade="false" schema="public" table="property_event"/>
+         </column>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="1" name="prison_id" nullable="false" remarks="The prison whose held property is being cleaned up. [Sensitivity: NONE]" size="6" type="varchar" typeCode="12"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="2" name="status" nullable="false" remarks="PENDING (requested, not yet claimed by a listener), STARTED (being processed) or FINISHED. A partial unique index allows one PENDING or STARTED job per prison. [Sensitivity: NONE]" size="16" type="varchar" typeCode="12"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="3" name="older_than_days" nullable="false" remarks="The look-back window the admin chose: only people who left at least this many days before the request are in scope. [Sensitivity: NONE]" size="10" type="int4" typeCode="4"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="4" name="cutoff_date" nullable="false" remarks="The request date minus older_than_days; a person must have left on or before this date to be in scope. Stored so the rule the job applied is reproducible. [Sensitivity: NONE]" size="13" type="date" typeCode="91"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="5" name="requested_by" nullable="false" remarks="DPS username of the admin who requested the run. The property events the run writes are attributed to the LEGACY_CLEANUP system user, so this is the only record of who asked for them. [Sensitivity: STAFF]" size="64" type="varchar" typeCode="12"/>
+         <column autoUpdated="false" defaultValue="null" digits="6" id="6" name="requested_at" nullable="false" remarks="When the run was requested. [Sensitivity: NONE]" size="29" type="timestamp" typeCode="93"/>
+         <column autoUpdated="false" defaultValue="null" digits="6" id="7" name="start_time" nullable="true" remarks="When a listener first claimed the job and began processing. Null while PENDING. [Sensitivity: NONE]" size="29" type="timestamp" typeCode="93"/>
+         <column autoUpdated="false" defaultValue="null" digits="6" id="8" name="last_activity_at" nullable="true" remarks="When the job last made progress. A STARTED job with no activity for 30 minutes is treated as abandoned (its pod died) and may be re-claimed by a redelivered message; only unprocessed items are then resumed. [Sensitivity: NONE]" size="29" type="timestamp" typeCode="93"/>
+         <column autoUpdated="false" defaultValue="null" digits="6" id="9" name="end_time" nullable="true" remarks="When processing finished. Null until FINISHED. [Sensitivity: NONE]" size="29" type="timestamp" typeCode="93"/>
+         <column autoUpdated="false" defaultValue="0" digits="0" id="10" name="total_records" nullable="false" remarks="How many containers were snapshotted as items when the job was requested. [Sensitivity: NONE]" size="10" type="int4" typeCode="4"/>
+         <column autoUpdated="false" defaultValue="0" digits="0" id="11" name="returned_records" nullable="false" remarks="How many items have been marked RETURNED so far. [Sensitivity: NONE]" size="10" type="int4" typeCode="4"/>
+         <column autoUpdated="false" defaultValue="0" digits="0" id="12" name="transferred_records" nullable="false" remarks="How many items have been marked TRANSFERRED so far. [Sensitivity: NONE]" size="10" type="int4" typeCode="4"/>
+         <column autoUpdated="false" defaultValue="0" digits="0" id="13" name="skipped_records" nullable="false" remarks="How many items were skipped: the container had already been removed by staff, or the person no longer qualified when re-checked against prisoner-search at processing time. [Sensitivity: NONE]" size="10" type="int4" typeCode="4"/>
+         <column autoUpdated="false" defaultValue="0" digits="0" id="14" name="failed_records" nullable="false" remarks="How many items failed with an error; the container was left unchanged and the message on the item says why. [Sensitivity: NONE]" size="10" type="int4" typeCode="4"/>
+         <primaryKey column="id" sequenceNumberInPK="1"/>
+         <index name="legacy_cleanup_job_pkey" unique="true">
+            <column ascending="true" name="id"/>
+         </index>
+         <index name="idx_legacy_cleanup_job_active_prison" unique="true">
+            <column ascending="true" name="prison_id"/>
+         </index>
+         <index name="idx_legacy_cleanup_job_prison" unique="false">
+            <column ascending="true" name="prison_id"/>
+            <column ascending="false" name="requested_at"/>
+         </index>
+      </table>
       <table name="property_container" remarks="A sealed container of one prisoner's property. The record is event-sourced: its history lives in property_event and its current status and location are derived from the most recent relevant event. Five values are mirrored into columns here (seal number, status, internal location, storage location type, receiving prison) so the establishment-wide list can filter and page in SQL; the derivation stays authoritative and every write refreshes the mirrors." schema="public" type="TABLE">
          <column autoUpdated="false" defaultValue="null" digits="0" id="0" name="id" nullable="false" remarks="Primary key. Time-ordered UUID v7, so insert order matches id order. [Sensitivity: NONE]" size="2147483647" type="uuid" typeCode="1111">
+            <child column="property_container_id" foreignKey="legacy_cleanup_item_property_container_id_fkey" implied="false" onDeleteCascade="true" schema="public" table="legacy_cleanup_item"/>
             <child column="property_container_id" foreignKey="property_event_property_container_id_fkey" implied="false" onDeleteCascade="false" schema="public" table="property_event"/>
          </column>
          <column autoUpdated="false" defaultValue="null" digits="0" id="1" name="prisoner_number" nullable="false" remarks="NOMIS offender number (noms id) of the prisoner whose property this is. The link that makes every row here personal data about that prisoner. Reassigned when NOMIS merges two prisoner numbers for the same person: the containers move to the surviving number and the retired one survives only as removedNomsNumber on the resulting domain event. [Sensitivity: PERSONAL]" size="10" type="varchar" typeCode="12"/>
@@ -82,12 +141,15 @@
          <column autoUpdated="false" defaultValue="null" digits="0" id="6" name="to_internal_location_id" nullable="true" remarks="Storage location the container moved to - a location UUID in hmpps-locations-inside-prison-api. Null when the event does not move it, or when it moved offsite to Branston (which has no internal location id). [Sensitivity: NONE]" size="2147483647" type="uuid" typeCode="1111"/>
          <column autoUpdated="false" defaultValue="null" digits="0" id="7" name="from_prison_id" nullable="true" remarks="Agency code the container was held at before this event. Set on events that move it between prisons. Indicates the prisoner's previous establishment. [Sensitivity: PERSONAL]" size="6" type="varchar" typeCode="12"/>
          <column autoUpdated="false" defaultValue="null" digits="0" id="8" name="to_prison_id" nullable="true" remarks="Agency code the container is going to. Set on a transfer out, and on the PRISONER_RECEIVED that flags property as due to follow its owner - so it indicates where the prisoner has moved to. [Sensitivity: PERSONAL]" size="6" type="varchar" typeCode="12"/>
-         <column autoUpdated="false" defaultValue="null" digits="0" id="9" name="event_user_id" nullable="false" remarks="DPS username of the member of staff who performed the action, or the system user for events raised by NOMIS sync or the prisoner movement listener. Identifies a member of staff. [Sensitivity: STAFF]" size="32" type="varchar" typeCode="12"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="9" name="event_user_id" nullable="false" remarks="DPS username of the member of staff who performed the action, or a reserved system user: PRISONER_PROPERTY_API for events raised by NOMIS sync or the prisoner movement listener, LEGACY_CLEANUP for closures written by a legacy clean-up job. Identifies a member of staff. [Sensitivity: STAFF]" size="32" type="varchar" typeCode="12"/>
          <column autoUpdated="false" defaultValue="null" digits="0" id="10" name="event_date" nullable="true" remarks="The date the underlying prison activity happened, where it differs from when it was recorded (for example a disposal logged after the event). Null when the recorded timestamp is the date. [Sensitivity: NONE]" size="13" type="date" typeCode="91"/>
          <column autoUpdated="false" defaultValue="null" digits="0" id="11" name="to_storage_location_type" nullable="true" remarks="The kind of location the container moved to: INTERNAL or BRANSTON. Older events recorded an internal location id without an explicit type, and are read as INTERNAL. [Sensitivity: NONE]" size="20" type="varchar" typeCode="12"/>
          <column autoUpdated="false" defaultValue="null" digits="0" id="12" name="related_container_id" nullable="true" remarks="The other container involved: the one this container was combined into, or the matching record at the other end of a transfer. Filled in later on a transfer out, once the receiving prison logs the arrival and the two records are reconciled. [Sensitivity: NONE]" size="2147483647" type="uuid" typeCode="1111"/>
          <column autoUpdated="false" defaultValue="null" digits="0" id="13" name="container_type" nullable="false" remarks="The container's type at the moment of the event, snapshotted so the history is a self-contained record. On a type change this holds the new type. [Sensitivity: NONE]" size="20" type="varchar" typeCode="12"/>
          <column autoUpdated="false" defaultValue="null" digits="0" id="14" name="related_container_seal_number" nullable="true" remarks="The related container's seal number as at this event, snapshotted so the history names it by the seal it had at the time rather than any later reseal. [Sensitivity: NONE]" size="60" type="varchar" typeCode="12"/>
+         <column autoUpdated="false" defaultValue="null" digits="0" id="15" name="legacy_cleanup_job_id" nullable="true" remarks="Set on the RETURNED or TRANSFERRED event when the closure was written by a legacy clean-up job rather than by staff; null on every other event. A TRANSFERRED event carrying it records where the person went for the history, but is never treated as property awaiting arrival at that prison. [Sensitivity: NONE]" size="2147483647" type="uuid" typeCode="1111">
+            <parent column="id" foreignKey="property_event_legacy_cleanup_job_id_fkey" implied="false" onDeleteCascade="false" schema="public" table="legacy_cleanup_job"/>
+         </column>
          <primaryKey column="id" sequenceNumberInPK="1"/>
          <index name="property_event_pkey" unique="true">
             <column ascending="true" name="id"/>

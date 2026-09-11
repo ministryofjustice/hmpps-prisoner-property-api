@@ -3,7 +3,7 @@
     <head>
         <meta charset="utf-8">
         <meta http-equiv="X-UA-Compatible" content="IE=edge">
-        <title>property_event - prisoner_property.public</title>
+        <title>legacy_cleanup_job - prisoner_property.public</title>
         <!-- Tell the browser to be responsive to screen width -->
         <meta content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" name="viewport">
         <link rel="icon" type="image/png" sizes="16x16" href="../favicon.png">
@@ -73,7 +73,7 @@
             <div class="content-wrapper">
                 <!-- Content Header (Page header) -->
                 <section class="content-header">
-                    <h1>property_event</h1><p><span id="recordNumber">-1</span> rows</p><br />
+                    <h1>legacy_cleanup_job</h1><p><span id="recordNumber">-1</span> rows</p><br />
                     <div class="box box-primary">
                         <div class="box-header with-border">
                             <i class="fa fa-file-text-o"></i>
@@ -84,7 +84,7 @@
                             </div>
                         </div><!-- /.box-header -->
                         <div class="box-body clearfix">
-                            <p>One thing that happened to a container, in an ordered history. This is the authoritative record: the container&rsquo;s current seal, status and location are derived from the most recent relevant event, and the columns on property_container are mirrors of that derivation. Events are appended, never amended, so this table is also the audit trail.</p>
+                            <p>One admin-requested run of the legacy property clean-up for a prison: closes containers still held there for people released or transferred out before a cut-off date, marking each RETURNED or TRANSFERRED. Processed asynchronously from an SQS work queue, one container per transaction; the counters are updated as it goes so progress can be watched.</p>
                         </div><!-- /.box-body -->
                     </div>
                 </section>
@@ -130,6 +130,16 @@
                                     <td>null</td>
                                     <td>
                                         <table border='0' cellspacing='0' cellpadding='0'>
+                                            <tr>
+                                                <td title="legacy_cleanup_item.legacy_cleanup_job_id references legacy_cleanup_job.id via legacy_cleanup_item_legacy_cleanup_job_id_fkey"><a href='legacy_cleanup_item.html'>legacy_cleanup_item</a><span class='relatedKey'>.legacy_cleanup_job_id</span></td>
+                                                <td class="constraint detail">legacy_cleanup_item_legacy_cleanup_job_id_fkey</td>
+                                                <td class="constraint detail"><span title='Cascade on delete:&#10;Deletion of parent deletes child'>C</span></td>
+                                            </tr>
+                                            <tr>
+                                                <td title="property_event.legacy_cleanup_job_id references legacy_cleanup_job.id via property_event_legacy_cleanup_job_id_fkey"><a href='property_event.html'>property_event</a><span class='relatedKey'>.legacy_cleanup_job_id</span></td>
+                                                <td class="constraint detail">property_event_legacy_cleanup_job_id_fkey</td>
+                                                <td class="constraint detail"><span title='Restrict delete:&#10;Parent cannot be deleted if children exist'>R</span></td>
+                                            </tr>
                                         </table>
                                     </td>
                                     <td>
@@ -139,31 +149,9 @@
                                     <td><p>Primary key. Time-ordered UUID v7. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
-                                    <td class='foreignKey' title='Foreign Key'><i class='icon ion-key iconkey' style='padding-left: 5px;'></i><span id="property_container_id">property_container_id</span></td>
-                                    <td>uuid</td>
-                                    <td>2147483647</td>
-                                    <td title=''></td>
-                                    <td title=''></td>
-                                    <td>null</td>
-                                    <td>
-                                        <table border='0' cellspacing='0' cellpadding='0'>
-                                        </table>
-                                    </td>
-                                    <td>
-                                        <table border='0' cellspacing='0' cellpadding='0'>
-                                            <tr>
-                                                <td title="property_event.property_container_id references property_container.id via property_event_property_container_id_fkey"><a href='property_container.html'>property_container</a><span class='relatedKey'>.id</span></td>
-                                                <td class="constraint detail">property_event_property_container_id_fkey</td>
-                                                <td class="constraint detail"><span title='Restrict delete:&#10;Parent cannot be deleted if children exist'>R</span></td>
-                                            </tr>
-                                        </table>
-                                    </td>
-                                    <td><p>Foreign key to property_container - the container this event happened to. <a href="./../null">Sensitivity: NONE</a></p></td>
-                                </tr>
-                                <tr>
-                                    <td><span id="event_type">event_type</span></td>
+                                    <td class='indexedColumn' title='Indexed'><i class='fa fa-sitemap fa-rotate-120' style='padding-right: 5px;'></i><span id="prison_id">prison_id</span></td>
                                     <td>varchar</td>
-                                    <td>30</td>
+                                    <td>6</td>
                                     <td title=''></td>
                                     <td title=''></td>
                                     <td>null</td>
@@ -175,13 +163,13 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>What happened. One of CREATED_SEALED, SEAL_CHANGED, CONTAINER_TYPE_CHANGE, MOVED, TRANSFERRED, RETURNED, DISPOSAL_REQUIRED, DISPOSED, COMBINED, CREATED_IN_ERROR, REMOVED, REACTIVATED, or the four driven by prisoner movements - PRISONER_TRANSFERRED_OUT, PRISONER_RECEIVED, PRISONER_RELEASED, DIED_IN_CUSTODY. Each type implies a status. <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>The prison whose held property is being cleaned up. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
-                                    <td><span id="seal_number">seal_number</span></td>
+                                    <td><span id="status">status</span></td>
                                     <td>varchar</td>
-                                    <td>60</td>
-                                    <td title='nullable'>√</td>
+                                    <td>16</td>
+                                    <td title=''></td>
                                     <td title=''></td>
                                     <td>null</td>
                                     <td>
@@ -192,10 +180,61 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>Seal number recorded by this event, on the event types that carry one (creation and reseal). Null on events that do not change the seal. <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>PENDING (requested, not yet claimed by a listener), STARTED (being processed) or FINISHED. A partial unique index allows one PENDING or STARTED job per prison. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
-                                    <td><span id="event_datetime">event_datetime</span></td>
+                                    <td><span id="older_than_days">older_than_days</span></td>
+                                    <td>int4</td>
+                                    <td>10</td>
+                                    <td title=''></td>
+                                    <td title=''></td>
+                                    <td>null</td>
+                                    <td>
+                                        <table border='0' cellspacing='0' cellpadding='0'>
+                                        </table>
+                                    </td>
+                                    <td>
+                                        <table border='0' cellspacing='0' cellpadding='0'>
+                                        </table>
+                                    </td>
+                                    <td><p>The look-back window the admin chose: only people who left at least this many days before the request are in scope. <a href="./../null">Sensitivity: NONE</a></p></td>
+                                </tr>
+                                <tr>
+                                    <td><span id="cutoff_date">cutoff_date</span></td>
+                                    <td>date</td>
+                                    <td>13</td>
+                                    <td title=''></td>
+                                    <td title=''></td>
+                                    <td>null</td>
+                                    <td>
+                                        <table border='0' cellspacing='0' cellpadding='0'>
+                                        </table>
+                                    </td>
+                                    <td>
+                                        <table border='0' cellspacing='0' cellpadding='0'>
+                                        </table>
+                                    </td>
+                                    <td><p>The request date minus older_than_days; a person must have left on or before this date to be in scope. Stored so the rule the job applied is reproducible. <a href="./../null">Sensitivity: NONE</a></p></td>
+                                </tr>
+                                <tr>
+                                    <td><span id="requested_by">requested_by</span></td>
+                                    <td>varchar</td>
+                                    <td>64</td>
+                                    <td title=''></td>
+                                    <td title=''></td>
+                                    <td>null</td>
+                                    <td>
+                                        <table border='0' cellspacing='0' cellpadding='0'>
+                                        </table>
+                                    </td>
+                                    <td>
+                                        <table border='0' cellspacing='0' cellpadding='0'>
+                                        </table>
+                                    </td>
+                                    <td><p>DPS username of the admin who requested the run. The property events the run writes are attributed to the LEGACY_CLEANUP system user, so this is the only record of who asked for them. <a href="./../null">Sensitivity: STAFF</a></p></td>
+                                </tr>
+                                <tr>
+                                    <td class='indexedColumn' title='Indexed'><i class='fa fa-sitemap fa-rotate-120' style='padding-right: 5px;'></i><span id="requested_at">requested_at</span></td>
                                     <td>timestamp</td>
                                     <td>29,6</td>
                                     <td title=''></td>
@@ -209,12 +248,12 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>When the event happened. Events are ordered by this; where two share a timestamp the later-appended one wins. <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>When the run was requested. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
-                                    <td><span id="from_internal_location_id">from_internal_location_id</span></td>
-                                    <td>uuid</td>
-                                    <td>2147483647</td>
+                                    <td><span id="start_time">start_time</span></td>
+                                    <td>timestamp</td>
+                                    <td>29,6</td>
                                     <td title='nullable'>√</td>
                                     <td title=''></td>
                                     <td>null</td>
@@ -226,12 +265,12 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>Storage location the container moved from - a location UUID in hmpps-locations-inside-prison-api. Null when the event does not move it. <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>When a listener first claimed the job and began processing. Null while PENDING. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
-                                    <td><span id="to_internal_location_id">to_internal_location_id</span></td>
-                                    <td>uuid</td>
-                                    <td>2147483647</td>
+                                    <td><span id="last_activity_at">last_activity_at</span></td>
+                                    <td>timestamp</td>
+                                    <td>29,6</td>
                                     <td title='nullable'>√</td>
                                     <td title=''></td>
                                     <td>null</td>
@@ -243,12 +282,12 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>Storage location the container moved to - a location UUID in hmpps-locations-inside-prison-api. Null when the event does not move it, or when it moved offsite to Branston (which has no internal location id). <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>When the job last made progress. A STARTED job with no activity for 30 minutes is treated as abandoned (its pod died) and may be re-claimed by a redelivered message; only unprocessed items are then resumed. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
-                                    <td><span id="from_prison_id">from_prison_id</span></td>
-                                    <td>varchar</td>
-                                    <td>6</td>
+                                    <td><span id="end_time">end_time</span></td>
+                                    <td>timestamp</td>
+                                    <td>29,6</td>
                                     <td title='nullable'>√</td>
                                     <td title=''></td>
                                     <td>null</td>
@@ -260,15 +299,15 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>Agency code the container was held at before this event. Set on events that move it between prisons. Indicates the prisoner&rsquo;s previous establishment. <a href="./../null">Sensitivity: PERSONAL</a></p></td>
+                                    <td><p>When processing finished. Null until FINISHED. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
-                                    <td><span id="to_prison_id">to_prison_id</span></td>
-                                    <td>varchar</td>
-                                    <td>6</td>
-                                    <td title='nullable'>√</td>
+                                    <td><span id="total_records">total_records</span></td>
+                                    <td>int4</td>
+                                    <td>10</td>
                                     <td title=''></td>
-                                    <td>null</td>
+                                    <td title=''></td>
+                                    <td>0</td>
                                     <td>
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
@@ -277,15 +316,15 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>Agency code the container is going to. Set on a transfer out, and on the PRISONER_RECEIVED that flags property as due to follow its owner - so it indicates where the prisoner has moved to. <a href="./../null">Sensitivity: PERSONAL</a></p></td>
+                                    <td><p>How many containers were snapshotted as items when the job was requested. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
-                                    <td><span id="event_user_id">event_user_id</span></td>
-                                    <td>varchar</td>
-                                    <td>32</td>
+                                    <td><span id="returned_records">returned_records</span></td>
+                                    <td>int4</td>
+                                    <td>10</td>
                                     <td title=''></td>
                                     <td title=''></td>
-                                    <td>null</td>
+                                    <td>0</td>
                                     <td>
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
@@ -294,15 +333,15 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>DPS username of the member of staff who performed the action, or a reserved system user: PRISONER_PROPERTY_API for events raised by NOMIS sync or the prisoner movement listener, LEGACY_CLEANUP for closures written by a legacy clean-up job. Identifies a member of staff. <a href="./../null">Sensitivity: STAFF</a></p></td>
+                                    <td><p>How many items have been marked RETURNED so far. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
-                                    <td><span id="event_date">event_date</span></td>
-                                    <td>date</td>
-                                    <td>13</td>
-                                    <td title='nullable'>√</td>
+                                    <td><span id="transferred_records">transferred_records</span></td>
+                                    <td>int4</td>
+                                    <td>10</td>
                                     <td title=''></td>
-                                    <td>null</td>
+                                    <td title=''></td>
+                                    <td>0</td>
                                     <td>
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
@@ -311,15 +350,15 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>The date the underlying prison activity happened, where it differs from when it was recorded (for example a disposal logged after the event). Null when the recorded timestamp is the date. <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>How many items have been marked TRANSFERRED so far. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
-                                    <td><span id="to_storage_location_type">to_storage_location_type</span></td>
-                                    <td>varchar</td>
-                                    <td>20</td>
-                                    <td title='nullable'>√</td>
+                                    <td><span id="skipped_records">skipped_records</span></td>
+                                    <td>int4</td>
+                                    <td>10</td>
                                     <td title=''></td>
-                                    <td>null</td>
+                                    <td title=''></td>
+                                    <td>0</td>
                                     <td>
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
@@ -328,32 +367,15 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>The kind of location the container moved to: INTERNAL or BRANSTON. Older events recorded an internal location id without an explicit type, and are read as INTERNAL. <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>How many items were skipped: the container had already been removed by staff, or the person no longer qualified when re-checked against prisoner-search at processing time. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
-                                    <td><span id="related_container_id">related_container_id</span></td>
-                                    <td>uuid</td>
-                                    <td>2147483647</td>
-                                    <td title='nullable'>√</td>
-                                    <td title=''></td>
-                                    <td>null</td>
-                                    <td>
-                                        <table border='0' cellspacing='0' cellpadding='0'>
-                                        </table>
-                                    </td>
-                                    <td>
-                                        <table border='0' cellspacing='0' cellpadding='0'>
-                                        </table>
-                                    </td>
-                                    <td><p>The other container involved: the one this container was combined into, or the matching record at the other end of a transfer. Filled in later on a transfer out, once the receiving prison logs the arrival and the two records are reconciled. <a href="./../null">Sensitivity: NONE</a></p></td>
-                                </tr>
-                                <tr>
-                                    <td><span id="container_type">container_type</span></td>
-                                    <td>varchar</td>
-                                    <td>20</td>
+                                    <td><span id="failed_records">failed_records</span></td>
+                                    <td>int4</td>
+                                    <td>10</td>
                                     <td title=''></td>
                                     <td title=''></td>
-                                    <td>null</td>
+                                    <td>0</td>
                                     <td>
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
@@ -362,46 +384,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>The container&rsquo;s type at the moment of the event, snapshotted so the history is a self-contained record. On a type change this holds the new type. <a href="./../null">Sensitivity: NONE</a></p></td>
-                                </tr>
-                                <tr>
-                                    <td><span id="related_container_seal_number">related_container_seal_number</span></td>
-                                    <td>varchar</td>
-                                    <td>60</td>
-                                    <td title='nullable'>√</td>
-                                    <td title=''></td>
-                                    <td>null</td>
-                                    <td>
-                                        <table border='0' cellspacing='0' cellpadding='0'>
-                                        </table>
-                                    </td>
-                                    <td>
-                                        <table border='0' cellspacing='0' cellpadding='0'>
-                                        </table>
-                                    </td>
-                                    <td><p>The related container&rsquo;s seal number as at this event, snapshotted so the history names it by the seal it had at the time rather than any later reseal. <a href="./../null">Sensitivity: NONE</a></p></td>
-                                </tr>
-                                <tr>
-                                    <td class='foreignKey' title='Foreign Key'><i class='icon ion-key iconkey' style='padding-left: 5px;'></i><span id="legacy_cleanup_job_id">legacy_cleanup_job_id</span></td>
-                                    <td>uuid</td>
-                                    <td>2147483647</td>
-                                    <td title='nullable'>√</td>
-                                    <td title=''></td>
-                                    <td>null</td>
-                                    <td>
-                                        <table border='0' cellspacing='0' cellpadding='0'>
-                                        </table>
-                                    </td>
-                                    <td>
-                                        <table border='0' cellspacing='0' cellpadding='0'>
-                                            <tr>
-                                                <td title="property_event.legacy_cleanup_job_id references legacy_cleanup_job.id via property_event_legacy_cleanup_job_id_fkey"><a href='legacy_cleanup_job.html'>legacy_cleanup_job</a><span class='relatedKey'>.id</span></td>
-                                                <td class="constraint detail">property_event_legacy_cleanup_job_id_fkey</td>
-                                                <td class="constraint detail"><span title='Restrict delete:&#10;Parent cannot be deleted if children exist'>R</span></td>
-                                            </tr>
-                                        </table>
-                                    </td>
-                                    <td><p>Set on the RETURNED or TRANSFERRED event when the closure was written by a legacy clean-up job rather than by staff; null on every other event. A TRANSFERRED event carrying it records where the person went for the history, but is never treated as property awaiting arrival at that prison. <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>How many items failed with an error; the container was left unchanged and the message on the item says why. <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 </tbody>
                             </table>
@@ -434,16 +417,22 @@
                                 </thead>
                                 <tbody>
                                 <tr>
-                                    <td class='primaryKey' title='Primary Key'><i class='icon ion-key iconkey'></i> property_event_pkey</td>
+                                    <td class='primaryKey' title='Primary Key'><i class='icon ion-key iconkey'></i> legacy_cleanup_job_pkey</td>
                                     <td>Primary key</td>
                                     <td><span title='Ascending'>Asc</span></td>
                                     <td>id</td>
                                 </tr>
                                 <tr>
-                                    <td title='Indexed'>idx_property_event_container</td>
-                                    <td>Performance</td>
+                                    <td class='uniqueKey' title='Unique Key'><i class='icon ion-key iconkey'></i> idx_legacy_cleanup_job_active_prison</td>
+                                    <td>Must be unique</td>
                                     <td><span title='Ascending'>Asc</span></td>
-                                    <td>property_container_id</td>
+                                    <td>prison_id</td>
+                                </tr>
+                                <tr>
+                                    <td title='Indexed'>idx_legacy_cleanup_job_prison</td>
+                                    <td>Performance</td>
+                                    <td><span title='Ascending'>Asc</span>/<span title='Descending'>Desc</span></td>
+                                    <td>prison_id + requested_at</td>
                                 </tr>
                                 </tbody>
                             </table>
@@ -468,11 +457,11 @@
                                 <div class="tab-content no-padding">
                                     <div class="chart tab-pane active" id="oneDegreeImg-chart" style="position: relative; overflow-x:auto;">
                                         
-                                        <a name='diagram'><object type="image/svg+xml" id="oneDegreeImg" data="../diagrams/tables/property_event.1degree.svg" class="diagram" border="0" align="left"></object></a>
+                                        <a name='diagram'><object type="image/svg+xml" id="oneDegreeImg" data="../diagrams/tables/legacy_cleanup_job.1degree.svg" class="diagram" border="0" align="left"></object></a>
                                     </div>
                                     <div class="chart tab-pane " id="twodegreesDegreeImg-chart" style="position: relative; overflow-x:auto;">
                                         
-                                        <a name='diagram'><object type="image/svg+xml" id="twodegreesDegreeImg" data="../diagrams/tables/property_event.2degrees.svg" class="diagram" border="0" align="left"></object></a>
+                                        <a name='diagram'><object type="image/svg+xml" id="twodegreesDegreeImg" data="../diagrams/tables/legacy_cleanup_job.2degrees.svg" class="diagram" border="0" align="left"></object></a>
                                     </div>
                                 </div>
                             </div>

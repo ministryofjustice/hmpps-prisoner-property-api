@@ -1,4 +1,6 @@
 flyway_schema_history
 active_agency
 property_event
+legacy_cleanup_item
 property_container
+legacy_cleanup_job
