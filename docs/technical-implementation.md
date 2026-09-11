@@ -24,7 +24,7 @@ Base package: `uk.gov.justice.digital.hmpps.prisonerpropertyapi`
 | `service/` | All business logic. **The transaction boundary.** Never publishes. |
 | `domain/` | JPA entities, enums, repositories, and the derivation logic that constitutes the model. |
 | `dto/` | The wire contract (requests + responses), with springdoc `@Schema` annotations. `dto/sync/` holds the NOMIS wire types. |
-| `event/` | Domain-event plumbing: `PropertyContainerEventFactory`, `DomainEventPublisher` (out), `PrisonerEventListener` (in), `HmppsDomainEvent`, and `PropertyEventSource` — the `DPS`/`NOMIS` attribute a sync-back filters on to avoid looping. |
+| `event/` | Domain-event plumbing: `PropertyContainerEventFactory`, `DomainEventPublisher` (out), `PrisonerEventListener` (in), `LegacyCleanupListener` (the self-sent work queue), `HmppsDomainEvent`, and `PropertyEventSource` — the `DPS`/`NOMIS` attribute a sync-back filters on to avoid looping. |
 | `client/` | Outbound WebClients, one per external service, each declaring its own small response types. |
 | `config/` | WebClient/OAuth2 wiring, caching, OpenAPI, the `@RestControllerAdvice` exception handler, and `ActiveAgenciesInfo` — an `InfoContributor` that publishes the active-prison list on `/info`. That is a public contract: it is how the front end learns which prisons are switched on. |
 | `health/` | One health-ping bean per external dependency. |
@@ -44,6 +44,7 @@ role, and keeping them apart is what stops staff endpoints and machine endpoints
 | `PropertyContainerResource` | `/property-containers` | `__RO` at class level; `__RW` on each mutating method | The front end (staff) |
 | `SyncPropertyContainerResource` | `/sync/property-containers` | `__SYNC` | NOMIS sync/migration services |
 | `ActiveAgenciesResource` | `/active-agencies` | `__ADMIN` | The rollout console |
+| `LegacyCleanupResource` | `/active-agencies/{id}/cleanup` | `__ADMIN` | The rollout console's legacy clean-up (preview, start, progress) |
 | `PropertyLocationAdminResource` | `/property-locations` | `__LOCATION_ADMIN` | The location-admin screens |
 
 > **Convention (enforced by tests):** every endpoint needs full springdoc `@Operation`/`@ApiResponse`
@@ -70,6 +71,9 @@ action and one raised by NOMIS sync are the same shape. Six smaller components s
 | Component | Responsibility |
 | --- | --- |
 | `ActiveAgenciesService` | The rollout flag. Deliberately **not** cached, so an admin toggle can't flip-flop between pods. |
+| `cleanup/LegacyCleanupRule` | The pure decision: may this container be closed, given where its owner is now and the cut-off. |
+| `cleanup/LegacyCleanupService` | Preview and start of a legacy clean-up job; sends the start message to the `prisonerpropertycleanup` queue after commit. |
+| `cleanup/LegacyCleanupProcessingService` | Runs a job from the queue: claims it under a row lock, closes each item in its own transaction, publishes after each commit. |
 | `BoxLocationService` | Storage locations with space. |
 | `PropertyLocationAdminService` | Location CRUD, guarding capacity and in-use deletes. |
 | `ContainerStatusResolver` | The status any screen actually shows — removal, then disposal, then owner location, then base status. |

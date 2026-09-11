@@ -11,6 +11,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertySystemUsers
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CombineContainersRequest
@@ -26,6 +27,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyContainerE
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyDomainEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyTelemetry
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.changedFieldsSince
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.cleanup.LegacyCleanupNotApplicableException
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -341,6 +343,54 @@ class PropertyContainerWriteService(
   }
 
   /**
+   * Close a container on behalf of a legacy clean-up job because its owner was released on [eventDate]: the
+   * same removal as a staff "returned", but attributed to [PropertySystemUsers.LEGACY_CLEANUP] and stamped
+   * with the [jobId] so the history says it was automatic. Dated to the release, which is when the property
+   * stopped being held for anyone.
+   *
+   * The job decided this container qualified when it was requested; [heldPrisonId] is re-asserted here so a
+   * container that has since moved on, or become due for disposal, is refused ([LegacyCleanupNotApplicableException],
+   * which the job records as skipped) rather than closed on a stale decision. Already removed raises
+   * [ContainerAlreadyRemovedException] as everywhere else.
+   */
+  @Transactional
+  fun legacyCleanupReturn(id: UUID, eventDate: LocalDate, jobId: UUID, heldPrisonId: String): WriteResult {
+    val container = loadForCleanup(id, heldPrisonId)
+    val before = ContainerState.of(container)
+    container.events.add(
+      PropertyEvent(
+        container,
+        PropertyEventType.RETURNED,
+        LocalDateTime.now(),
+        PropertySystemUsers.LEGACY_CLEANUP,
+        eventDate = eventDate,
+        fromPrisonId = container.prisonId,
+        legacyCleanupJobId = jobId,
+      ),
+    )
+    return container.removeWith(RemovalOutcome.RETURNED, eventDate, before)
+  }
+
+  /**
+   * Close a container on behalf of a legacy clean-up job because its owner is now at [toPrisonId], having left
+   * on [eventDate]. Recorded as a transfer so the history says where the person went, but the TRANSFERRED event
+   * carries the [jobId], which keeps it from surfacing at [toPrisonId] as property awaiting arrival (see
+   * [PropertyContainer.receivingPrison]) - nothing was physically sent. Guards as [legacyCleanupReturn].
+   */
+  @Transactional
+  fun legacyCleanupTransfer(id: UUID, toPrisonId: String, eventDate: LocalDate, jobId: UUID, heldPrisonId: String): WriteResult {
+    val container = loadForCleanup(id, heldPrisonId)
+    return container.transferTo(toPrisonId, PropertySystemUsers.LEGACY_CLEANUP, eventDate, legacyCleanupJobId = jobId)
+  }
+
+  private fun loadForCleanup(id: UUID, heldPrisonId: String): PropertyContainer {
+    val container = loadActive(id)
+    if (container.prisonId != heldPrisonId) throw LegacyCleanupNotApplicableException(id, "held at ${container.prisonId}, not $heldPrisonId")
+    if (container.isDisposalDue()) throw LegacyCleanupNotApplicableException(id, "due for disposal")
+    return container
+  }
+
+  /**
    * Combine the property of two or more source containers into a single new sealed container. The
    * sources must share one prisoner and prison (inherited by the new container) and be active; each is
    * removed from active storage (COMBINED) with a link to the new container.
@@ -624,10 +674,19 @@ class PropertyContainerWriteService(
    * related container, so this container still surfaces as awaiting at [toPrisonId] (see
    * [PropertyContainer.receivingPrison]).
    */
-  private fun PropertyContainer.transferTo(toPrisonId: String, username: String, date: LocalDate): WriteResult {
+  private fun PropertyContainer.transferTo(toPrisonId: String, username: String, date: LocalDate, legacyCleanupJobId: UUID? = null): WriteResult {
     val before = ContainerState.of(this)
     events.add(
-      PropertyEvent(this, PropertyEventType.TRANSFERRED, LocalDateTime.now(), username, eventDate = date, fromPrisonId = prisonId, toPrisonId = toPrisonId),
+      PropertyEvent(
+        this,
+        PropertyEventType.TRANSFERRED,
+        LocalDateTime.now(),
+        username,
+        eventDate = date,
+        fromPrisonId = prisonId,
+        toPrisonId = toPrisonId,
+        legacyCleanupJobId = legacyCleanupJobId,
+      ),
     )
     removalOutcome = RemovalOutcome.TRANSFERRED
     removalDate = date
@@ -651,7 +710,7 @@ class PropertyContainerWriteService(
 
   private companion object {
     /** Event user id recorded for changes driven by an external domain event rather than a member of staff. */
-    private const val SYSTEM_USER = "PRISONER_PROPERTY_API"
+    private const val SYSTEM_USER = PropertySystemUsers.PRISONER_PROPERTY_API
     private val log = LoggerFactory.getLogger(PropertyContainerWriteService::class.java)
   }
 }

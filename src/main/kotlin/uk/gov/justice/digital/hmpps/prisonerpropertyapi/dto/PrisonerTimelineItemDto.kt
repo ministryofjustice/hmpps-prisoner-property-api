@@ -6,6 +6,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertySystemUsers
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -135,9 +136,6 @@ data class PrisonerTimelineItemDto(
   val containerLocationDescription: String?,
 ) {
   companion object {
-    /** Any event recorded by the system rather than a user carries this reserved user id. */
-    private const val SYSTEM_USER = "PRISONER_PROPERTY_API"
-
     /**
      * Build a container-event item. Every detail is the value *as at this event* rather than the container's
      * current state, so an entry that predates a later change still reads correctly: the type comes from the
@@ -164,7 +162,7 @@ data class PrisonerTimelineItemDto(
       eventDateTime = event.eventDateTime,
       eventDate = event.eventDate,
       eventUserId = event.eventUserId,
-      systemGenerated = event.eventUserId == SYSTEM_USER,
+      systemGenerated = PropertySystemUsers.isSystem(event.eventUserId),
       prisonerName = null,
       actingEstablishmentName = actingEstablishmentName,
       fromPrisonName = fromPrisonName,
@@ -204,7 +202,7 @@ data class PrisonerTimelineItemDto(
       eventStatus = null,
       eventDateTime = dateInToPrison,
       eventDate = null,
-      eventUserId = SYSTEM_USER,
+      eventUserId = PropertySystemUsers.PRISONER_PROPERTY_API,
       systemGenerated = true,
       prisonerName = prisonerName,
       actingEstablishmentName = toPrisonName,
@@ -237,7 +235,7 @@ data class PrisonerTimelineItemDto(
       eventStatus = null,
       eventDateTime = releaseDate.atStartOfDay(),
       eventDate = releaseDate,
-      eventUserId = SYSTEM_USER,
+      eventUserId = PropertySystemUsers.PRISONER_PROPERTY_API,
       systemGenerated = true,
       prisonerName = prisonerName,
       actingEstablishmentName = null,
@@ -272,7 +270,7 @@ data class PrisonerTimelineItemDto(
       eventStatus = null,
       eventDateTime = rolloutAt,
       eventDate = rolloutAt.toLocalDate(),
-      eventUserId = SYSTEM_USER,
+      eventUserId = PropertySystemUsers.PRISONER_PROPERTY_API,
       systemGenerated = true,
       prisonerName = null,
       actingEstablishmentName = null,

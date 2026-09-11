@@ -39,6 +39,12 @@ class PrisonerSearchClient(
       "prisonId",
       "lastMovementTypeCode",
       "confirmedReleaseDate",
+      // The movement dates the legacy clean-up needs to decide how long ago someone left (see LegacyCleanupRule).
+      "lastMovementReasonCode",
+      "lastMovementDate",
+      "previousPrisonId",
+      "previousPrisonLeavingDate",
+      "lastAdmissionDate",
     ).joinToString(",")
 
     /**
@@ -180,4 +186,15 @@ data class Prisoner(
   // deliberately not used. Requested on both the single-prisoner lookup and the trimmed bulk list.
   val confirmedReleaseDate: LocalDate? = null,
   val conditionalReleaseDate: LocalDate? = null,
+  // When and why the person last moved. For someone released (prisonId OUT, lastMovementTypeCode REL) the
+  // movement date is their release date; the reason code DEC marks a death in custody.
+  val lastMovementReasonCode: String? = null,
+  val lastMovementDate: LocalDate? = null,
+  // The prison they were at before the current one within this term, and when they left it - so a prison can
+  // tell exactly when someone it still holds property for moved on, if they came straight from here.
+  val previousPrisonId: String? = null,
+  val previousPrisonLeavingDate: LocalDate? = null,
+  // When they were admitted to the prison they are at now. Whatever route they took, they left here no later
+  // than this, so it is a safe upper bound on the leaving date when previousPrisonId is not this prison.
+  val lastAdmissionDate: LocalDate? = null,
 )

@@ -24,6 +24,9 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContaine
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationCapacityBelowUsageException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationInUseException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationNotFoundException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.cleanup.LegacyCleanupJobActiveException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.cleanup.LegacyCleanupJobNotFoundException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.cleanup.LegacyCleanupTooLargeException
 import uk.gov.justice.hmpps.kotlin.common.ErrorResponse
 
 @RestControllerAdvice
@@ -173,6 +176,39 @@ class PrisonerPropertyApiExceptionHandler {
         developerMessage = e.message,
       ),
     ).also { log.info("Container already removed: {}", e.message) }
+
+  @ExceptionHandler(LegacyCleanupJobActiveException::class)
+  fun handleLegacyCleanupJobActiveException(e: LegacyCleanupJobActiveException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(CONFLICT)
+    .body(
+      ErrorResponse(
+        status = CONFLICT,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Legacy clean-up already active: {}", e.message) }
+
+  @ExceptionHandler(LegacyCleanupJobNotFoundException::class)
+  fun handleLegacyCleanupJobNotFoundException(e: LegacyCleanupJobNotFoundException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(NOT_FOUND)
+    .body(
+      ErrorResponse(
+        status = NOT_FOUND,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Legacy clean-up job not found: {}", e.message) }
+
+  @ExceptionHandler(LegacyCleanupTooLargeException::class)
+  fun handleLegacyCleanupTooLargeException(e: LegacyCleanupTooLargeException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(BAD_REQUEST)
+    .body(
+      ErrorResponse(
+        status = BAD_REQUEST,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.error("Legacy clean-up refused: {}", e.message) }
 
   @ExceptionHandler(NoResourceFoundException::class)
   fun handleNoResourceFoundException(e: NoResourceFoundException): ResponseEntity<ErrorResponse> = ResponseEntity

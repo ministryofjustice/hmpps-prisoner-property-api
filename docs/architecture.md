@@ -129,6 +129,7 @@ flowchart TB
     db[("Postgres")]
     sns{{"domainevents SNS"}}
     sqs{{"prisonerproperty SQS"}}
+    work{{"prisonerpropertycleanup SQS"}}
 
     uidata -- "HTTPS + service token" --> resource
     uidata -- "calls (only data/ does)" --> extui
@@ -137,9 +138,10 @@ flowchart TB
     event --> sns
     sqs --> event
     sns -. "filtered subscription" .-> sqs
+    service -- "self-sent job" --> work --> event
 
     classDef ext fill:#f4f4f4,stroke:#767676,color:#0b0c0c
-    class ext,extui,sns,sqs ext
+    class ext,extui,sns,sqs,work ext
 ```
 
 | Layer | API | UI |
@@ -306,6 +308,18 @@ resulting `.updated` event.
 
 Any other event type is logged and ignored.
 
+### The work queue
+
+There is a second queue, **`prisonerpropertycleanup`**, that is not subscribed to any topic. The service
+sends to it itself: when an admin requests a legacy clean-up (`LegacyCleanupService.start`) the job and its
+items are committed and *then* a start message is sent, so the listener can never find a job that is not
+there yet. `LegacyCleanupListener` consumes it one message at a time and `LegacyCleanupProcessingService`
+closes each container in its own transaction, publishing that container's `.updated` event after its commit
+— the same publish-after-commit rule as everywhere else, only with the listener thread standing in for the
+resource. A message redelivered after the visibility timeout (or to a second pod) finds the job claimed under
+a row lock and stands down; a job left `STARTED` with no activity for 30 minutes is treated as abandoned and
+resumed from its unprocessed items. See `docs/legacy-cleanup.md`.
+
 ### The payload
 
 ```json
@@ -355,6 +369,7 @@ filters on `changedFields` must therefore match on the field it cares about, not
 | prisoner merged | one `.updated` per container moved, `changedFields: ["prisonerNumber"]` and `removedNomsNumber` in `additionalInformation`; none when the retired number held nothing |
 | sync upsert | one `.created` or `.updated`, `source: NOMIS`; none when the snapshot changed nothing |
 | sync migrate | **none, ever** — bulk replay must not flood the topic |
+| legacy clean-up | one `.updated` per container closed, `source: DPS`, published after that container's own commit; none for items skipped or failed |
 
 The multi-container writes are the ones to be careful with: a subscriber that only handles the container
 named in the request will miss the other containers the same transaction changed.
@@ -524,7 +539,7 @@ API refuses it:
 | --- | --- | --- |
 | Read property | *(any signed-in user)* | `ROLE_PRISONER_PROPERTY__RO` |
 | Create/change/remove/combine | `PRISONERPROP__MANAGE` | `ROLE_PRISONER_PROPERTY__RW` |
-| Rollout console | `PRISONERPROP__ADMIN` | `ROLE_PRISONER_PROPERTY__ADMIN` |
+| Rollout console, incl. the legacy clean-up | `PRISONERPROP__ADMIN` | `ROLE_PRISONER_PROPERTY__ADMIN` |
 | Manage storage locations | `PRISONERPROP__LOCATION_ADMIN` | `ROLE_PRISONER_PROPERTY__LOCATION_ADMIN` |
 | NOMIS sync | *(n/a — service to service)* | `ROLE_PRISONER_PROPERTY__SYNC` |
 | Subject access request | *(n/a — the SAR tool, not this service's UI)* | `ROLE_SAR_DATA_ACCESS` |
@@ -534,6 +549,10 @@ both — so the UI blocks write journeys for staff whose active caseload is a pr
 on yet, and the admin console is how a prison gets switched on. The same flag, with its `updatedAt`
 timestamp, lets the property history label each arrival with the system in use at that prison *at the
 time* — which is why old history can honestly say "property managed in NOMIS".
+
+Switching a prison on also exposes its NOMIS backlog: every migrated container still held there for someone
+released or transferred out long ago. The **legacy clean-up** (`/active-agencies/{id}/cleanup`, same admin
+role) previews and then closes that backlog as a queued job — see `docs/legacy-cleanup.md`.
 
 ---
 
