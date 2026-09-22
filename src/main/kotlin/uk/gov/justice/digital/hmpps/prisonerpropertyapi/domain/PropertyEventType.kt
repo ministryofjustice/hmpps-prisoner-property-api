@@ -10,6 +10,12 @@ enum class PropertyEventType(val status: ContainerStatus, val carriesSeal: Boole
   CONTAINER_TYPE_CHANGE(ContainerStatus.STORED),
   MOVED(ContainerStatus.STORED),
   PRISONER_RECEIVED(ContainerStatus.DUE_FOR_TRANSFER_OUT),
+
+  // The person left on transfer. Recorded separately from PRISONER_RECEIVED because it is a different fact
+  // with a different shape: it happens at the sending prison, hours before any reception, and carries no
+  // destination - nobody knows where the person is going until they arrive. Both can appear against one
+  // container for one move, and both are true: they left, and later they were received somewhere.
+  PRISONER_TRANSFERRED_OUT(ContainerStatus.DUE_FOR_TRANSFER_OUT),
   PRISONER_RELEASED(ContainerStatus.DUE_FOR_RETURN),
   DIED_IN_CUSTODY(ContainerStatus.DUE_FOR_RETURN),
   TRANSFERRED(ContainerStatus.TRANSFER),

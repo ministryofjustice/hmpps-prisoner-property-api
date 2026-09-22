@@ -140,11 +140,15 @@ class PropertyContainer(
    *    receiving prison has not yet logged the arrival (the TRANSFERRED event has no related container) -
    *    the destination is on that TRANSFERRED event, so it still shows as awaiting at the receiving prison.
    * Once reconciled (the TRANSFERRED event gains a related container id) it is null again.
+   *
+   * A transfer written by a legacy clean-up job (the TRANSFERRED event carries a job id) is the exception: it
+   * records where the person went so the history reads correctly, but nothing was physically sent on, so it is
+   * never awaiting arrival anywhere. It can still be reconciled if the destination later logs the old seal.
    */
   fun receivingPrison(): String? = when {
     baseStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT -> events.maxByOrNull { it.eventDateTime }?.toPrisonId
     removalOutcome == RemovalOutcome.TRANSFERRED ->
-      latestTransferEvent()?.takeIf { it.relatedContainerId == null }?.toPrisonId
+      latestTransferEvent()?.takeIf { it.relatedContainerId == null && it.legacyCleanupJobId == null }?.toPrisonId
     else -> null
   }
 

@@ -12,6 +12,7 @@ import software.amazon.awssdk.services.sns.model.PublishRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
@@ -48,6 +49,52 @@ class PrisonerReceivedIntegrationTest : IntegrationTestBase() {
       // destination is what the receiving prison's incoming list keys on.
       assertThat(it.changedFields).containsExactly("currentStatus", "receivingPrisonId")
     })
+  }
+
+  @Test
+  fun `a reception after a transfer out records the destination the transfer out could not (MAPB-861)`() {
+    val container = createContainer(prisonId = "LEI")
+
+    // The person leaves LEI. The property is flagged, but nothing yet says where it has to follow them to.
+    publishPrisonerReleased(prisonerNumber = "A1234BC", reason = "TRANSFERRED")
+    await untilAsserted {
+      assertThat(repository.findById(container.id).orElseThrow().currentStatus())
+        .isEqualTo(ContainerStatus.DUE_FOR_TRANSFER_OUT)
+    }
+    assertThat(repository.findById(container.id).orElseThrow().receivingPrisonId).isNull()
+
+    // Hours later they arrive at MDI, which is the first anyone knows of the destination.
+    publishPrisonerReceived(prisonerNumber = "A1234BC", prisonId = "MDI")
+
+    await untilAsserted {
+      assertThat(repository.findById(container.id).orElseThrow().receivingPrisonId).isEqualTo("MDI")
+    }
+    // The status was already right and stays right; both movements are in the history, because both happened.
+    assertThat(repository.findById(container.id).orElseThrow().currentStatus())
+      .isEqualTo(ContainerStatus.DUE_FOR_TRANSFER_OUT)
+    assertThat(repository.findById(container.id).orElseThrow().events.map { it.eventType })
+      .containsSequence(PropertyEventType.PRISONER_TRANSFERRED_OUT, PropertyEventType.PRISONER_RECEIVED)
+    // Only the destination changed this time round, so that is all the update event reports.
+    assertThat(publishedEventsFor(container.id).last().changedFields).containsExactly("receivingPrisonId")
+  }
+
+  private fun publishPrisonerReleased(prisonerNumber: String, reason: String) {
+    val topic = hmppsQueueService.findByTopicId("domainevents")!!
+    val event = HmppsDomainEvent(
+      eventType = "prison-offender-events.prisoner.released",
+      additionalInformation = mapOf("nomsNumber" to prisonerNumber, "reason" to reason),
+    )
+    topic.snsClient.publish(
+      PublishRequest.builder()
+        .topicArn(topic.arn)
+        .message(objectMapper.writeValueAsString(event))
+        .messageAttributes(
+          mapOf(
+            "eventType" to MessageAttributeValue.builder().dataType("String").stringValue(event.eventType).build(),
+          ),
+        )
+        .build(),
+    ).get()
   }
 
   @Test

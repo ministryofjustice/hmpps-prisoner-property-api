@@ -167,6 +167,19 @@ Disposal **takes precedence** over the two owner-driven statuses, so a container
 counted here and *only* here. `countActiveByPrisonerAndStatus` excludes it for that reason; before MAPB-726
 it was counted twice, in this tile and in one of the other two.
 
+## The legacy clean-up preview uses the same rule
+
+`GET /active-agencies/{prisonId}/cleanup/preview` reports "due for return now" and "due for transfer out
+now" figures alongside what a clean-up would close. They are computed from `findCleanupCandidates` — the
+same predicates as `countActiveByPrisonerAndStatus` (live, not yet due for disposal) — and the same
+`ContainerStatusResolver.ownerLocation` classification, so they equal the two owner-driven tiles above.
+That is deliberate: the admin is being told how much of the backlog the tiles show a window will clear,
+and a preview that used a different rule would answer a different question.
+
+A container the clean-up transfers records where the person went but is **never** counted as due for
+transfer in at that prison: its `TRANSFERRED` event carries the job id and `receivingPrison()` ignores it,
+so `receiving_prison_id` stays null. Nothing was physically sent on. See `docs/legacy-cleanup.md`.
+
 ## Summary of triggers
 
 | Tile | Source | Changes when |

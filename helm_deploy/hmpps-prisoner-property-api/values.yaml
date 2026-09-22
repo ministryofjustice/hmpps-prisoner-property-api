@@ -86,6 +86,11 @@ generic-service:
       HMPPS_SQS_QUEUES_PRISONERPROPERTY_QUEUE_NAME: "sqs_queue_name"
     sqs-prisoner-property-event-dlq-secret:
       HMPPS_SQS_QUEUES_PRISONERPROPERTY_DLQ_NAME: "sqs_queue_name"
+    # Legacy clean-up work queue + DLQ (prisoner-property-cleanup-sqs.tf)
+    sqs-prisoner-property-cleanup-queue-secret:
+      HMPPS_SQS_QUEUES_PRISONERPROPERTYCLEANUP_QUEUE_NAME: "sqs_queue_name"
+    sqs-prisoner-property-cleanup-dlq-secret:
+      HMPPS_SQS_QUEUES_PRISONERPROPERTYCLEANUP_DLQ_NAME: "sqs_queue_name"
     # Shared hmpps-domain-events SNS topic for publishing (existing secret)
     hmpps-domain-events-topic:
       HMPPS_SQS_TOPICS_DOMAINEVENTS_ARN: "topic_arn"

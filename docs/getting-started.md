@@ -97,7 +97,7 @@ This is the part worth reading twice.
 
 ### 4.1 The event types
 
-Fifteen event types, each carrying the `ContainerStatus` it implies
+Sixteen event types, each carrying the `ContainerStatus` it implies
 (`domain/PropertyEventType.kt`):
 
 | Event type | Status it carries | Notes |
@@ -107,6 +107,7 @@ Fifteen event types, each carrying the `ContainerStatus` it implies
 | `CONTAINER_TYPE_CHANGE` | `STORED` | |
 | `MOVED` | `STORED` | Carries a location. |
 | `PRISONER_RECEIVED` | `DUE_FOR_TRANSFER_OUT` | The owner turned up at another prison — the property must follow. |
+| `PRISONER_TRANSFERRED_OUT` | `DUE_FOR_TRANSFER_OUT` | The owner left on transfer. Carries **no destination** — the movement does not say where they are going, so the later `PRISONER_RECEIVED` is what records it. |
 | `PRISONER_RELEASED` | `DUE_FOR_RETURN` | |
 | `DIED_IN_CUSTODY` | `DUE_FOR_RETURN` | Released with NOMIS movement reason `DEC`. |
 | `TRANSFERRED` | `TRANSFER` | Sent to another prison. **A removal** — see 4.5. |

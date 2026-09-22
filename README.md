@@ -116,6 +116,14 @@ same list is published on the actuator `/info` payload, which is how the front e
 | `GET /` | ADMIN | The prisons currently switched on |
 | `GET /all` | ADMIN | Every prison with its on/off state, for the console |
 | `PUT /{agencyId}` | ADMIN | Switch a prison on or off |
+| `GET /{agencyId}/cleanup/preview?olderThanDays=28` | ADMIN | What a legacy clean-up would close at the prison, and what it would leave alone |
+| `POST /{agencyId}/cleanup` | ADMIN | Queue a legacy clean-up (202); one in flight per prison (409) |
+| `GET /{agencyId}/cleanup` | ADMIN | The prison's clean-up jobs, newest first |
+| `GET /cleanup/{jobId}` | ADMIN | One job with its items and progress |
+
+The legacy clean-up closes the NOMIS backlog a prison inherits when it is switched on — property still
+held for people released or transferred out before a cut-off — asynchronously, one container per
+transaction, telling NOMIS as it goes. See [docs/legacy-cleanup.md](docs/legacy-cleanup.md).
 
 **Storage locations** (`/property-locations`)
 

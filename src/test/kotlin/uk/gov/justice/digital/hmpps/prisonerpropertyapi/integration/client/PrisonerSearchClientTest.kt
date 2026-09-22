@@ -12,6 +12,8 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.PrisonerSearchCli
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.IntegrationTestBase
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonerSearchApiExtension.Companion.prisonerSearch
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonerStub
+import java.time.LocalDate
 
 class PrisonerSearchClientTest : IntegrationTestBase() {
 
@@ -54,14 +56,41 @@ class PrisonerSearchClientTest : IntegrationTestBase() {
     assertThat(prisoners.keys).containsExactlyInAnyOrder("A1234BC", "A1111AA")
     assertThat(prisoners["A1234BC"]?.prisonId).isEqualTo("MDI")
     // The confirmed release date is requested too: the establishment list and summary need it to show
-    // stored property as due for return ahead of release, matching the person view.
+    // stored property as due for return ahead of release, matching the person view. The movement dates
+    // are what the legacy clean-up rule reads to tell how long ago someone left.
     prisonerSearch.verify(
       postRequestedFor(urlPathEqualTo("/prisoner-search/prisoner-numbers"))
         .withQueryParam(
           "responseFields",
-          equalTo("prisonerNumber,firstName,lastName,prisonId,lastMovementTypeCode,confirmedReleaseDate"),
+          equalTo(
+            "prisonerNumber,firstName,lastName,prisonId,lastMovementTypeCode,confirmedReleaseDate," +
+              "lastMovementReasonCode,lastMovementDate,previousPrisonId,previousPrisonLeavingDate,lastAdmissionDate",
+          ),
         ),
     )
+  }
+
+  @Test
+  fun `getPrisoners maps the movement dates the legacy clean-up reads`() {
+    prisonerSearch.stubFindByNumbersDetailed(
+      PrisonerStub(
+        "A1234BC",
+        "MDI",
+        lastMovementReasonCode = "INT",
+        lastMovementDate = "2026-06-02",
+        previousPrisonId = "LEI",
+        previousPrisonLeavingDate = "2026-06-01",
+        lastAdmissionDate = "2026-06-02",
+      ),
+    )
+
+    val prisoner = prisonerSearchClient.getPrisoners(listOf("A1234BC")).getValue("A1234BC")
+
+    assertThat(prisoner.lastMovementReasonCode).isEqualTo("INT")
+    assertThat(prisoner.lastMovementDate).isEqualTo(LocalDate.parse("2026-06-02"))
+    assertThat(prisoner.previousPrisonId).isEqualTo("LEI")
+    assertThat(prisoner.previousPrisonLeavingDate).isEqualTo(LocalDate.parse("2026-06-01"))
+    assertThat(prisoner.lastAdmissionDate).isEqualTo(LocalDate.parse("2026-06-02"))
   }
 
   @Test

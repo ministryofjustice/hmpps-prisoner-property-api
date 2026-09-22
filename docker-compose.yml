@@ -69,7 +69,6 @@ services:
       retries: 10
     environment:
       - SERVICES=sns,sqs
-      - DEFAULT_REGION=eu-west-2
 
 networks:
   hmpps:

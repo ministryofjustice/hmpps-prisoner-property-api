@@ -51,10 +51,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Java
-        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
           distribution: temurin
           java-version: ${{ inputs.java_version }}
@@ -73,7 +73,7 @@ jobs:
             --tests uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.ExportReferenceData
 
       - name: Generate database schema report
-        uses: ministryofjustice/hmpps-github-shared-actions/.github/actions/database_schema_report@c89a206b6b32888d13f6aec01af0f7694df6b42f # v1.0.19
+        uses: ministryofjustice/hmpps-github-shared-actions/.github/actions/database_schema_report@accf37e936517ed39e7a888cf74f0277dab3310e # v1.1.4
         with:
           database_name: ${{ inputs.database_name }}
           schema: ${{ inputs.database_schema }}
@@ -96,7 +96,7 @@ jobs:
       # site never publishes. It survives later runs because this step only replaces schema-spy-report/.
       - name: Publish to GitHub Pages
         if: ${{ inputs.publish }}
-        uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f # v4.8.0
+        uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4.9.0
         with:
           branch: gh-pages
           folder: /tmp/schemaspy

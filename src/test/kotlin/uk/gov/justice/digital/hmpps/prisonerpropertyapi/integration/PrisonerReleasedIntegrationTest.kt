@@ -69,6 +69,26 @@ class PrisonerReleasedIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `a transfer out flags property as due for transfer out, with no destination yet (MAPB-861)`() {
+    val container = createContainer(prisonId = "LEI")
+
+    publishPrisonerReleased(prisonerNumber = "A1234BC", reason = "TRANSFERRED")
+
+    await untilAsserted {
+      assertThat(repository.findById(container.id).orElseThrow().currentStatus())
+        .isEqualTo(ContainerStatus.DUE_FOR_TRANSFER_OUT)
+    }
+    assertThat(latestEventType(container.id)).isEqualTo(PropertyEventType.PRISONER_TRANSFERRED_OUT)
+    // The movement does not say where the person is going, so nothing claims the property yet.
+    assertThat(repository.findById(container.id).orElseThrow().receivingPrisonId).isNull()
+    assertThat(publishedEventsFor(container.id).last()).satisfies({
+      assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+      assertThat(it.prisonerNumber).isEqualTo("A1234BC")
+      assertThat(it.changedFields).containsExactly("currentStatus")
+    })
+  }
+
+  @Test
   fun `a temporary release does not flag property as due for return`() {
     val container = createContainer(prisonId = "LEI")
 

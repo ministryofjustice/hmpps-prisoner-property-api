@@ -20,6 +20,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PrisonerMovementS
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.SearchTerm
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MovementKind
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonPropertySummaryDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertyContainerDto
@@ -566,14 +567,23 @@ class PropertyContainerService(
   /** The count for a status from a [countContainersByStatus] map, as an Int (0 when absent). */
   private fun Map<ContainerStatus, Long>.count(status: ContainerStatus): Int = this[status]?.toInt() ?: 0
 
-  /** The ids of the given property locations whose code, local name or path hierarchy match [term] (case-insensitive). */
-  private fun resolveLocationIds(propertyLocations: List<PropertyLocation>, term: String): List<UUID> = propertyLocations
-    .filter {
-      it.code.equals(term, ignoreCase = true) ||
-        it.localName.equals(term, ignoreCase = true) ||
-        it.pathHierarchy.equals(term, ignoreCase = true)
-    }
-    .map { it.id }
+  /**
+   * The ids of the given property locations whose code, local name or path hierarchy match [term].
+   *
+   * Partial, so staff who only have part of a location - the box number without the wing prefix, say - still
+   * find it. Matching is [SearchTerm]'s, the same rule the box-location picker uses, so the two searches
+   * cannot disagree about what a term means.
+   */
+  private fun resolveLocationIds(propertyLocations: List<PropertyLocation>, term: String): List<UUID> {
+    val matcher = SearchTerm.toWildcardRegex(term)
+    return propertyLocations
+      .filter {
+        matcher.containsMatchIn(it.code) ||
+          matcher.containsMatchIn(it.pathHierarchy) ||
+          (it.localName?.let(matcher::containsMatchIn) ?: false)
+      }
+      .map { it.id }
+  }
 
   private companion object {
     private val log = org.slf4j.LoggerFactory.getLogger(this::class.java)

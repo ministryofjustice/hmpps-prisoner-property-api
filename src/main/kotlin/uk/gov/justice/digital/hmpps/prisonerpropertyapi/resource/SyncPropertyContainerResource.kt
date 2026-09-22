@@ -18,6 +18,7 @@ import org.springframework.validation.annotation.Validated
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
@@ -142,4 +143,30 @@ class SyncPropertyContainerResource(
     @ParameterObject
     pageable: Pageable,
   ): Page<UUID> = propertyContainerService.getAllIds(pageable)
+
+  @PutMapping("/move/from/{source}/to/{target}")
+  @Operation(
+    summary = "Move property containers from the source prisoner to the target prisoner",
+    description = "Called by Nomis sync to implement the <i>prison-offender-events.prisoner.booking.moved</i> Nomis event to correct DPS property." +
+      "The containers must initially belong to the source prisoner, or already belong to the target prisoner." +
+      "Requires role ROLE_PRISONER_PROPERTY__SYNC.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Containers moved"),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__SYNC role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "404", description = "Some of the supplied DPS ids do not exist", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun moveToPrisoner(
+    @Parameter(description = "Source prisoner", example = "A1234FG", required = true)
+    @PathVariable
+    source: String,
+    @Parameter(description = "Target prisoner", example = "A1234FG", required = true)
+    @PathVariable
+    target: String,
+    @RequestBody
+    propertyIds: List<UUID>,
+  ) {
+    syncPropertyContainerService.moveToPrisoner(source, target, propertyIds)
+  }
 }
