@@ -102,18 +102,18 @@ class SubjectAccessRequestIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.content[1].sealNumber").isEqualTo("SAR001")
       .jsonPath("$.content[0].prisonerNumber").isEqualTo(PRISONER)
       .jsonPath("$.content[0].prisonId").isEqualTo("LEI")
-      .jsonPath("$.content[0].containerType").isEqualTo("STANDARD")
-      .jsonPath("$.content[0].status").isEqualTo("STORED")
+      .jsonPath("$.content[0].containerType").isEqualTo("Standard property")
+      .jsonPath("$.content[0].status").isEqualTo("In storage")
       .jsonPath("$.content[0].createdByUsername").isEqualTo("USER1")
       .jsonPath("$.content[0].events.length()").isEqualTo(2)
-      .jsonPath("$.content[0].events[0].eventType").isEqualTo("CREATED_SEALED")
+      .jsonPath("$.content[0].events[0].eventType").isEqualTo("Sealed into storage")
       .jsonPath("$.content[0].events[0].eventUsername").isEqualTo("USER1")
-      .jsonPath("$.content[0].events[1].eventType").isEqualTo("MOVED")
+      .jsonPath("$.content[0].events[1].eventType").isEqualTo("Moved to a different storage location")
       .jsonPath("$.content[0].events[1].toLocationId").isEqualTo(LOCATION_B.toString())
-      .jsonPath("$.content[0].events[1].toStorageLocationType").isEqualTo("INTERNAL")
+      .jsonPath("$.content[0].events[1].toStorageLocationType").isEqualTo("In the establishment")
       // the removed container keeps its outcome and the reason it left storage
-      .jsonPath("$.content[1].status").isEqualTo("RETURNED")
-      .jsonPath("$.content[1].removalOutcome").isEqualTo("RETURNED")
+      .jsonPath("$.content[1].status").isEqualTo("Returned")
+      .jsonPath("$.content[1].removalOutcome").isEqualTo("Returned")
       .jsonPath("$.content[1].removalDate").isEqualTo("2025-02-10")
   }
 
@@ -153,7 +153,7 @@ class SubjectAccessRequestIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.content[0].sealNumber").isEqualTo("SAR002")
       // created 1 March, only the move falls inside the range, but both events come back
       .jsonPath("$.content[0].events.length()").isEqualTo(2)
-      .jsonPath("$.content[0].events[0].eventType").isEqualTo("CREATED_SEALED")
+      .jsonPath("$.content[0].events[0].eventType").isEqualTo("Sealed into storage")
   }
 
   @Test
