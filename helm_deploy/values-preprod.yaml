@@ -14,6 +14,7 @@ generic-service:
     PRISON_REGISTER_URL: "https://prison-register-preprod.hmpps.service.justice.gov.uk"
     LOCATIONS_INSIDE_PRISON_URL: "https://locations-inside-prison-api-preprod.hmpps.service.justice.gov.uk"
     PRISON_API_URL: "https://prison-api-preprod.prison.service.justice.gov.uk"
+    HMPPS_SAR_TEMPLATE_PATH: "/sar/templates/V1__sar_template.mustache"
 
 # CloudPlatform AlertManager receiver to route prometheus alerts to slack
 # See https://user-guide.cloud-platform.service.justice.gov.uk/documentation/monitoring-an-app/how-to-create-alarms.html#creating-your-own-custom-alerts

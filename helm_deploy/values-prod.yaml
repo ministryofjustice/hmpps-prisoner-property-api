@@ -11,6 +11,7 @@ generic-service:
     PRISON_REGISTER_URL: "https://prison-register.hmpps.service.justice.gov.uk"
     LOCATIONS_INSIDE_PRISON_URL: "https://locations-inside-prison-api.hmpps.service.justice.gov.uk"
     PRISON_API_URL: "https://prison-api.prison.service.justice.gov.uk"
+    HMPPS_SAR_TEMPLATE_PATH: "/sar/templates/V1__sar_template.mustache"
 
   # Copies the production database into preprod whenever preprod NOMIS has been refreshed, which is
   # roughly every two weeks. The CronJob runs in the production namespace so that the production
