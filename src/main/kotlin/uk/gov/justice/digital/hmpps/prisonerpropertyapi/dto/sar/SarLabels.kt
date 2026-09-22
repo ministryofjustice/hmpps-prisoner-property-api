@@ -29,6 +29,7 @@ internal val PropertyEventType.sarLabel: String
     PropertyEventType.SEAL_CHANGED -> "Resealed"
     PropertyEventType.CONTAINER_TYPE_CHANGE -> "Type of property changed"
     PropertyEventType.MOVED -> "Moved to a different storage location"
+    PropertyEventType.PRISONER_TRANSFERRED_OUT -> "Due to be sent on following a transfer"
     PropertyEventType.PRISONER_RECEIVED -> "Due to be sent on to another establishment"
     PropertyEventType.PRISONER_RELEASED -> "Due to be returned on release"
     PropertyEventType.DIED_IN_CUSTODY -> "Due to be returned"
