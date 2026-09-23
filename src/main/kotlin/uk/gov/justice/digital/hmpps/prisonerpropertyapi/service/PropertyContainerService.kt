@@ -364,12 +364,12 @@ class PropertyContainerService(
 
   /**
    * A prisoner's whole-property history: every event across all of their containers, interleaved
-   * newest first, plus a de-duplicated "arrived at ..." item for each prison the prisoner moved into and a
+   * newest first, plus the "arrived at ..." items that explain that property (see [relevantArrivals]) and a
    * "property management started in DPS at ..." marker for each establishment they have held property at that is
    * switched on in DPS. Prison and location ids are resolved to names, and each container event carries the seal
    * number and acting establishment as at that point in the container's history - both carried forward through
    * the events, so a transfer that reassigns the container's current prison does not relabel its earlier events.
-   * Returns an empty list if the prisoner has no property.
+   * For a prisoner with no property, only the arrival at their current prison (if any) is returned.
    */
   @Transactional(readOnly = true)
   fun getPrisonerTimeline(prisonerNumber: String): List<PrisonerTimelineItemDto> {
@@ -389,6 +389,8 @@ class PropertyContainerService(
       )
     }
 
+    // Where and when each container event happened, so only the arrivals that explain the property are kept.
+    val propertyAnchors = mutableListOf<PropertyAnchor>()
     val containerItems = containers.flatMap { container ->
       var sealAsOfEvent: String? = null
       // The container's location as at each event, walked forward in time: an event sets it when it carries a
@@ -411,7 +413,9 @@ class PropertyContainerService(
       container.events.sortedBy { it.eventDateTime }.map { event ->
         event.sealNumber?.let { sealAsOfEvent = it }
         (if (event.eventType == PropertyEventType.CREATED_SEALED) event.toPrisonId else event.fromPrisonId)?.let { heldPrisonId = it }
-        val actingEstablishmentName = prisonNames[heldPrisonId ?: container.prisonId]
+        val actingPrisonId = heldPrisonId ?: container.prisonId
+        val actingEstablishmentName = prisonNames[actingPrisonId]
+        propertyAnchors += PropertyAnchor(actingPrisonId, event.eventDateTime)
         if (event.eventType == PropertyEventType.TRANSFERRED) event.toPrisonId?.let { heldPrisonId = it }
         if (event.affectsLocation()) {
           locationAsOfEvent = if (event.eventType == PropertyEventType.TRANSFERRED) null else event.toInternalLocationId
@@ -439,10 +443,14 @@ class PropertyContainerService(
     // build the DPS-first-used markers. Fetched once and shared by both.
     val rolloutDates = activeAgenciesService.getActiveAgencyRolloutDates()
 
-    // Admission / transfer-in items are assembled at read time from prison-api's movement history, so they show
-    // even for a prisoner with no property. Best-effort: a prison-api failure yields no movement items rather
-    // than failing the whole timeline.
-    val movementItems = buildMovementItems(prisonerNumber, prisonerName, prisonNames, rolloutDates)
+    // Admission / transfer-in items are assembled at read time from prison-api's movement history, then cut down
+    // to the ones that explain the property plus the arrival at the current prison. Best-effort: a prison-api
+    // failure yields no movement items rather than failing the whole timeline.
+    val movementItems = relevantArrivals(
+      buildMovementItems(prisonerNumber, prisonerName, prisonNames, rolloutDates),
+      propertyAnchors,
+      prisoner.realPrisonId(),
+    )
 
     // A forward-looking "scheduled for release" marker, derived from the prisoner's release dates: prefer the
     // confirmed date, fall back to the conditional (sentence-calculated) one. Only meaningful when there is
@@ -488,6 +496,40 @@ class PropertyContainerService(
   }
 
   /**
+   * The arrivals worth showing. prison-api returns every admission and transfer in, so a person with many short
+   * sentences gets long runs of "admitted to" lines for prisons that never held their property - noise that
+   * buries the property events, and without the releases it does not tell a coherent story. Kept instead:
+   * - for each container event, the latest arrival at the prison holding the container on or before that event -
+   *   the arrival that began the stay in which the property was stored or handled. One line per stay, so property
+   *   handled in two separate stays at the same prison keeps both arrivals;
+   * - the latest arrival at the prison the person is in now ([currentPrisonId]; null when released or in
+   *   transit), even with no property there yet, so the history shows where they are.
+   * An event with no earlier arrival at its prison keeps nothing. Distinct arrivals only, which also drops the
+   * duplicate rows prison-api occasionally returns.
+   */
+  private fun relevantArrivals(
+    arrivals: List<Arrival>,
+    anchors: List<PropertyAnchor>,
+    currentPrisonId: String?,
+  ): List<PrisonerTimelineItemDto> {
+    val arrivalsByPrison = arrivals.groupBy { it.prisonId }
+    val latestArrivalAt = { prisonId: String, at: LocalDateTime? ->
+      arrivalsByPrison[prisonId]
+        ?.filter { at == null || !it.item.eventDateTime.isAfter(at) }
+        ?.maxByOrNull { it.item.eventDateTime }
+    }
+    val kept = anchors.mapNotNull { latestArrivalAt(it.prisonId, it.at) } +
+      listOfNotNull(currentPrisonId?.let { latestArrivalAt(it, null) })
+    return kept.distinctBy { it.prisonId to it.item.eventDateTime }.map { it.item }
+  }
+
+  /** Where and when a container event happened: the prison holding the container at that event. */
+  private data class PropertyAnchor(val prisonId: String, val at: LocalDateTime)
+
+  /** A movement item with the id of the prison arrived at, which the DTO carries only as a name. */
+  private data class Arrival(val prisonId: String, val item: PrisonerTimelineItemDto)
+
+  /**
    * Admission and transfer-in movement items from prison-api's prison-timeline. Per booking, each ADM movement
    * becomes an "admitted to" item and each transfer a "transferred in to" item; TAP (temporary-absence returns)
    * are skipped. Each arrival is labelled with the receiving establishment's property system at that date (see
@@ -498,7 +540,7 @@ class PropertyContainerService(
     prisonerName: String?,
     prisonNames: Map<String, String>,
     rolloutDates: Map<String, LocalDateTime>,
-  ): List<PrisonerTimelineItemDto> {
+  ): List<Arrival> {
     val summary = runCatching { prisonApiClient.getPrisonTimeline(prisonerNumber) }
       .onFailure { log.warn("prison-api timeline lookup failed for {}, omitting movement items", prisonerNumber, it) }
       .getOrNull() ?: return emptyList()
@@ -507,27 +549,33 @@ class PropertyContainerService(
       val admissions = period.movementDates
         .filter { it.inwardType == ADMISSION_MOVEMENT_TYPE && it.admittedIntoPrisonId != null && it.dateInToPrison != null }
         .map {
-          PrisonerTimelineItemDto.prisonerMovement(
-            kind = MovementKind.ADMISSION,
-            prisonerNumber = prisonerNumber,
-            prisonerName = prisonerName,
-            dateInToPrison = it.dateInToPrison!!,
-            toPrisonId = it.admittedIntoPrisonId!!,
-            toPrisonName = prisonNames[it.admittedIntoPrisonId],
-            propertySystem = propertySystemAt(it.admittedIntoPrisonId, it.dateInToPrison, rolloutDates),
+          Arrival(
+            it.admittedIntoPrisonId!!,
+            PrisonerTimelineItemDto.prisonerMovement(
+              kind = MovementKind.ADMISSION,
+              prisonerNumber = prisonerNumber,
+              prisonerName = prisonerName,
+              dateInToPrison = it.dateInToPrison!!,
+              toPrisonId = it.admittedIntoPrisonId!!,
+              toPrisonName = prisonNames[it.admittedIntoPrisonId],
+              propertySystem = propertySystemAt(it.admittedIntoPrisonId, it.dateInToPrison, rolloutDates),
+            ),
           )
         }
       val transfersIn = period.transfers
         .filter { it.toPrisonId != null && it.dateInToPrison != null }
         .map {
-          PrisonerTimelineItemDto.prisonerMovement(
-            kind = MovementKind.TRANSFER_IN,
-            prisonerNumber = prisonerNumber,
-            prisonerName = prisonerName,
-            dateInToPrison = it.dateInToPrison!!,
-            toPrisonId = it.toPrisonId!!,
-            toPrisonName = prisonNames[it.toPrisonId],
-            propertySystem = propertySystemAt(it.toPrisonId, it.dateInToPrison, rolloutDates),
+          Arrival(
+            it.toPrisonId!!,
+            PrisonerTimelineItemDto.prisonerMovement(
+              kind = MovementKind.TRANSFER_IN,
+              prisonerNumber = prisonerNumber,
+              prisonerName = prisonerName,
+              dateInToPrison = it.dateInToPrison!!,
+              toPrisonId = it.toPrisonId!!,
+              toPrisonName = prisonNames[it.toPrisonId],
+              propertySystem = propertySystemAt(it.toPrisonId, it.dateInToPrison, rolloutDates),
+            ),
           )
         }
       admissions + transfersIn
