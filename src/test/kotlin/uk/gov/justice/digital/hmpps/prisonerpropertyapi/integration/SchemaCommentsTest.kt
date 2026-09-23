@@ -8,9 +8,11 @@ import org.springframework.jdbc.core.JdbcTemplate
 /**
  * Guards the data dictionary published to GitHub Pages (see db/migration/V15__schema_comments.sql).
  *
- * Descriptions live in the database as COMMENT ON statements so SchemaSpy, the CSV export and any Glue
- * crawl share one source of truth. Nothing else would notice a new column arriving undocumented, so
- * this fails the build instead.
+ * Descriptions live in the database as COMMENT ON statements so SchemaSpy, the CSV exports and any Glue
+ * crawl share one source of truth. Each carries three tags - a sensitivity classification, an example
+ * value, and whether the column is disclosed in a subject access request - which between them are what
+ * the SAR Data Requirements extract is built from. Nothing else would notice a new column arriving
+ * undocumented, so this fails the build instead.
  */
 class SchemaCommentsTest : IntegrationTestBase() {
 
@@ -56,6 +58,33 @@ class SchemaCommentsTest : IntegrationTestBase() {
       .isEmpty()
   }
 
+  /**
+   * The answer matters more than the tag. A new column defaults to nothing, so whoever adds one has to
+   * decide whether its value reaches a prisoner's report - which is the same decision SarJpaEntitiesTest
+   * forces from the entity side, asked here of the schema.
+   */
+  @Test
+  fun `every column description says whether it is disclosed in a subject access request`() {
+    val unclassified = columnComments()
+      .filter { it.comment != null && !SAR_IMPACT.containsMatchIn(it.comment) }
+      .map { it.name }
+
+    assertThat(unclassified)
+      .describedAs("column comments need a [SAR: Y] or [SAR: N] tag - see V20__sar_impact.sql")
+      .isEmpty()
+  }
+
+  @Test
+  fun `every column description carries an example value`() {
+    val missing = columnComments()
+      .filter { it.comment != null && !EXAMPLE.containsMatchIn(it.comment) }
+      .map { it.name }
+
+    assertThat(missing)
+      .describedAs("column comments need an [Example: ...] tag - see V19__example_values.sql")
+      .isEmpty()
+  }
+
   private data class ColumnComment(val name: String, val comment: String?)
 
   private fun columnComments(): List<ColumnComment> = jdbcTemplate.query(
@@ -75,5 +104,12 @@ class SchemaCommentsTest : IntegrationTestBase() {
 
   private companion object {
     val SENSITIVITY = Regex("""\[Sensitivity: (NONE|PERSONAL|STAFF|SPECIAL-CATEGORY|OFFICIAL-SENSITIVE)]$""")
+
+    // Both of these sit before the sensitivity tag, which SENSITIVITY anchors to the end of the comment,
+    // but neither is matched against its neighbours - a fourth tag would otherwise break them silently.
+    // The SAR Data Requirements extract the Offender SAR Team review needs both for every element.
+    val EXAMPLE = Regex("""\[Example: [^]]+]""")
+
+    val SAR_IMPACT = Regex("""\[SAR: [YN]]""")
   }
 }
