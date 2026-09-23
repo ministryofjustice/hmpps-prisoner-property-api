@@ -216,14 +216,16 @@ at a time — the granularity the SAR tool's register-before-deploy rule needs.
 `scripts/generate-sar-data-requirements.sh` produces the SAR Data Requirements extract the Offender SAR
 Team review, published alongside the other exports. It is generated from the same schema comments as the
 data dictionary, so it cannot drift from the schema — every column carries an example value
-(`[Example: ...]`, added in `V19`) as well as its sensitivity classification, and `SchemaCommentsTest`
-fails the build if a new column is missing either.
+(`[Example: ...]`, added in `V19`) and a SAR classification (`[SAR: Y]` or `[SAR: N]`, added in `V20`) as
+well as its sensitivity, and `SchemaCommentsTest` fails the build if a new column is missing any of them.
 
-One column needs care when quoting it. `SAR Impact` is derived from the sensitivity classification, so it
-says whether a column's *own content* is personal data about the prisoner — not whether it appears in a
-report. Every row in `property_container` and `property_event` belongs to a prisoner through
-`prisoner_number`, so the whole record is that prisoner's personal data and is disclosed, whatever an
-individual column is marked.
+`SAR Impact` is set deliberately per column in `V20__sar_impact.sql`, transcribed from the SAR response
+DTOs themselves, and answers the question the Offender SAR Team are asking: does this element's value
+reach the prisoner's report. It is not derived from the sensitivity classification, which answers a
+different question — whether the column's own content is personal data. Most of what the report discloses
+is not personal data in itself, because the personal data is the link to the prisoner that every row
+already carries, so deriving one from the other would mark 8 of 59 elements as in scope when the true
+figure is 25. Change what the response discloses and `V20` needs changing with it.
 
 #### Changing any of this
 
@@ -259,7 +261,7 @@ along with two CSV exports for the MOJ Data Catalogue:
 
 | File | Contents |
 |------|----------|
-| `data-dictionary.csv` | Every table and column, with its description, example value, sensitivity classification, type, nullability, PK and FK |
+| `data-dictionary.csv` | Every table and column, with its description, example value, SAR and sensitivity classifications, type, nullability, PK and FK |
 | `reference-data.csv` | The enum lookups. Every code in this schema resolves in Kotlin — there are no reference tables — so without this a consumer sees a `varchar` with no idea which values are legal |
 | `sar-data-requirements.csv` | The extract the Offender SAR Team review at the data review checkpoint — see [Subject access requests](#subject-access-requests) |
 
@@ -284,7 +286,15 @@ scripts/generate-data-dictionary.sh
 
 Descriptions live in the database as `COMMENT ON` statements, applied by
 `db/migration/V15__schema_comments.sql`, so SchemaSpy, the CSV export and any Glue crawl all read the
-same source of truth. Each column description ends with a sensitivity classification:
+same source of truth. Each column description ends with three tags, in this order — an example value,
+a SAR classification, and a sensitivity classification:
+
+```
+Seal number currently on the container. [Example: SEAL12345] [SAR: Y] [Sensitivity: NONE]
+```
+
+The sensitivity tag must stay last; `SchemaCommentsTest` anchors it to the end of the comment, so a new
+tag goes before it. The classifications are:
 
 | Tag | Meaning |
 | --- | --- |
@@ -303,8 +313,10 @@ prisoner via `property_container.prisoner_number`, so the whole record is person
 prisoner however an individual column is tagged — which is what matters for a subject access request.
 Nothing in this schema is special category.
 
-In `data-dictionary.csv` the tag is split into its own `sensitivity` column and stripped from the
-description, so the text reads cleanly and the classification can be filtered on.
+In `data-dictionary.csv` each tag is split into its own column — `example_value`, `sar_impact` and
+`sensitivity` — and stripped from the description, so the text reads cleanly and the classifications can
+be filtered on. `sar_impact` is explained under
+[the data requirements extract](#the-data-requirements-extract).
 
 **Any new table or column needs a `COMMENT ON`** in a migration — `SchemaCommentsTest` fails the build
 otherwise. A later migration can add to or replace any comment at any time. Likewise a new enum value

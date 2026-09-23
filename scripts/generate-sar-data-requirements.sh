@@ -10,18 +10,15 @@
 #
 #   Product Name, Type of Change, Entity, Element, Description, Example Value, Mandatory, SAR Impact, Impact
 #
-# SAR Impact is derived from the [Sensitivity: ...] tag on each column comment:
+# SAR Impact comes from the [SAR: Y|N] tag on each column comment, set deliberately per column in
+# V20__sar_impact.sql and transcribed there from the SAR response itself (dto/sar/SarPropertyContainer.kt
+# and SarPropertyEvent.kt). It answers the question the Offender SAR Team are actually asking: does this
+# element's value reach the prisoner's report.
 #
-#   PERSONAL, SPECIAL-CATEGORY  -> Y   personal data about the prisoner
-#   STAFF                       -> N   personal data, but about a member of staff, so out of scope of a
-#                                      prisoner's request (it remains in scope of that staff member's own)
-#   NONE, OFFICIAL-SENSITIVE    -> N   not personal data in itself
-#
-# Read that column carefully before quoting it. It describes whether the column's *own content* is
-# personal data about the prisoner, not whether the column appears in a report. Every row in
-# property_container and property_event belongs to a prisoner through property_container.prisoner_number,
-# so the whole record is that prisoner's personal data and is disclosed, whatever an individual column is
-# marked. V15__schema_comments.sql makes the same point at greater length.
+# It is deliberately not derived from the [Sensitivity: ...] tag, which answers a different question -
+# whether the column's own content is personal data. Most of what the report discloses is not personal
+# data in itself, because the personal data is the link to the prisoner that every row already carries.
+# Deriving one from the other would mark 8 of 59 elements as in scope when the true figure is 25.
 #
 # Impact is NO CHANGE throughout, which is correct for a new product - nothing existed before to be
 # added to, changed or deleted. The column is kept so the same script serves the Enhancement and
@@ -61,22 +58,18 @@ SELECT
   c.table_name                                           AS "Entity",
   c.column_name                                          AS "Element",
   regexp_replace(
-    regexp_replace(
-      col_description(pc.oid, c.ordinal_position),
-      '\s*\[Sensitivity: [A-Z-]+\]$', ''
-    ),
-    '\s*\[Example: [^\]]*\]$', ''
+    col_description(pc.oid, c.ordinal_position),
+    '\s*\[(Example|SAR|Sensitivity): [^\]]*\]', '', 'g'
   )                                                      AS "Description",
   substring(
     col_description(pc.oid, c.ordinal_position)
     from '\[Example: ([^\]]*)\]'
   )                                                      AS "Example Value",
   CASE WHEN c.is_nullable = 'NO' THEN 'Y' ELSE 'N' END   AS "Mandatory",
-  CASE
-    WHEN col_description(pc.oid, c.ordinal_position)
-           ~ '\[Sensitivity: (PERSONAL|SPECIAL-CATEGORY)\]$' THEN 'Y'
-    ELSE 'N'
-  END                                                    AS "SAR Impact",
+  substring(
+    col_description(pc.oid, c.ordinal_position)
+    from '\[SAR: ([YN])\]'
+  )                                                      AS "SAR Impact",
   '${IMPACT}'                                            AS "Impact"
 FROM information_schema.columns c
 JOIN pg_class pc

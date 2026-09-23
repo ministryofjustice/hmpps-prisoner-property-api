@@ -3,10 +3,11 @@
 # Exports the prisoner property schema as a flat CSV data dictionary.
 #
 # The descriptions come from the COMMENT ON statements in db/migration/V15__schema_comments.sql, so this
-# is the same source of truth as the SchemaSpy report. Two tags are pulled out of each column comment
+# is the same source of truth as the SchemaSpy report. Three tags are pulled out of each column comment
 # into their own columns and stripped from the description so the text reads cleanly: the sensitivity
-# classification ([Sensitivity: ...], V15) and the example value ([Example: ...], V19). The output is
-# intended for the MOJ Data Catalogue / AWS Glue.
+# classification ([Sensitivity: ...], V15), the example value ([Example: ...], V19) and whether the
+# column is disclosed in a subject access request ([SAR: ...], V20). The output is intended for the
+# MOJ Data Catalogue / AWS Glue.
 #
 # For the SAR Data Requirements extract built from the same comments, see
 # scripts/generate-sar-data-requirements.sh.
@@ -42,17 +43,20 @@ SELECT
   c.character_maximum_length,
   c.is_nullable,
   c.column_default,
+  -- Strips every tag wherever it sits, rather than anchoring to the end of the comment. There are three
+  -- of them now and a fourth would break an anchored pattern silently, leaving the tag in the prose.
   regexp_replace(
-    regexp_replace(
-      col_description(pc.oid, c.ordinal_position),
-      '\s*\[Sensitivity: [A-Z-]+\]$', ''
-    ),
-    '\s*\[Example: [^\]]*\]$', ''
+    col_description(pc.oid, c.ordinal_position),
+    '\s*\[(Example|SAR|Sensitivity): [^\]]*\]', '', 'g'
   )                                                      AS column_description,
   substring(
     col_description(pc.oid, c.ordinal_position)
     from '\[Example: ([^\]]*)\]'
   )                                                      AS example_value,
+  substring(
+    col_description(pc.oid, c.ordinal_position)
+    from '\[SAR: ([YN])\]'
+  )                                                      AS sar_impact,
   substring(
     col_description(pc.oid, c.ordinal_position)
     from '\[Sensitivity: ([A-Z-]+)\]'

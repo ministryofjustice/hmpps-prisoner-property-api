@@ -44,8 +44,9 @@ hmpps.sar:
     # records about the person - that their property was returned or sent on, and when - is already in the
     # report as an event on the container itself; the row is the job's own working state. Confirm that with
     # the Offender SAR team as part of the data review (MAPB-768). V19 adds an example value to each
-    # column comment for that review's extract - comments only, no schema or data change.
-    expected-flyway-schema-version: 19
+    # column comment for that review's extract, and V20 records against each column whether it is
+    # disclosed in a report - comments only, no schema or data change.
+    expected-flyway-schema-version: 20
     expected-api-response:
       path: /sar/expected-api-response.json
     expected-jpa-entity-schema:
