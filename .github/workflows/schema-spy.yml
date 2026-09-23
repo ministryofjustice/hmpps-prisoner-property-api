@@ -89,6 +89,7 @@ jobs:
           DB_SCHEMA: ${{ inputs.database_schema }}
         run: |
           scripts/generate-data-dictionary.sh /tmp/schemaspy/data-dictionary.csv
+          scripts/generate-sar-data-requirements.sh /tmp/schemaspy/sar-data-requirements.csv
           cp reference-data.csv /tmp/schemaspy/reference-data.csv
 
       # The gh-pages root needs an empty .nojekyll file, added once by hand. Without it Pages tries to run

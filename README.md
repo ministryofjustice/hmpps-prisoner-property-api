@@ -211,6 +211,20 @@ refuses to start if it is wrong, which is much better found in CI than in a depl
 overridden per environment (`HMPPS_SAR_TEMPLATE_PATH`) so a new version can be rolled out one environment
 at a time — the granularity the SAR tool's register-before-deploy rule needs.
 
+#### The data requirements extract
+
+`scripts/generate-sar-data-requirements.sh` produces the SAR Data Requirements extract the Offender SAR
+Team review, published alongside the other exports. It is generated from the same schema comments as the
+data dictionary, so it cannot drift from the schema — every column carries an example value
+(`[Example: ...]`, added in `V19`) as well as its sensitivity classification, and `SchemaCommentsTest`
+fails the build if a new column is missing either.
+
+One column needs care when quoting it. `SAR Impact` is derived from the sensitivity classification, so it
+says whether a column's *own content* is personal data about the prisoner — not whether it appears in a
+report. Every row in `property_container` and `property_event` belongs to a prisoner through
+`prisoner_number`, so the whole record is that prisoner's personal data and is disclosed, whatever an
+individual column is marked.
+
 #### Changing any of this
 
 Not a routine code change. It is governed by the
@@ -245,8 +259,9 @@ along with two CSV exports for the MOJ Data Catalogue:
 
 | File | Contents |
 |------|----------|
-| `data-dictionary.csv` | Every table and column, with its description, sensitivity classification, type, nullability, PK and FK |
+| `data-dictionary.csv` | Every table and column, with its description, example value, sensitivity classification, type, nullability, PK and FK |
 | `reference-data.csv` | The enum lookups. Every code in this schema resolves in Kotlin — there are no reference tables — so without this a consumer sees a `varchar` with no idea which values are legal |
+| `sar-data-requirements.csv` | The extract the Offender SAR Team review at the data review checkpoint — see [Subject access requests](#subject-access-requests) |
 
 The report shows every table and column, with types, nullability, primary and foreign keys, and ER
 diagrams. Share these rather than a hand-written description when explaining the schema — to the

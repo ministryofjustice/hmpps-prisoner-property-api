@@ -3,9 +3,13 @@
 # Exports the prisoner property schema as a flat CSV data dictionary.
 #
 # The descriptions come from the COMMENT ON statements in db/migration/V15__schema_comments.sql, so this
-# is the same source of truth as the SchemaSpy report. The sensitivity classification is pulled out of
-# the trailing [Sensitivity: ...] tag on each column comment into its own column, and stripped from the
-# description so the text reads cleanly. The output is intended for the MOJ Data Catalogue / AWS Glue.
+# is the same source of truth as the SchemaSpy report. Two tags are pulled out of each column comment
+# into their own columns and stripped from the description so the text reads cleanly: the sensitivity
+# classification ([Sensitivity: ...], V15) and the example value ([Example: ...], V19). The output is
+# intended for the MOJ Data Catalogue / AWS Glue.
+#
+# For the SAR Data Requirements extract built from the same comments, see
+# scripts/generate-sar-data-requirements.sh.
 #
 # Usage:
 #   scripts/generate-data-dictionary.sh [output-file]
@@ -39,9 +43,16 @@ SELECT
   c.is_nullable,
   c.column_default,
   regexp_replace(
-    col_description(pc.oid, c.ordinal_position),
-    '\s*\[Sensitivity: [A-Z-]+\]$', ''
+    regexp_replace(
+      col_description(pc.oid, c.ordinal_position),
+      '\s*\[Sensitivity: [A-Z-]+\]$', ''
+    ),
+    '\s*\[Example: [^\]]*\]$', ''
   )                                                      AS column_description,
+  substring(
+    col_description(pc.oid, c.ordinal_position)
+    from '\[Example: ([^\]]*)\]'
+  )                                                      AS example_value,
   substring(
     col_description(pc.oid, c.ordinal_position)
     from '\[Sensitivity: ([A-Z-]+)\]'

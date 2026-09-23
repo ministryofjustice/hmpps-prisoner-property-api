@@ -43,8 +43,9 @@ hmpps.sar:
     # V18 adds the legacy clean-up job and item tables. The item holds a prisoner number, but what it
     # records about the person - that their property was returned or sent on, and when - is already in the
     # report as an event on the container itself; the row is the job's own working state. Confirm that with
-    # the Offender SAR team as part of the data review (MAPB-768).
-    expected-flyway-schema-version: 18
+    # the Offender SAR team as part of the data review (MAPB-768). V19 adds an example value to each
+    # column comment for that review's extract - comments only, no schema or data change.
+    expected-flyway-schema-version: 19
     expected-api-response:
       path: /sar/expected-api-response.json
     expected-jpa-entity-schema:
