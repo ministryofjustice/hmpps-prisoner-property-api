@@ -615,11 +615,16 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       LOCATION_A.toString() to "Old Property Store",
       LOCATION_B.toString() to "Reception Property Store",
     )
-    // Admission and transfer-in movement rows are sourced from prison-api (later-dated than the container
-    // events, so they sit at the top of the newest-first list).
+    // Admission and transfer-in movement rows are sourced from prison-api. Only two are kept: the Leeds
+    // admission that began the stay in which the containers were stored, and the transfer in to Moorland, where
+    // the prisoner is now. The earlier Leeds stay and the old Moorland admission explain no property.
     prisonApi.stubGetPrisonTimeline(
       "A1234BC",
-      admissions = listOf("LEI" to "2026-05-01T09:00:00"),
+      admissions = listOf(
+        "LEI" to "2025-06-01T09:00:00",
+        "MDI" to "2025-09-01T09:00:00",
+        "LEI" to "2025-12-01T09:00:00",
+      ),
       transfers = listOf("MDI" to "2026-06-01T10:00:00"),
     )
     // A second container for the same prisoner: created, the prisoner then moved to MDI (received),
@@ -631,43 +636,45 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      // 3 seed events + 3 transferred-container events + 2 prison-api movements (admission + transfer-in)
+      // 3 seed events + 3 transferred-container events + 2 relevant prison-api movements
       .jsonPath("$.length()").isEqualTo(8)
-      // newest first: the prison-api movements - transfer in to Moorland, then admission to Leeds
+      // newest first: the transfer in to Moorland, kept because it is where the prisoner is now
       .jsonPath("$[0].itemType").isEqualTo("PRISONER_MOVEMENT")
       .jsonPath("$[0].movementKind").isEqualTo("TRANSFER_IN")
       .jsonPath("$[0].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
       .jsonPath("$[0].systemGenerated").isEqualTo(true)
-      .jsonPath("$[1].itemType").isEqualTo("PRISONER_MOVEMENT")
-      .jsonPath("$[1].movementKind").isEqualTo("ADMISSION")
-      .jsonPath("$[1].toPrisonName").isEqualTo("Leeds (HMP)")
       // then the container events, newest first. The container is NOW at Moorland (its current prisonId), but the
       // transfer happened at Leeds - so the acting establishment stays Leeds and only the destination is Moorland.
-      .jsonPath("$[2].itemType").isEqualTo("CONTAINER_EVENT")
-      .jsonPath("$[2].eventType").isEqualTo("TRANSFERRED")
-      .jsonPath("$[2].eventStatus").isEqualTo("TRANSFER")
-      .jsonPath("$[2].actingEstablishmentName").isEqualTo("Leeds (HMP)")
-      .jsonPath("$[2].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
-      .jsonPath("$[2].sealNumber").isEqualTo("SN880032")
+      .jsonPath("$[1].itemType").isEqualTo("CONTAINER_EVENT")
+      .jsonPath("$[1].eventType").isEqualTo("TRANSFERRED")
+      .jsonPath("$[1].eventStatus").isEqualTo("TRANSFER")
+      .jsonPath("$[1].actingEstablishmentName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[1].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
+      .jsonPath("$[1].sealNumber").isEqualTo("SN880032")
       // the received ("due for transfer out") event also happened at Leeds - it keeps Leeds, not the current Moorland
-      .jsonPath("$[3].itemType").isEqualTo("CONTAINER_EVENT")
-      .jsonPath("$[3].eventType").isEqualTo("PRISONER_RECEIVED")
-      .jsonPath("$[3].eventStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
-      .jsonPath("$[3].actingEstablishmentName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[2].itemType").isEqualTo("CONTAINER_EVENT")
+      .jsonPath("$[2].eventType").isEqualTo("PRISONER_RECEIVED")
+      .jsonPath("$[2].eventStatus").isEqualTo("DUE_FOR_TRANSFER_OUT")
+      .jsonPath("$[2].actingEstablishmentName").isEqualTo("Leeds (HMP)")
       // and the original creation at Leeds still reads Leeds after the transfer (the bug relabelled it Moorland)
-      .jsonPath("$[4].eventType").isEqualTo("CREATED_SEALED")
-      .jsonPath("$[4].actingEstablishmentName").isEqualTo("Leeds (HMP)")
-      .jsonPath("$[4].toPrisonName").isEqualTo("Leeds (HMP)")
-      // oldest item is the seed container's creation. Every detail is as at that event, so the expandable
-      // details show the original seal - not the later SEAL002 the container carries now - and the location
-      // it was created in, not the one it was later moved to.
-      .jsonPath("$[7].eventType").isEqualTo("CREATED_SEALED")
-      .jsonPath("$[7].sealNumber").isEqualTo("SEAL001")
-      .jsonPath("$[7].containerSealNumber").isEqualTo("SEAL001")
-      .jsonPath("$[7].containerLocationDescription").isEqualTo("Old Property Store")
-      // and the later move shows the destination it moved to
-      .jsonPath("$[5].eventType").isEqualTo("MOVED")
-      .jsonPath("$[5].containerLocationDescription").isEqualTo("Reception Property Store")
+      .jsonPath("$[3].eventType").isEqualTo("CREATED_SEALED")
+      .jsonPath("$[3].actingEstablishmentName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[3].toPrisonName").isEqualTo("Leeds (HMP)")
+      // the later move shows the destination it moved to
+      .jsonPath("$[4].eventType").isEqualTo("MOVED")
+      .jsonPath("$[4].containerLocationDescription").isEqualTo("Reception Property Store")
+      // the seed container's creation. Every detail is as at that event, so the expandable details show the
+      // original seal - not the later SEAL002 the container carries now - and the location it was created in,
+      // not the one it was later moved to.
+      .jsonPath("$[6].eventType").isEqualTo("CREATED_SEALED")
+      .jsonPath("$[6].sealNumber").isEqualTo("SEAL001")
+      .jsonPath("$[6].containerSealNumber").isEqualTo("SEAL001")
+      .jsonPath("$[6].containerLocationDescription").isEqualTo("Old Property Store")
+      // oldest item is the admission to Leeds that began the stay in which the property was stored
+      .jsonPath("$[7].itemType").isEqualTo("PRISONER_MOVEMENT")
+      .jsonPath("$[7].movementKind").isEqualTo("ADMISSION")
+      .jsonPath("$[7].toPrisonName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[7].eventDateTime").isEqualTo("2025-12-01T09:00:00")
   }
 
   @Test
@@ -719,11 +726,18 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `timeline shows prison-api admissions even for a prisoner with no property`() {
+  fun `timeline shows the arrival at the current prison even for a prisoner with no property`() {
     hmppsAuth.stubGrantToken()
-    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonerSearch.stubGetPrisoner("A1234BC") // currently at Moorland
     prisonRegister.stubGetPrisons()
-    prisonApi.stubGetPrisonTimeline("A1234BC", admissions = listOf("LEI" to "2026-05-01T09:00:00"))
+    prisonApi.stubGetPrisonTimeline(
+      "A1234BC",
+      admissions = listOf(
+        "LEI" to "2025-11-01T09:00:00", // held no property and not where they are now
+        "MDI" to "2026-02-01T09:00:00", // an earlier stay at the current prison
+        "MDI" to "2026-05-01T09:00:00", // the current stay
+      ),
+    )
     // No property saved for A1234BC beyond the seed - remove it so the person is property-less.
     repository.deleteAll()
 
@@ -732,11 +746,12 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      // just the admission - the timeline is no longer empty when the person has no property
+      // just the latest arrival at the current prison, so the timeline is not empty when the person has no property
       .jsonPath("$.length()").isEqualTo(1)
       .jsonPath("$[0].itemType").isEqualTo("PRISONER_MOVEMENT")
       .jsonPath("$[0].movementKind").isEqualTo("ADMISSION")
-      .jsonPath("$[0].toPrisonName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[0].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
+      .jsonPath("$[0].eventDateTime").isEqualTo("2026-05-01T09:00:00")
   }
 
   @Test
@@ -783,38 +798,112 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   @Test
   fun `timeline labels each arrival with the receiving prison's property system (DPS on or after rollout, else NOMIS)`() {
     hmppsAuth.stubGrantToken()
-    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "LEI")
     prisonRegister.stubGetPrisons()
-    // Leeds went live on DPS on 2026-03-01; Moorland is not on DPS.
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    // Leeds went live on DPS on 2026-03-01.
     activeAgencyRepository.save(ActiveAgency("LEI", active = true, updatedAt = LocalDateTime.parse("2026-03-01T09:00:00"), updatedBy = "ADMIN"))
     prisonApi.stubGetPrisonTimeline(
       "A1234BC",
-      admissions = listOf(
-        "LEI" to "2026-06-01T09:00:00", // after Leeds' rollout -> DPS
-        "MDI" to "2026-04-01T09:00:00", // Moorland not on DPS -> NOMIS
-        "LEI" to "2026-02-01T09:00:00", // before Leeds' rollout -> NOMIS
-      ),
-      transfers = listOf("LEI" to "2026-07-01T09:00:00"), // after Leeds' rollout -> DPS
+      // before Leeds' rollout -> NOMIS; kept as it began the stay in which the seed container was stored
+      admissions = listOf("LEI" to "2025-12-01T09:00:00"),
+      // after Leeds' rollout -> DPS; kept as the arrival at the current prison
+      transfers = listOf("LEI" to "2026-07-01T09:00:00"),
     )
-    repository.deleteAll() // property-less, so only the four movement items appear
 
     webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("$.length()").isEqualTo(4)
+      // 3 seed events + the DPS-first-used marker + 2 arrivals
+      .jsonPath("$.length()").isEqualTo(6)
       // newest first
       .jsonPath("$[0].movementKind").isEqualTo("TRANSFER_IN")
       .jsonPath("$[0].toPrisonName").isEqualTo("Leeds (HMP)")
       .jsonPath("$[0].propertySystem").isEqualTo("DPS")
-      .jsonPath("$[1].movementKind").isEqualTo("ADMISSION")
-      .jsonPath("$[1].toPrisonName").isEqualTo("Leeds (HMP)")
-      .jsonPath("$[1].propertySystem").isEqualTo("DPS")
-      .jsonPath("$[2].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
-      .jsonPath("$[2].propertySystem").isEqualTo("NOMIS")
-      .jsonPath("$[3].toPrisonName").isEqualTo("Leeds (HMP)")
-      .jsonPath("$[3].propertySystem").isEqualTo("NOMIS")
+      .jsonPath("$[5].movementKind").isEqualTo("ADMISSION")
+      .jsonPath("$[5].toPrisonName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[5].propertySystem").isEqualTo("NOMIS")
+  }
+
+  @Test
+  fun `timeline leaves out repeated arrivals that explain no property`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC") // currently at Moorland
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    // The seed container was stored at Leeds on 2026-01-01.
+    prisonApi.stubGetPrisonTimeline(
+      "A1234BC",
+      admissions = listOf(
+        "LEI" to "2025-06-01T09:00:00", // an earlier Leeds stay - dropped
+        "LEI" to "2025-12-01T09:00:00", // began the stay in which the container was stored - kept
+        "LEI" to "2025-12-01T09:00:00", // the same admission repeated by prison-api - dropped
+        "LEI" to "2026-02-01T09:00:00", // a later Leeds stay with no property handled - dropped
+        "MDI" to "2025-09-01T09:00:00", // an earlier stay at the current prison - dropped
+        "MDI" to "2026-04-01T09:00:00", // the current stay - kept
+      ),
+      transfers = listOf("MDI" to "2025-10-01T09:00:00"), // an earlier transfer in to the current prison - dropped
+    )
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // 3 seed events + 2 arrivals
+      .jsonPath("$.length()").isEqualTo(5)
+      .jsonPath("$[0].itemType").isEqualTo("PRISONER_MOVEMENT")
+      .jsonPath("$[0].toPrisonName").isEqualTo("Moorland (HMP & YOI)")
+      .jsonPath("$[0].eventDateTime").isEqualTo("2026-04-01T09:00:00")
+      .jsonPath("$[4].itemType").isEqualTo("PRISONER_MOVEMENT")
+      .jsonPath("$[4].toPrisonName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$[4].eventDateTime").isEqualTo("2025-12-01T09:00:00")
+  }
+
+  @Test
+  fun `timeline keeps the arrival for each stay in which property was handled, and none for a released prisoner's last prison`() {
+    hmppsAuth.stubGrantToken()
+    // Released: there is no current prison, so the last admission explains nothing on its own.
+    prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "OUT", lastMovementTypeCode = "REL")
+    prisonRegister.stubGetPrisons()
+    locations.stubPostLocationsBatch(LOCATION_B.toString())
+    // A second container stored at Leeds in a later stay than the seed container (2026-01-01).
+    val laterStay = PropertyContainer(
+      prisonerNumber = "A1234BC",
+      prisonId = "LEI",
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "USER1",
+      currentSealNumber = "SEAL020",
+    )
+    laterStay.events.add(
+      PropertyEvent(laterStay, PropertyEventType.CREATED_SEALED, baseTime.plusMonths(6), "USER1", sealNumber = "SEAL020", toPrisonId = "LEI"),
+    )
+    laterStay.refreshDerivedState()
+    repository.save(laterStay)
+    prisonApi.stubGetPrisonTimeline(
+      "A1234BC",
+      admissions = listOf(
+        "LEI" to "2025-12-01T09:00:00", // began the seed container's stay - kept
+        "LEI" to "2026-06-15T09:00:00", // began the later container's stay - kept
+        "MDI" to "2026-08-01T09:00:00", // the last prison before release, with no property - dropped
+      ),
+    )
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      // 3 seed events + 1 later-container event + 2 Leeds arrivals
+      .jsonPath("$.length()").isEqualTo(6)
+      .jsonPath("$[0].eventType").isEqualTo("CREATED_SEALED")
+      .jsonPath("$[0].sealNumber").isEqualTo("SEAL020")
+      .jsonPath("$[1].itemType").isEqualTo("PRISONER_MOVEMENT")
+      .jsonPath("$[1].eventDateTime").isEqualTo("2026-06-15T09:00:00")
+      .jsonPath("$[5].itemType").isEqualTo("PRISONER_MOVEMENT")
+      .jsonPath("$[5].eventDateTime").isEqualTo("2025-12-01T09:00:00")
   }
 
   @Test

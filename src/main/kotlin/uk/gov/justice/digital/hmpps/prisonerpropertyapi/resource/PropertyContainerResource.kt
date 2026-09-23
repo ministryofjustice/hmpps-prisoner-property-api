@@ -324,10 +324,12 @@ class PropertyContainerResource(
   @Operation(
     summary = "Get a prisoner's whole-property history timeline, newest first",
     description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns a single interleaved timeline of every event " +
-      "across all of the prisoner's containers, newest first, plus a de-duplicated \"arrived at ...\" " +
-      "item for each prison the prisoner moved into. Prison and location ids are resolved to names, and each " +
-      "container event carries the seal number and acting establishment as at that point in its history. Returns an " +
-      "empty list if the prisoner has no property.",
+      "across all of the prisoner's containers, newest first, plus the \"arrived at ...\" items that explain " +
+      "that property - the arrival that began each stay in which property was stored or handled - and the " +
+      "arrival at the prisoner's current prison. Other admissions and transfers in are left out. Prison and " +
+      "location ids are resolved to names, and each container event carries the seal number and acting " +
+      "establishment as at that point in its history. For a prisoner with no property, returns only the arrival " +
+      "at their current prison, if any.",
     responses = [
       ApiResponse(responseCode = "200", description = "Prisoner property timeline returned"),
       ApiResponse(responseCode = "400", description = "Invalid prisoner number", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
