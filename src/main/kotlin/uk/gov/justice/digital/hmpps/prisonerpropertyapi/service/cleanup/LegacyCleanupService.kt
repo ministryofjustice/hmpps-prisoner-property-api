@@ -63,7 +63,7 @@ class LegacyCleanupService(
       ?: throw IllegalStateException("hmpps.sqs queue '${LegacyCleanupListener.QUEUE_ID}' is not configured")
   }
 
-  fun preview(prisonId: String, olderThanDays: Int): LegacyCleanupPreviewDto = plan(prisonId, olderThanDays).toPreview()
+  fun preview(prisonId: String): LegacyCleanupPreviewDto = plan(prisonId).toPreview()
 
   /**
    * Create a job from the current plan and hand it to the listener. The items are saved with the job in one
@@ -74,11 +74,11 @@ class LegacyCleanupService(
    * One job may be in flight per prison. The pre-check gives a clean 409; the partial unique index behind it
    * catches the race between two admins, surfacing as a constraint violation mapped to the same 409.
    */
-  fun start(prisonId: String, olderThanDays: Int, username: String): LegacyCleanupJobDto {
+  fun start(prisonId: String, username: String): LegacyCleanupJobDto {
     if (jobRepository.existsByPrisonIdAndStatusIn(prisonId, LegacyCleanupJob.ACTIVE_STATUSES)) {
       throw LegacyCleanupJobActiveException(prisonId)
     }
-    val plan = plan(prisonId, olderThanDays)
+    val plan = plan(prisonId)
     val job = try {
       transaction.execute { saveJob(plan, username) }!!
     } catch (e: DataIntegrityViolationException) {
@@ -89,10 +89,8 @@ class LegacyCleanupService(
       mapOf(
         "prisonId" to prisonId,
         "jobId" to job.id.toString(),
-        "olderThanDays" to olderThanDays.toString(),
+        "cutoffDate" to plan.cutoff.toString(),
         "totalRecords" to job.totalRecords.toString(),
-        "toReturn" to plan.toReturn.size.toString(),
-        "toTransfer" to plan.toTransfer.size.toString(),
         "requestedBy" to username,
       ),
       null,
@@ -104,7 +102,6 @@ class LegacyCleanupService(
     val now = LocalDateTime.now()
     val job = LegacyCleanupJob(
       prisonId = plan.prisonId,
-      olderThanDays = plan.olderThanDays,
       cutoffDate = plan.cutoff,
       requestedBy = username,
       requestedAt = now,
@@ -116,7 +113,7 @@ class LegacyCleanupService(
           job = job,
           containerId = planned.containerId,
           prisonerNumber = planned.prisonerNumber,
-          action = planned.action,
+          action = LegacyCleanupAction.REMOVE,
           plannedEventDate = planned.eventDate,
           plannedToPrisonId = planned.toPrisonId,
         ),
@@ -156,18 +153,18 @@ class LegacyCleanupService(
     .orElseThrow { LegacyCleanupJobNotFoundException(id) }
 
   /**
-   * Classify every live container at [prisonId] against the rule. One grouped query for the candidates, one
-   * bulk prisoner-search lookup for their owners (chunked by the client), then the pure decision per owner.
+   * Classify every live container at [prisonId] against the rule. One query for the candidates, one bulk
+   * prisoner-search lookup for their owners (chunked by the client), then the pure decision per container: the
+   * container's own exclusions first (confiscated, disposal date still to come), then its owner's.
    *
-   * Alongside the decision, each owner is also classified with the same [ContainerStatusResolver] rule the
-   * summary tiles use, so the preview can show "due for return now" and "due for transfer out now" figures
-   * that match the tiles exactly - that is what tells the admin how much of the visible backlog the window
-   * will clear.
+   * Alongside the decision, each container is also classified the way the summary tiles classify it, so the
+   * preview can show "due for return now" and "due for transfer out now" figures that match the tiles exactly -
+   * that is what tells the admin how much of the visible backlog the clean-up will clear.
    */
-  private fun plan(prisonId: String, olderThanDays: Int): CleanupPlan {
+  private fun plan(prisonId: String): CleanupPlan {
     val today = LocalDate.now()
-    val cutoff = today.minusDays(olderThanDays.toLong())
-    val candidates = repository.findCleanupCandidates(prisonId, today)
+    val cutoff = LegacyCleanupRule.cutoff(today)
+    val candidates = repository.findCleanupCandidates(prisonId)
     val prisonerNumbers = candidates.mapTo(mutableSetOf()) { it.prisonerNumber }
     if (prisonerNumbers.size > MAX_CANDIDATE_PRISONERS) {
       throw LegacyCleanupTooLargeException(prisonId, prisonerNumbers.size, MAX_CANDIDATE_PRISONERS)
@@ -177,17 +174,27 @@ class LegacyCleanupService(
       log.warn("Legacy clean-up plan for {} resolved {} of {} property owners; the rest are ineligible", prisonId, prisoners.size, prisonerNumbers.size)
     }
 
-    val decisions = prisonerNumbers.associateWith { rule.decide(prisoners[it], prisonId, cutoff) }
+    val ownerDecisions = prisonerNumbers.associateWith { rule.decide(prisoners[it], prisonId, cutoff) }
     val shownAs = prisonerNumbers.associateWith { statusResolver.ownerLocation(prisoners[it], prisonId) }
 
     return CleanupPlan(
       prisonId = prisonId,
-      olderThanDays = olderThanDays,
       cutoff = cutoff,
       today = today,
       candidates = candidates,
-      decisions = decisions,
-      readsAs = candidates.associate { it.id to shownAs.getValue(it.prisonerNumber).statusFor(it.status) },
+      decisions = candidates.associate { candidate ->
+        val excluded = rule.containerExclusion(candidate.containerType, candidate.proposedDisposalDate, today)
+        candidate.id to (excluded?.let { CleanupDecision.NotEligible(it) } ?: ownerDecisions.getValue(candidate.prisonerNumber))
+      },
+      // The tiles' precedence (ContainerStatusResolver.effectiveStatus): a disposal date that has arisen reads as
+      // due for disposal whatever the owner's location, so those containers are not counted as due for return.
+      readsAs = candidates.associate { candidate ->
+        candidate.id to if (candidate.proposedDisposalDate?.isAfter(today) == false) {
+          ContainerStatus.DISPOSAL_REQUIRED
+        } else {
+          shownAs.getValue(candidate.prisonerNumber).statusFor(candidate.status)
+        }
+      },
     )
   }
 
@@ -201,48 +208,43 @@ class LegacyCleanupService(
   }
 }
 
-/** A container the clean-up will close, and how. */
+/** A container the clean-up will close, dated to when its owner left, and why. */
 data class PlannedItem(
   val containerId: UUID,
   val prisonerNumber: String,
-  val action: LegacyCleanupAction,
   val eventDate: LocalDate,
+  val reason: CleanupReason,
   val toPrisonId: String?,
 )
 
 /** The outcome of classifying a prison's live containers: the items to close, and everything needed to explain the rest. */
 class CleanupPlan(
   val prisonId: String,
-  val olderThanDays: Int,
   val cutoff: LocalDate,
   private val today: LocalDate,
   private val candidates: List<CleanupCandidate>,
-  private val decisions: Map<String, CleanupDecision>,
+  private val decisions: Map<UUID, CleanupDecision>,
   private val readsAs: Map<UUID, ContainerStatus>,
 ) {
   val items: List<PlannedItem> = candidates.mapNotNull { candidate ->
-    when (val decision = decisions.getValue(candidate.prisonerNumber)) {
-      is CleanupDecision.Return -> PlannedItem(candidate.id, candidate.prisonerNumber, LegacyCleanupAction.RETURN, decision.eventDate, null)
-      is CleanupDecision.Transfer -> PlannedItem(candidate.id, candidate.prisonerNumber, LegacyCleanupAction.TRANSFER, decision.dateLeft, decision.toPrisonId)
+    when (val decision = decisions.getValue(candidate.id)) {
+      is CleanupDecision.Remove -> PlannedItem(candidate.id, candidate.prisonerNumber, decision.eventDate, decision.reason, decision.toPrisonId)
       is CleanupDecision.NotEligible -> null
     }
   }
 
-  val toReturn get() = items.filter { it.action == LegacyCleanupAction.RETURN }
-  val toTransfer get() = items.filter { it.action == LegacyCleanupAction.TRANSFER }
-
   fun toPreview(): LegacyCleanupPreviewDto {
     val ineligible = candidates
-      .mapNotNull { candidate -> (decisions.getValue(candidate.prisonerNumber) as? CleanupDecision.NotEligible)?.let { it.reason to candidate } }
+      .mapNotNull { candidate -> (decisions.getValue(candidate.id) as? CleanupDecision.NotEligible)?.let { it.reason to candidate } }
       .groupBy({ it.first }, { it.second })
       .mapValues { (_, rows) -> count(rows) }
     return LegacyCleanupPreviewDto(
       prisonId = prisonId,
-      olderThanDays = olderThanDays,
+      retentionMonths = LegacyCleanupRule.RETENTION_MONTHS.toInt(),
       cutoffDate = cutoff,
       generatedAt = LocalDateTime.now(),
-      toReturn = count(toReturn),
-      toTransfer = count(toTransfer),
+      toRemove = count(items),
+      toRemoveByReason = items.groupBy { it.reason }.mapValues { (_, rows) -> count(rows) },
       dueForReturnNow = count(candidates.filter { readsAs[it.id] == ContainerStatus.DUE_FOR_RETURN }),
       dueForTransferOutNow = count(candidates.filter { readsAs[it.id] == ContainerStatus.DUE_FOR_TRANSFER_OUT }),
       candidates = count(candidates),
@@ -250,9 +252,9 @@ class CleanupPlan(
       ageBands = AGE_BANDS.map { band ->
         CleanupAgeBandDto(
           label = band.label,
-          fromDays = band.fromDays,
-          toDays = band.toDays,
-          containers = items.count { band.contains(ChronoUnit.DAYS.between(it.eventDate, today).toInt()) },
+          fromMonths = band.fromMonths,
+          toMonths = band.toMonths,
+          containers = items.count { band.contains(ChronoUnit.MONTHS.between(it.eventDate, today).toInt()) },
         )
       },
     )
@@ -263,16 +265,16 @@ class CleanupPlan(
   @JvmName("countPlanned")
   private fun count(rows: List<PlannedItem>) = CleanupCountDto(rows.size, rows.distinctBy { it.prisonerNumber }.size)
 
-  private data class AgeBand(val label: String, val fromDays: Int, val toDays: Int?) {
-    fun contains(days: Int) = days >= fromDays && (toDays == null || days <= toDays)
+  private data class AgeBand(val label: String, val fromMonths: Int, val toMonths: Int?) {
+    fun contains(months: Int) = months >= fromMonths && (toMonths == null || months <= toMonths)
   }
 
   private companion object {
-    /** How stale the backlog is, for choosing a window: within a quarter, within a year, older. */
+    /** How long ago the people whose property will be closed left. Everything closed is at least 13 months old. */
     val AGE_BANDS = listOf(
-      AgeBand("Up to 90 days", 0, 90),
-      AgeBand("91 to 365 days", 91, 365),
-      AgeBand("Over a year", 366, null),
+      AgeBand("13 months to 2 years", 13, 23),
+      AgeBand("2 to 5 years", 24, 59),
+      AgeBand("Over 5 years", 60, null),
     )
   }
 }

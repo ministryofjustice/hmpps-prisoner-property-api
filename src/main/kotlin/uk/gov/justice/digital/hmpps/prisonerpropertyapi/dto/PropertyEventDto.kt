@@ -23,6 +23,13 @@ data class PropertyEventDto(
   @Schema(description = "Id of the user who recorded the event", example = "AUSER_GEN")
   val eventUserId: String,
 
+  @Schema(
+    description = "Whether a legacy clean-up job recorded this event - for a REMOVED event, that the record was archived " +
+      "automatically under the 13-month retention rule rather than removed in NOMIS",
+    example = "false",
+  )
+  val legacyCleanup: Boolean = false,
+
   @Schema(description = "Seal number recorded by this event, for events that carry a seal", example = "SEAL12345", nullable = true)
   val sealNumber: String?,
 
@@ -96,6 +103,7 @@ data class PropertyEventDto(
       eventType = event.eventType,
       eventDateTime = event.eventDateTime,
       eventUserId = event.eventUserId,
+      legacyCleanup = event.legacyCleanupJobId != null,
       sealNumber = event.sealNumber,
       fromInternalLocationId = event.fromInternalLocationId,
       toInternalLocationId = event.toInternalLocationId,

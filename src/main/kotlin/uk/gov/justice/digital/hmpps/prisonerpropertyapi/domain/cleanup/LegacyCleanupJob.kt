@@ -28,11 +28,13 @@ class LegacyCleanupJob(
   @Column(name = "prison_id", nullable = false)
   val prisonId: String,
 
-  @Column(name = "older_than_days", nullable = false)
-  val olderThanDays: Int,
-
   @Column(name = "cutoff_date", nullable = false)
   val cutoffDate: LocalDate,
+
+  // The look-back window in days an admin chose, before the fixed 13-month rule (MAPB-854) replaced it. Kept only
+  // so jobs run under the old window still read correctly; null for every job since.
+  @Column(name = "older_than_days")
+  val olderThanDays: Int? = null,
 
   @Column(name = "requested_by", nullable = false)
   val requestedBy: String,
@@ -56,6 +58,11 @@ class LegacyCleanupJob(
   @Column(name = "total_records", nullable = false)
   var totalRecords: Int = 0,
 
+  @Column(name = "removed_records", nullable = false)
+  var removedRecords: Int = 0,
+
+  // Returned / transferred counts are from jobs run before MAPB-854, which closed property as returned or
+  // transferred; jobs since mark everything removed.
   @Column(name = "returned_records", nullable = false)
   var returnedRecords: Int = 0,
 
@@ -90,6 +97,7 @@ class LegacyCleanupJob(
     status = LegacyCleanupJobStatus.FINISHED
     endTime = now
     lastActivityAt = now
+    removedRecords = items.count { it.status == LegacyCleanupItemStatus.PROCESSED && it.action == LegacyCleanupAction.REMOVE }
     returnedRecords = items.count { it.status == LegacyCleanupItemStatus.PROCESSED && it.action == LegacyCleanupAction.RETURN }
     transferredRecords = items.count { it.status == LegacyCleanupItemStatus.PROCESSED && it.action == LegacyCleanupAction.TRANSFER }
     skippedRecords = items.count { it.status == LegacyCleanupItemStatus.SKIPPED }

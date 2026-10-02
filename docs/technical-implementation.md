@@ -71,7 +71,7 @@ action and one raised by NOMIS sync are the same shape. Six smaller components s
 | Component | Responsibility |
 | --- | --- |
 | `ActiveAgenciesService` | The rollout flag. Deliberately **not** cached, so an admin toggle can't flip-flop between pods. |
-| `cleanup/LegacyCleanupRule` | The pure decision: may this container be closed, given where its owner is now and the cut-off. |
+| `cleanup/LegacyCleanupRule` | The pure 13-month retention rule: may this container be closed, given its type and disposal date, where its owner is now and the cut-off. |
 | `cleanup/LegacyCleanupService` | Preview and start of a legacy clean-up job; sends the start message to the `prisonerpropertycleanup` queue after commit. |
 | `cleanup/LegacyCleanupProcessingService` | Runs a job from the queue: claims it under a row lock, closes each item in its own transaction, publishes after each commit. |
 | `BoxLocationService` | Storage locations with space. |

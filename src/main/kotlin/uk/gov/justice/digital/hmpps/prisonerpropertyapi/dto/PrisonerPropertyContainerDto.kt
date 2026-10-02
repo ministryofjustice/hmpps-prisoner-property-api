@@ -73,7 +73,7 @@ data class PrisonerPropertyContainerDto(
   @Schema(description = "Date the container is proposed to be disposed of, if any", example = "2026-09-01", nullable = true)
   val proposedDisposalDate: LocalDate?,
 
-  @Schema(description = "Why the container left active storage (disposed, returned, transferred, combined), if it has", example = "DISPOSED", nullable = true)
+  @Schema(description = "Why the container left active storage (disposed, returned, transferred, combined, created in error, or removed), if it has", example = "DISPOSED", nullable = true)
   val removalOutcome: RemovalOutcome?,
 
   @Schema(description = "Date the container left active storage, if it has", example = "2026-09-15", nullable = true)

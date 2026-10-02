@@ -29,12 +29,8 @@ interface LegacyCleanupJobRepository : JpaRepository<LegacyCleanupJob, UUID> {
    * stale-claim rule reads.
    */
   @Modifying
-  @Query("update LegacyCleanupJob j set j.returnedRecords = j.returnedRecords + 1, j.lastActivityAt = :now where j.id = :id")
-  fun incrementReturned(@Param("id") id: UUID, @Param("now") now: LocalDateTime)
-
-  @Modifying
-  @Query("update LegacyCleanupJob j set j.transferredRecords = j.transferredRecords + 1, j.lastActivityAt = :now where j.id = :id")
-  fun incrementTransferred(@Param("id") id: UUID, @Param("now") now: LocalDateTime)
+  @Query("update LegacyCleanupJob j set j.removedRecords = j.removedRecords + 1, j.lastActivityAt = :now where j.id = :id")
+  fun incrementRemoved(@Param("id") id: UUID, @Param("now") now: LocalDateTime)
 
   @Modifying
   @Query("update LegacyCleanupJob j set j.skippedRecords = j.skippedRecords + 1, j.lastActivityAt = :now where j.id = :id")

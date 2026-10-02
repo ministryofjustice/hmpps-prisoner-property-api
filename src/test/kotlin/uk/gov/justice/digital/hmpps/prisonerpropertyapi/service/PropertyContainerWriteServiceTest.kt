@@ -527,69 +527,70 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
-  fun `legacy clean-up return records a RETURNED event attributed to the clean-up, dated to the release`() {
+  fun `legacy clean-up records a REMOVED event attributed to the clean-up, dated to when the person left`() {
     val existing = existingContainer()
     whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
     val jobId = UUID.randomUUID()
-    val released = LocalDate.parse("2026-06-01")
+    val left = LocalDate.parse("2025-06-01")
 
-    val result = service.legacyCleanupReturn(existing.id!!, released, jobId, "LEI")
-
-    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.RETURNED)
-    assertThat(existing.removalDate).isEqualTo(released)
-    assertThat(existing.currentLocation()).isNull()
-    val event = existing.events.last()
-    assertThat(event.eventType).isEqualTo(PropertyEventType.RETURNED)
-    assertThat(event.eventUserId).isEqualTo(PropertySystemUsers.LEGACY_CLEANUP)
-    assertThat(event.eventDate).isEqualTo(released)
-    assertThat(event.legacyCleanupJobId).isEqualTo(jobId)
-    assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("location", "removalOutcome", "currentStatus"))
-  }
-
-  @Test
-  fun `legacy clean-up transfer records the destination but is not awaiting arrival there`() {
-    val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
-    val jobId = UUID.randomUUID()
-    val left = LocalDate.parse("2026-06-01")
-
-    val result = service.legacyCleanupTransfer(existing.id!!, "MDI", left, jobId, "LEI")
+    val result = service.legacyCleanupRemove(existing.id!!, left, jobId, "LEI")
 
     assertThat(existing.prisonId).isEqualTo("LEI")
-    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.TRANSFERRED)
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.REMOVED)
     assertThat(existing.removalDate).isEqualTo(left)
-    val event = existing.events.last()
-    assertThat(event.eventType).isEqualTo(PropertyEventType.TRANSFERRED)
-    assertThat(event.eventUserId).isEqualTo(PropertySystemUsers.LEGACY_CLEANUP)
-    assertThat(event.toPrisonId).isEqualTo("MDI")
-    assertThat(event.legacyCleanupJobId).isEqualTo(jobId)
-    // unlike a staff transfer, nothing is on its way to MDI
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.REMOVED)
+    // removing it frees the storage location; the earlier events keep where it was
+    assertThat(existing.currentLocation()).isNull()
+    assertThat(existing.currentInternalLocationId).isNull()
     assertThat(existing.receivingPrison()).isNull()
-    assertThat(existing.receivingPrisonId).isNull()
+    val event = existing.events.last()
+    assertThat(event.eventType).isEqualTo(PropertyEventType.REMOVED)
+    assertThat(event.eventUserId).isEqualTo(PropertySystemUsers.LEGACY_CLEANUP)
+    assertThat(event.eventDate).isEqualTo(left)
+    assertThat(event.fromPrisonId).isEqualTo("LEI")
+    assertThat(event.legacyCleanupJobId).isEqualTo(jobId)
+    assertThat(existing.removedByLegacyCleanup()).isTrue()
     assertThat(result.event?.additionalInformation?.get("changedFields")).isEqualTo(listOf("location", "removalOutcome", "currentStatus"))
   }
 
   @Test
-  fun `legacy clean-up refuses a container held at a different prison or due for disposal, and one already removed`() {
+  fun `legacy clean-up closes a container whose disposal date has passed`() {
+    val disposalDue = existingContainer().apply { proposedDisposalDate = LocalDate.now().minusDays(1) }
+    whenever(repository.findById(disposalDue.id!!)).thenReturn(Optional.of(disposalDue))
+
+    service.legacyCleanupRemove(disposalDue.id!!, LocalDate.parse("2025-06-01"), UUID.randomUUID(), "LEI")
+
+    assertThat(disposalDue.removalOutcome).isEqualTo(RemovalOutcome.REMOVED)
+  }
+
+  @Test
+  fun `legacy clean-up refuses a container held elsewhere, confiscated, with a disposal date to come, or already removed`() {
     val elsewhere = existingContainer()
     whenever(repository.findById(elsewhere.id!!)).thenReturn(Optional.of(elsewhere))
-    assertThatThrownBy { service.legacyCleanupReturn(elsewhere.id!!, LocalDate.now(), UUID.randomUUID(), "MDI") }
+    assertThatThrownBy { service.legacyCleanupRemove(elsewhere.id!!, LocalDate.now(), UUID.randomUUID(), "MDI") }
       .isInstanceOf(LegacyCleanupNotApplicableException::class.java)
       .hasMessageContaining("held at LEI, not MDI")
 
-    val disposalDue = existingContainer().apply { proposedDisposalDate = LocalDate.now().minusDays(1) }
-    whenever(repository.findById(disposalDue.id!!)).thenReturn(Optional.of(disposalDue))
-    assertThatThrownBy { service.legacyCleanupTransfer(disposalDue.id!!, "MDI", LocalDate.now(), UUID.randomUUID(), "LEI") }
+    val confiscated = existingContainer().apply { containerType = ContainerType.CONFISCATED }
+    whenever(repository.findById(confiscated.id!!)).thenReturn(Optional.of(confiscated))
+    assertThatThrownBy { service.legacyCleanupRemove(confiscated.id!!, LocalDate.now(), UUID.randomUUID(), "LEI") }
       .isInstanceOf(LegacyCleanupNotApplicableException::class.java)
-      .hasMessageContaining("due for disposal")
+      .hasMessageContaining("CONFISCATED")
+
+    val disposalToCome = existingContainer().apply { proposedDisposalDate = LocalDate.now().plusDays(1) }
+    whenever(repository.findById(disposalToCome.id!!)).thenReturn(Optional.of(disposalToCome))
+    assertThatThrownBy { service.legacyCleanupRemove(disposalToCome.id!!, LocalDate.now(), UUID.randomUUID(), "LEI") }
+      .isInstanceOf(LegacyCleanupNotApplicableException::class.java)
+      .hasMessageContaining("DISPOSAL_DATE_NOT_REACHED")
 
     val removed = existingContainer().apply { removalOutcome = RemovalOutcome.RETURNED }
     whenever(repository.findById(removed.id!!)).thenReturn(Optional.of(removed))
-    assertThatThrownBy { service.legacyCleanupReturn(removed.id!!, LocalDate.now(), UUID.randomUUID(), "LEI") }
+    assertThatThrownBy { service.legacyCleanupRemove(removed.id!!, LocalDate.now(), UUID.randomUUID(), "LEI") }
       .isInstanceOf(ContainerAlreadyRemovedException::class.java)
 
     assertThat(elsewhere.removalOutcome).isNull()
-    assertThat(disposalDue.removalOutcome).isNull()
+    assertThat(confiscated.removalOutcome).isNull()
+    assertThat(disposalToCome.removalOutcome).isNull()
   }
 
   @Test

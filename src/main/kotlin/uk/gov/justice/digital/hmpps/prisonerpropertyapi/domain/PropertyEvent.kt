@@ -68,9 +68,11 @@ class PropertyEvent(
   @Column(name = "related_container_seal_number")
   var relatedContainerSealNumber: String? = null,
 
-  // Set when a legacy clean-up job wrote this RETURNED / TRANSFERRED event rather than a member of staff. The
-  // timeline uses it to say the closure was automatic, and PropertyContainer.receivingPrison() uses it to keep a
-  // clean-up transfer - which records where the person went but was never physically sent on - from being
+  // Set when a legacy clean-up job wrote this event rather than a member of staff or the NOMIS sync: a REMOVED
+  // event under the 13-month retention rule (MAPB-854), or a RETURNED / TRANSFERRED event from jobs run before it.
+  // It is the flag that tells an automatic clean-up apart from other removals: the history words it as an archived
+  // legacy record (exposed as legacyCleanup), the NOMIS sync will not reactivate a container it removed, and
+  // PropertyContainer.receivingPrison() keeps an old clean-up transfer - never physically sent on - from being
   // advertised at that prison as property awaiting arrival.
   @Column(name = "legacy_cleanup_job_id")
   val legacyCleanupJobId: UUID? = null,

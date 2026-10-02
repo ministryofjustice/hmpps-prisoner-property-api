@@ -32,7 +32,7 @@ object PropertyTelemetry {
   const val PRISON_ROLLOUT_CHANGED = "prison-property-prison-rollout-changed"
 
   /**
-   * The legacy clean-up job: requested by an admin (with the window and what it set out to close), and
+   * The legacy clean-up job: requested by an admin (with the cut-off date and what it set out to close), and
    * finished (with what it actually did). The per-container `.updated` events it publishes are tracked by the
    * publisher like any other; these two bracket the run so its size and duration are queryable.
    */
@@ -42,6 +42,12 @@ object PropertyTelemetry {
   /** An item the clean-up left alone or could not close; carries the `reason`. */
   const val LEGACY_CLEANUP_ITEM_SKIPPED = "prison-property-legacy-cleanup-item-skipped"
   const val LEGACY_CLEANUP_ITEM_FAILED = "prison-property-legacy-cleanup-item-failed"
+
+  /**
+   * NOMIS sent as active a container the legacy clean-up had removed, and the sync left it removed. A steady
+   * trickle means NOMIS still holds those records as active and is being edited there.
+   */
+  const val SYNC_LEGACY_CLEANUP_RETAINED = "prison-property-sync-legacy-cleanup-retained"
 
   /** A clean-up start message arrived for a job already running or finished - a redelivery, deliberately ignored. */
   const val LEGACY_CLEANUP_DUPLICATE_MESSAGE = "prison-property-legacy-cleanup-duplicate-message"

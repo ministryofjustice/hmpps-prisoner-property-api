@@ -137,6 +137,14 @@ class SyncPropertyContainerService(
     val user = request.modifyUsername ?: request.createUsername
     val changed = mutableListOf<String>()
 
+    // A container the legacy clean-up closed under the retention rule stays closed whatever NOMIS says: NOMIS may
+    // still hold it as active (the write-back is not guaranteed to have reached it), and reviving it would put
+    // long-gone property back on the prison's list. So NOMIS's active flag and location are not applied, a disposal
+    // date does not record the container as due for disposal, and the removal is left exactly as the clean-up
+    // recorded it. Seal, type and disposal-date corrections are still recorded on the container.
+    val retainedByCleanup = existing.removedByLegacyCleanup()
+    val nomisActive = request.active && !retainedByCleanup
+
     val incomingSeal = transformer.resolveSeal(request.nomisPropertyContainerId, request.sealMark)
     if (incomingSeal != existing.currentSealNumber) {
       existing.currentSealNumber = incomingSeal
@@ -156,7 +164,7 @@ class SyncPropertyContainerService(
     // Ignore the NOMIS location while the container is inactive (removed) - it must not occupy a storage slot.
     // On reactivation the snapshot is active again, so the new location is applied here before the removal is
     // cleared below.
-    val incomingLocation = if (request.active) transformer.resolveLocation(request) else null
+    val incomingLocation = if (nomisActive) transformer.resolveLocation(request) else null
     if (incomingLocation != null &&
       (incomingLocation.type != existing.currentLocationType() || incomingLocation.internalLocationId != existing.currentLocation())
     ) {
@@ -176,7 +184,7 @@ class SyncPropertyContainerService(
 
     if (request.proposedDisposalDate != existing.proposedDisposalDate) {
       existing.proposedDisposalDate = request.proposedDisposalDate
-      if (request.active && request.proposedDisposalDate != null) {
+      if (nomisActive && request.proposedDisposalDate != null) {
         existing.events.add(disposalRequiredEvent(existing, request.proposedDisposalDate, now, user))
       }
       changed += "proposedDisposalDate"
@@ -188,7 +196,11 @@ class SyncPropertyContainerService(
     // reactivation, or the last location event if it had one before removal).
     val resolvedRemovalDate = request.expiryDate ?: now.toLocalDate()
     val wasRemoved = existing.removalOutcome == RemovalOutcome.REMOVED
-    if (!request.active) {
+    if (retainedByCleanup) {
+      if (request.active) {
+        log.info("NOMIS sent property container {} as active, but the legacy clean-up removed it; leaving it removed", existing.id)
+      }
+    } else if (!request.active) {
       if (!wasRemoved || existing.removalDate != resolvedRemovalDate) {
         if (!wasRemoved) {
           existing.events.add(removedEvent(existing, resolvedRemovalDate, now, user))
@@ -212,7 +224,11 @@ class SyncPropertyContainerService(
         event = PropertyContainerEventFactory.syncEvent(PropertyDomainEventType.CONTAINER_UPDATED, existing.id!!, request.nomisPropertyContainerId, request.prisonerNumber, changed)
       }
     }
-    return SyncResult(SyncPropertyContainerResponse(existing.id!!, request.nomisPropertyContainerId, SyncMappingType.UPDATED), event)
+    return SyncResult(
+      SyncPropertyContainerResponse(existing.id!!, request.nomisPropertyContainerId, SyncMappingType.UPDATED),
+      event,
+      legacyCleanupRetained = retainedByCleanup && request.active,
+    )
   }
 
   private fun disposalRequiredEvent(container: PropertyContainer, date: LocalDate, time: LocalDateTime, user: String) = PropertyEvent(container, PropertyEventType.DISPOSAL_REQUIRED, time, user, eventDate = date)
@@ -223,5 +239,7 @@ class SyncPropertyContainerService(
 /**
  * The outcome of a sync/migrate: the API [response] plus the domain [event] to publish *after* the
  * transaction commits (null when there is nothing to publish - a migration or an unchanged snapshot).
+ * [legacyCleanupRetained] is set when NOMIS sent as active a container the legacy clean-up had removed, and it
+ * was left removed - tracked so NOMIS disagreeing with the clean-up is visible.
  */
-data class SyncResult(val response: SyncPropertyContainerResponse, val event: HmppsDomainEvent?)
+data class SyncResult(val response: SyncPropertyContainerResponse, val event: HmppsDomainEvent?, val legacyCleanupRetained: Boolean = false)
