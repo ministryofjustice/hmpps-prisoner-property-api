@@ -190,7 +190,13 @@ class PropertyContainerResource(
     @Parameter(description = "Filter to these container types (repeatable). Omit for all types.", example = "STANDARD")
     @RequestParam(required = false)
     containerType: List<ContainerType>?,
-    @Parameter(description = "Filter to these statuses (repeatable). Omit to hide containers that have left active storage.", example = "STORED")
+    @Parameter(
+      description = "Filter to these statuses (repeatable). Omit to hide containers that have left active storage. The " +
+        "removal statuses (RETURNED, DISPOSED, TRANSFER, CREATED_IN_ERROR, REMOVED) return only containers that left " +
+        "storage that way, never stored ones; REMOVED covers both containers marked inactive in NOMIS and those the " +
+        "legacy clean-up archived.",
+      example = "STORED",
+    )
     @RequestParam(required = false)
     status: List<ContainerStatus>?,
     @Parameter(description = "Filter to storage locations matching this term - part of a code, local name or path hierarchy (* and ? are wildcards) - or BRANSTON for offsite storage", example = "PB5638")

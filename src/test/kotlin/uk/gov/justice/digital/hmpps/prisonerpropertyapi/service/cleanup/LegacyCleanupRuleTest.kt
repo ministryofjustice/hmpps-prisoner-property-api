@@ -3,17 +3,23 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.cleanup
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
+import org.junit.jupiter.params.provider.ValueSource
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.client.Prisoner
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import java.time.LocalDate
 
 class LegacyCleanupRuleTest {
 
   private val rule = LegacyCleanupRule()
-  private val cutoff = LocalDate.parse("2026-08-14")
+  private val today = LocalDate.parse("2026-10-02")
+  private val cutoff = LegacyCleanupRule.cutoff(today)
 
   private fun prisoner(
     prisonId: String?,
     lastMovementTypeCode: String? = "ADM",
+    lastMovementReasonCode: String? = null,
     lastMovementDate: LocalDate? = null,
     previousPrisonId: String? = null,
     previousPrisonLeavingDate: LocalDate? = null,
@@ -28,11 +34,51 @@ class LegacyCleanupRuleTest {
     cellLocation = null,
     lastMovementTypeCode = lastMovementTypeCode,
     confirmedReleaseDate = confirmedReleaseDate,
+    lastMovementReasonCode = lastMovementReasonCode,
     lastMovementDate = lastMovementDate,
     previousPrisonId = previousPrisonId,
     previousPrisonLeavingDate = previousPrisonLeavingDate,
     lastAdmissionDate = lastAdmissionDate,
   )
+
+  @Nested
+  inner class Cutoff {
+    @Test
+    fun `is 13 months before today`() {
+      assertThat(cutoff).isEqualTo(LocalDate.parse("2025-09-02"))
+    }
+
+    @Test
+    fun `falls back to the end of a shorter month`() {
+      assertThat(LegacyCleanupRule.cutoff(LocalDate.parse("2026-03-31"))).isEqualTo(LocalDate.parse("2025-02-28"))
+    }
+  }
+
+  @Nested
+  inner class Container {
+    @Test
+    fun `confiscated property is never closed, however old`() {
+      assertThat(rule.containerExclusion(ContainerType.CONFISCATED, null, today)).isEqualTo(IneligibleReason.CONFISCATED)
+      assertThat(rule.containerExclusion(ContainerType.CONFISCATED, LocalDate.parse("2020-01-01"), today)).isEqualTo(IneligibleReason.CONFISCATED)
+    }
+
+    @Test
+    fun `property with a disposal date still to come is never closed`() {
+      assertThat(rule.containerExclusion(ContainerType.STANDARD, today.plusDays(1), today)).isEqualTo(IneligibleReason.DISPOSAL_DATE_NOT_REACHED)
+    }
+
+    @Test
+    fun `a disposal date that has arrived or passed does not protect the property`() {
+      assertThat(rule.containerExclusion(ContainerType.STANDARD, today, today)).isNull()
+      assertThat(rule.containerExclusion(ContainerType.STANDARD, LocalDate.parse("2024-01-01"), today)).isNull()
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ContainerType::class, names = ["CONFISCATED"], mode = EnumSource.Mode.EXCLUDE)
+    fun `any other type of property with no disposal date is eligible on its own account`(type: ContainerType) {
+      assertThat(rule.containerExclusion(type, null, today)).isNull()
+    }
+  }
 
   @Test
   fun `an unresolved owner is never touched`() {
@@ -41,8 +87,8 @@ class LegacyCleanupRuleTest {
   }
 
   @Test
-  fun `an owner still at the holding prison is never touched, even with a confirmed release date tomorrow`() {
-    val here = prisoner(prisonId = "LEI", confirmedReleaseDate = LocalDate.parse("2026-01-01"))
+  fun `an owner still at the holding prison is never touched, however long ago they arrived`() {
+    val here = prisoner(prisonId = "LEI", lastAdmissionDate = LocalDate.parse("2010-01-01"), confirmedReleaseDate = today.plusDays(1))
     assertThat(rule.decide(here, "LEI", cutoff)).isEqualTo(CleanupDecision.NotEligible(IneligibleReason.OWNER_HERE))
   }
 
@@ -55,15 +101,34 @@ class LegacyCleanupRuleTest {
   @Nested
   inner class Released {
     @Test
-    fun `released on or before the cut-off is returned, dated to the release`() {
-      val released = prisoner(prisonId = "OUT", lastMovementTypeCode = "REL", lastMovementDate = cutoff)
-      assertThat(rule.decide(released, "LEI", cutoff)).isEqualTo(CleanupDecision.Return(eventDate = cutoff))
+    fun `released exactly 13 months ago is removed, dated to the release`() {
+      val released = prisoner(prisonId = "OUT", lastMovementTypeCode = "REL", lastMovementReasonCode = "CR", lastMovementDate = cutoff)
+      assertThat(rule.decide(released, "LEI", cutoff)).isEqualTo(CleanupDecision.Remove(eventDate = cutoff, reason = CleanupReason.RELEASED))
     }
 
     @Test
-    fun `released after the cut-off is too recent`() {
+    fun `released less than 13 months ago is too recent`() {
       val released = prisoner(prisonId = "OUT", lastMovementTypeCode = "REL", lastMovementDate = cutoff.plusDays(1))
       assertThat(rule.decide(released, "LEI", cutoff)).isEqualTo(CleanupDecision.NotEligible(IneligibleReason.TOO_RECENT))
+    }
+
+    @Test
+    fun `a death in custody arrives as a release and is reported as a death`() {
+      val died = prisoner(prisonId = "OUT", lastMovementTypeCode = "REL", lastMovementReasonCode = "DEC", lastMovementDate = LocalDate.parse("2024-05-01"))
+      assertThat(rule.decide(died, "LEI", cutoff)).isEqualTo(CleanupDecision.Remove(eventDate = LocalDate.parse("2024-05-01"), reason = CleanupReason.DIED))
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["ESCP", "UAL", "UAL_ECL"])
+    fun `an escape or abscond arrives as a release and is reported as one`(reasonCode: String) {
+      val escaped = prisoner(prisonId = "OUT", lastMovementTypeCode = "REL", lastMovementReasonCode = reasonCode, lastMovementDate = LocalDate.parse("2024-05-01"))
+      assertThat(rule.decide(escaped, "LEI", cutoff)).isEqualTo(CleanupDecision.Remove(eventDate = LocalDate.parse("2024-05-01"), reason = CleanupReason.ESCAPED))
+    }
+
+    @Test
+    fun `an escape less than 13 months ago is too recent`() {
+      val escaped = prisoner(prisonId = "OUT", lastMovementTypeCode = "REL", lastMovementReasonCode = "UAL", lastMovementDate = cutoff.plusDays(1))
+      assertThat(rule.decide(escaped, "LEI", cutoff)).isEqualTo(CleanupDecision.NotEligible(IneligibleReason.TOO_RECENT))
     }
 
     @Test
@@ -86,10 +151,11 @@ class LegacyCleanupRuleTest {
       val moved = prisoner(
         prisonId = "MDI",
         previousPrisonId = "LEI",
-        previousPrisonLeavingDate = LocalDate.parse("2026-06-01"),
-        lastAdmissionDate = LocalDate.parse("2026-06-02"),
+        previousPrisonLeavingDate = LocalDate.parse("2025-06-01"),
+        lastAdmissionDate = LocalDate.parse("2025-06-02"),
       )
-      assertThat(rule.decide(moved, "LEI", cutoff)).isEqualTo(CleanupDecision.Transfer(toPrisonId = "MDI", dateLeft = LocalDate.parse("2026-06-01")))
+      assertThat(rule.decide(moved, "LEI", cutoff))
+        .isEqualTo(CleanupDecision.Remove(eventDate = LocalDate.parse("2025-06-01"), reason = CleanupReason.TRANSFERRED, toPrisonId = "MDI"))
     }
 
     @Test
@@ -97,14 +163,15 @@ class LegacyCleanupRuleTest {
       val moved = prisoner(
         prisonId = "MDI",
         previousPrisonId = "BXI",
-        previousPrisonLeavingDate = LocalDate.parse("2026-07-01"),
-        lastAdmissionDate = LocalDate.parse("2026-07-02"),
+        previousPrisonLeavingDate = LocalDate.parse("2025-07-01"),
+        lastAdmissionDate = LocalDate.parse("2025-07-02"),
       )
-      assertThat(rule.decide(moved, "LEI", cutoff)).isEqualTo(CleanupDecision.Transfer(toPrisonId = "MDI", dateLeft = LocalDate.parse("2026-07-02")))
+      assertThat(rule.decide(moved, "LEI", cutoff))
+        .isEqualTo(CleanupDecision.Remove(eventDate = LocalDate.parse("2025-07-02"), reason = CleanupReason.TRANSFERRED, toPrisonId = "MDI"))
     }
 
     @Test
-    fun `left after the cut-off is too recent`() {
+    fun `left less than 13 months ago is still awaiting transfer and too recent`() {
       val moved = prisoner(prisonId = "MDI", previousPrisonId = "LEI", previousPrisonLeavingDate = cutoff.plusDays(1))
       assertThat(rule.decide(moved, "LEI", cutoff)).isEqualTo(CleanupDecision.NotEligible(IneligibleReason.TOO_RECENT))
     }

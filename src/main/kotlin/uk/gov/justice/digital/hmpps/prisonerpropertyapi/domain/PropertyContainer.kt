@@ -94,6 +94,14 @@ class PropertyContainer(
   fun isRemoved(): Boolean = removalOutcome != null
 
   /**
+   * Whether the container is currently removed because a legacy clean-up job closed it under the retention rule,
+   * rather than because NOMIS marked it inactive: the outcome is REMOVED and the REMOVED event that put it there
+   * carries the job id. Such a removal is final - the NOMIS sync does not reactivate it.
+   */
+  fun removedByLegacyCleanup(): Boolean = removalOutcome == RemovalOutcome.REMOVED &&
+    events.filter { it.eventType == PropertyEventType.REMOVED }.maxByOrNull { it.eventDateTime }?.legacyCleanupJobId != null
+
+  /**
    * Whether the container has a proposed disposal date that has now arisen (today or earlier) and is
    * still in active storage. Disposal is time-based, so this is derived from [proposedDisposalDate] vs
    * today - never denormalised - and drives the DISPOSAL_REQUIRED overlay wherever status is shown.
@@ -143,7 +151,8 @@ class PropertyContainer(
    *
    * A transfer written by a legacy clean-up job (the TRANSFERRED event carries a job id) is the exception: it
    * records where the person went so the history reads correctly, but nothing was physically sent on, so it is
-   * never awaiting arrival anywhere. It can still be reconciled if the destination later logs the old seal.
+   * never awaiting arrival anywhere. It can still be reconciled if the destination later logs the old seal. Only
+   * jobs run before MAPB-854 wrote such transfers; the clean-up now marks containers removed.
    */
   fun receivingPrison(): String? = when {
     baseStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT -> events.maxByOrNull { it.eventDateTime }?.toPrisonId

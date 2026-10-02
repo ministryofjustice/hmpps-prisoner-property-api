@@ -132,19 +132,17 @@ class LegacyCleanupProcessingService(
   private fun isStale(lastActivity: LocalDateTime?, now: LocalDateTime) = lastActivity == null || Duration.between(lastActivity, now) > STALE_CLAIM_THRESHOLD
 
   /**
-   * Close one container, inside the caller's fresh transaction. The decision is re-made from the live
-   * prisoner-search record and must agree with the snapshot's action; a person who no longer qualifies, or now
-   * qualifies differently, is skipped and left for a later run rather than closed on the old grounds.
+   * Close one container, inside the caller's fresh transaction. The owner's decision is re-made from the live
+   * prisoner-search record, and the container's own exclusions are re-checked by the write; a person who no longer
+   * qualifies is skipped and left for a later run rather than closed on the old grounds. An item planned as RETURN
+   * or TRANSFER belongs to a job requested before the 13-month rule and is skipped rather than closed differently.
    */
   private fun close(item: LegacyCleanupItem, prisoner: Prisoner?, context: JobContext): ItemOutcome {
-    val decision = rule.decide(prisoner, context.prisonId, context.cutoff)
-    return when {
-      decision is CleanupDecision.Return && item.action == LegacyCleanupAction.RETURN ->
-        ItemOutcome.Processed(writeService.legacyCleanupReturn(item.containerId, decision.eventDate, context.jobId, context.prisonId).event)
-      decision is CleanupDecision.Transfer && item.action == LegacyCleanupAction.TRANSFER ->
-        ItemOutcome.Processed(writeService.legacyCleanupTransfer(item.containerId, decision.toPrisonId, decision.dateLeft, context.jobId, context.prisonId).event)
-      decision is CleanupDecision.NotEligible -> ItemOutcome.Skipped("no longer eligible: ${decision.reason}")
-      else -> ItemOutcome.Skipped("owner now qualifies for ${decision.javaClass.simpleName.uppercase()}, not ${item.action}")
+    if (item.action != LegacyCleanupAction.REMOVE) return ItemOutcome.Skipped("planned as ${item.action} before the 13-month rule")
+    return when (val decision = rule.decide(prisoner, context.prisonId, context.cutoff)) {
+      is CleanupDecision.Remove ->
+        ItemOutcome.Processed(writeService.legacyCleanupRemove(item.containerId, decision.eventDate, context.jobId, context.prisonId).event)
+      is CleanupDecision.NotEligible -> ItemOutcome.Skipped("no longer eligible: ${decision.reason}")
     }
   }
 
@@ -158,7 +156,8 @@ class LegacyCleanupProcessingService(
     when (outcome) {
       is ItemOutcome.Processed -> {
         item.markProcessed(now, outcome.message)
-        if (item.action == LegacyCleanupAction.RETURN) jobRepository.incrementReturned(jobId, now) else jobRepository.incrementTransferred(jobId, now)
+        // Only REMOVE items are closed now; finish() recounts every counter from the items' actions.
+        jobRepository.incrementRemoved(jobId, now)
       }
       is ItemOutcome.Skipped -> {
         item.markSkipped(outcome.reason, now)
@@ -197,11 +196,10 @@ class LegacyCleanupProcessingService(
     job.finish(now)
     jobRepository.saveAndFlush(job)
     log.info(
-      "Legacy clean-up job {} at {} finished: {} returned, {} transferred, {} skipped, {} failed of {}",
+      "Legacy clean-up job {} at {} finished: {} removed, {} skipped, {} failed of {}",
       jobId,
       job.prisonId,
-      job.returnedRecords,
-      job.transferredRecords,
+      job.removedRecords,
       job.skippedRecords,
       job.failedRecords,
       job.totalRecords,
@@ -212,8 +210,7 @@ class LegacyCleanupProcessingService(
         "prisonId" to job.prisonId,
         "jobId" to jobId.toString(),
         "totalRecords" to job.totalRecords.toString(),
-        "returnedRecords" to job.returnedRecords.toString(),
-        "transferredRecords" to job.transferredRecords.toString(),
+        "removedRecords" to job.removedRecords.toString(),
         "skippedRecords" to job.skippedRecords.toString(),
         "failedRecords" to job.failedRecords.toString(),
         "durationMs" to Duration.between(job.startTime ?: now, now).toMillis().toString(),

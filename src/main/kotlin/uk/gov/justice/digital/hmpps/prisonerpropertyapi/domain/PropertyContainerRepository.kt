@@ -124,22 +124,20 @@ interface PropertyContainerRepository :
   ): List<PrisonerStatusContainerCount>
 
   /**
-   * The containers a legacy clean-up could close at a prison: still in storage and not yet due for disposal -
-   * deliberately the same predicates as [countActiveByPrisonerAndStatus], so the clean-up preview counts the
-   * very rows the summary tiles count and the two cannot disagree. Only what the classification needs is
-   * projected; the container itself is loaded again, fresh, when its item is processed.
+   * The containers a legacy clean-up could close at a prison: every one still in storage there, including those
+   * already due for disposal (the retention rule closes those too once the owner has been gone 13 months). The
+   * rule itself excludes confiscated containers and those whose disposal date is still to come, so the preview
+   * can say how many it left alone and why. Only what the classification needs is projected; the container
+   * itself is loaded again, fresh, when its item is processed.
    */
   @Query(
-    "select c.id as id, c.prisonerNumber as prisonerNumber, c.currentStatusValue as status " +
+    "select c.id as id, c.prisonerNumber as prisonerNumber, c.currentStatusValue as status, " +
+      "c.containerType as containerType, c.proposedDisposalDate as proposedDisposalDate " +
       "from PropertyContainer c " +
       "where c.prisonId = :prisonId and c.removalOutcome is null " +
-      "and (c.proposedDisposalDate is null or c.proposedDisposalDate > :today) " +
       "order by c.id",
   )
-  fun findCleanupCandidates(
-    @Param("prisonId") prisonId: String,
-    @Param("today") today: LocalDate,
-  ): List<CleanupCandidate>
+  fun findCleanupCandidates(@Param("prisonId") prisonId: String): List<CleanupCandidate>
 
   /**
    * How many active (not removed) containers a prison holds whose proposed disposal date has now arisen
@@ -183,9 +181,11 @@ interface PrisonerStatusContainerCount {
   val count: Long
 }
 
-/** Projection for [PropertyContainerRepository.findCleanupCandidates]: a live container, its owner and its persisted status. */
+/** Projection for [PropertyContainerRepository.findCleanupCandidates]: a live container, its owner, its persisted status and what the retention rule checks. */
 interface CleanupCandidate {
   val id: UUID
   val prisonerNumber: String
   val status: ContainerStatus
+  val containerType: ContainerType
+  val proposedDisposalDate: LocalDate?
 }

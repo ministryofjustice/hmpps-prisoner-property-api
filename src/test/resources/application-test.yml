@@ -45,8 +45,10 @@ hmpps.sar:
     # report as an event on the container itself; the row is the job's own working state. Confirm that with
     # the Offender SAR team as part of the data review (MAPB-768). V19 adds an example value to each
     # column comment for that review's extract, and V20 records against each column whether it is
-    # disclosed in a report - comments only, no schema or data change.
-    expected-flyway-schema-version: 20
+    # disclosed in a report - comments only, no schema or data change. V21 (the 13-month clean-up rule)
+    # adds only a removed count to the clean-up job and relaxes its old window column - the job's own
+    # working state again; the archived container shows in the report as its REMOVED event.
+    expected-flyway-schema-version: 21
     expected-api-response:
       path: /sar/expected-api-response.json
     expected-jpa-entity-schema:

@@ -123,6 +123,47 @@ class SyncPropertyContainerServiceTest {
   }
 
   @Test
+  fun `an active snapshot does not reactivate a container the legacy clean-up removed`() {
+    val existing = closedByLegacyCleanup()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    val eventsBefore = existing.events.size
+
+    val result = service.sync(request(dpsId = existing.id, active = true, proposedDisposalDate = LocalDate.parse("2026-12-01")))
+
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.REMOVED)
+    assertThat(existing.removalDate).isEqualTo(CLEANUP_DATE)
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.REMOVED)
+    // Neither NOMIS's location nor its disposal date brings the container back into storage.
+    assertThat(existing.currentLocation()).isNull()
+    assertThat(existing.events).hasSize(eventsBefore)
+    assertThat(result.legacyCleanupRetained).isTrue()
+  }
+
+  @Test
+  fun `an inactive snapshot leaves the removal date the legacy clean-up recorded`() {
+    val existing = closedByLegacyCleanup()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    val result = service.sync(request(dpsId = existing.id, active = false, expiryDate = LocalDate.parse("2026-09-15")))
+
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.REMOVED)
+    assertThat(existing.removalDate).isEqualTo(CLEANUP_DATE)
+    assertThat(result.event).isNull()
+    assertThat(result.legacyCleanupRetained).isFalse()
+  }
+
+  @Test
+  fun `a seal correction from NOMIS still lands on a container the legacy clean-up removed`() {
+    val existing = closedByLegacyCleanup()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.sync(request(dpsId = existing.id, active = true, sealMark = "SEAL2"))
+
+    assertThat(existing.currentSealNumber).isEqualTo("SEAL2")
+    assertThat(existing.removalOutcome).isEqualTo(RemovalOutcome.REMOVED)
+  }
+
+  @Test
   fun `reactivating a container that was removed with no location leaves it locationless`() {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
@@ -280,6 +321,14 @@ class SyncPropertyContainerServiceTest {
     return container
   }
 
+  private fun closedByLegacyCleanup(): PropertyContainer = existingContainer().apply {
+    events.add(PropertyEvent(this, PropertyEventType.REMOVED, MODIFY_TIME.minusDays(1), "LEGACY_CLEANUP", eventDate = CLEANUP_DATE, fromPrisonId = "LEI", legacyCleanupJobId = UUID.randomUUID()))
+    removalOutcome = RemovalOutcome.REMOVED
+    removalDate = CLEANUP_DATE
+    refreshDerivedState()
+    assertThat(removedByLegacyCleanup()).isTrue()
+  }
+
   private fun request(
     dpsId: UUID? = null,
     sealMark: String? = "SEAL1",
@@ -309,5 +358,6 @@ class SyncPropertyContainerServiceTest {
     private val CREATE_TIME: LocalDateTime = LocalDateTime.parse("2026-01-01T09:00:00")
     private val MODIFY_TIME: LocalDateTime = LocalDateTime.parse("2026-02-01T09:00:00")
     private val LOCATION: UUID = UUID.fromString("11111111-1111-1111-1111-111111111111")
+    private val CLEANUP_DATE: LocalDate = LocalDate.parse("2024-06-01")
   }
 }

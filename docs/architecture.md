@@ -552,7 +552,8 @@ time* — which is why old history can honestly say "property managed in NOMIS".
 
 Switching a prison on also exposes its NOMIS backlog: every migrated container still held there for someone
 released or transferred out long ago. The **legacy clean-up** (`/active-agencies/{id}/cleanup`, same admin
-role) previews and then closes that backlog as a queued job — see `docs/legacy-cleanup.md`.
+role) previews and then closes that backlog as a queued job, marking removed the property of anyone who left
+more than 13 months ago — see `docs/legacy-cleanup.md`.
 
 ---
 

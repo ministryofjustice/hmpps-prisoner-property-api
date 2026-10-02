@@ -72,7 +72,11 @@ class LegacyCleanupItem(
   }
 }
 
-/** What the clean-up does to a container: RETURN marks it returned to a released person; TRANSFER marks it transferred to the prison the person is now at. */
-enum class LegacyCleanupAction { RETURN, TRANSFER }
+/**
+ * What the clean-up does to a container. REMOVE marks it removed - all that can be said for certain about legacy
+ * property whose owner left more than 13 months ago. RETURN (marked returned to a released person) and TRANSFER
+ * (marked transferred to the prison the person is now at) are from jobs run before MAPB-854 and are no longer planned.
+ */
+enum class LegacyCleanupAction { REMOVE, RETURN, TRANSFER }
 
 enum class LegacyCleanupItemStatus { PENDING, PROCESSED, SKIPPED, FAILED }

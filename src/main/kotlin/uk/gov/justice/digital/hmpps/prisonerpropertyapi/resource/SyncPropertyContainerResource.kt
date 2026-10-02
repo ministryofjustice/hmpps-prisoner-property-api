@@ -59,6 +59,9 @@ class SyncPropertyContainerResource(
       response.telemetryProperties(),
       null,
     )
+    if (legacyCleanupRetained) {
+      telemetryClient.trackEvent(PropertyTelemetry.SYNC_LEGACY_CLEANUP_RETAINED, response.telemetryProperties(), null)
+    }
     return response
   }
 
