@@ -401,7 +401,7 @@
                                             </tr>
                                         </table>
                                     </td>
-                                    <td><p>Set on the RETURNED or TRANSFERRED event when the closure was written by a legacy clean-up job rather than by staff; null on every other event. A TRANSFERRED event carrying it records where the person went for the history, but is never treated as property awaiting arrival at that prison. <a href="./../null">Example: 66666666-6666-6666-6666-666666666666</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>Set when a legacy clean-up job wrote the event rather than staff or the NOMIS sync: a REMOVED event under the 13-month retention rule, or a RETURNED or TRANSFERRED event from jobs run before it; null on every other event. It marks the removal as an automatic archive of a legacy record, which the NOMIS sync never reverses. A TRANSFERRED event carrying it records where the person went for the history, but is never treated as property awaiting arrival at that prison. <a href="./../null">Example: 66666666-6666-6666-6666-666666666666</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 </tbody>
                             </table>

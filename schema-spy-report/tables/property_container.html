@@ -282,7 +282,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>Why the container left active storage: DISPOSED, RETURNED, TRANSFERRED, COMBINED, CREATED_IN_ERROR or REMOVED. Null while the container is in active storage. All are terminal except REMOVED, which a REACTIVATED event reverses - which is why there is no archived flag. <a href="./../null">Example: TRANSFERRED</a> <a href="./../null">SAR: Y</a> <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>Why the container left active storage: DISPOSED, RETURNED, TRANSFERRED, COMBINED, CREATED_IN_ERROR or REMOVED. Null while the container is in active storage. REMOVED means NOMIS marked the container inactive, or the legacy clean-up archived it under the 13-month retention rule (its REMOVED event carries legacy_cleanup_job_id). All are terminal except a REMOVED from NOMIS, which a REACTIVATED event reverses - which is why there is no archived flag. <a href="./../null">Example: TRANSFERRED</a> <a href="./../null">SAR: Y</a> <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="removal_date">removal_date</span></td>

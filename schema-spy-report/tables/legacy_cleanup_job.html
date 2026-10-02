@@ -186,7 +186,7 @@
                                     <td><span id="older_than_days">older_than_days</span></td>
                                     <td>int4</td>
                                     <td>10</td>
-                                    <td title=''></td>
+                                    <td title='nullable'>√</td>
                                     <td title=''></td>
                                     <td>null</td>
                                     <td>
@@ -197,7 +197,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>The look-back window the admin chose: only people who left at least this many days before the request are in scope. <a href="./../null">Example: 90</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>The look-back window in days an admin chose, for jobs run before the fixed 13-month retention rule (MAPB-854); null for every job since. <a href="./../null">Example: 28</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="cutoff_date">cutoff_date</span></td>
@@ -214,7 +214,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>The request date minus older_than_days; a person must have left on or before this date to be in scope. Stored so the rule the job applied is reproducible. <a href="./../null">Example: 2026-06-17</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>A person must have left on or before this date for their property to be closed: 13 months before the request date (the request date minus older_than_days for jobs run before the 13-month rule). Stored so the rule the job applied is reproducible. <a href="./../null">Example: 2025-09-02</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="requested_by">requested_by</span></td>
@@ -333,7 +333,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>How many items have been marked RETURNED so far. <a href="./../null">Example: 118</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>How many items were marked RETURNED, by jobs run before the 13-month rule; always 0 since. <a href="./../null">Example: 118</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="transferred_records">transferred_records</span></td>
@@ -350,7 +350,7 @@
                                         <table border='0' cellspacing='0' cellpadding='0'>
                                         </table>
                                     </td>
-                                    <td><p>How many items have been marked TRANSFERRED so far. <a href="./../null">Example: 286</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
+                                    <td><p>How many items were marked TRANSFERRED, by jobs run before the 13-month rule; always 0 since. <a href="./../null">Example: 286</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 <tr>
                                     <td><span id="skipped_records">skipped_records</span></td>
@@ -385,6 +385,23 @@
                                         </table>
                                     </td>
                                     <td><p>How many items failed with an error; the container was left unchanged and the message on the item says why. <a href="./../null">Example: 2</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
+                                </tr>
+                                <tr>
+                                    <td><span id="removed_records">removed_records</span></td>
+                                    <td>int4</td>
+                                    <td>10</td>
+                                    <td title=''></td>
+                                    <td title=''></td>
+                                    <td>0</td>
+                                    <td>
+                                        <table border='0' cellspacing='0' cellpadding='0'>
+                                        </table>
+                                    </td>
+                                    <td>
+                                        <table border='0' cellspacing='0' cellpadding='0'>
+                                        </table>
+                                    </td>
+                                    <td><p>How many items have been marked REMOVED so far. <a href="./../null">Example: 404</a> <a href="./../null">SAR: N</a> <a href="./../null">Sensitivity: NONE</a></p></td>
                                 </tr>
                                 </tbody>
                             </table>
