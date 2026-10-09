@@ -19,6 +19,11 @@ import java.util.UUID
  *
  * Enum codes are the exception: they mean nothing outside this service, so they are decoded here to the
  * wording in [sarLabel] rather than disclosed raw.
+ *
+ * [fromLocationId] and [toLocationId] are no longer rendered: the Offender SAR team decided at the data review
+ * (MAPB-768) that where in the establishment property was stored is not to be shown, and V2 of the template
+ * drops them. They stay in the response only while V1 is the registered template in preprod and production,
+ * and should be removed once V2 is live everywhere.
  */
 @Schema(description = "A single event in a property container's history")
 data class SarPropertyEvent(
