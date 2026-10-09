@@ -46,6 +46,8 @@ class SubjectAccessRequestTemplateIntegrationTest : IntegrationTestBase() {
    * and forgotten in the template is data withheld from someone's report, which is the failure this whole
    * process exists to prevent. MAPB-771 makes this exact against a rendered report; this is the cheap
    * version that runs on every build.
+   *
+   * The storage location ids are the deliberate exception - see the test below.
    */
   @Test
   fun `the template reads every field the response carries`() {
@@ -60,10 +62,7 @@ class SubjectAccessRequestTemplateIntegrationTest : IntegrationTestBase() {
       "containerType", "sealNumber", "status", "prisonId", "createdDateTime", "createdByUsername",
       "proposedDisposalDate", "removalOutcome", "removalDate", "events",
     )
-    val eventFields = listOf(
-      "eventType", "eventDateTime", "eventDate", "eventUsername", "fromLocationId", "toLocationId",
-      "toStorageLocationType", "fromPrisonId", "toPrisonId", "relatedContainerSealNumber",
-    )
+    val eventFields = listOf("eventType", "eventDateTime", "eventDate", "eventUsername", "toStorageLocationType", "fromPrisonId", "toPrisonId", "relatedContainerSealNumber")
 
     assertThat(containerFields + eventFields).allSatisfy { field ->
       assertThat(template).`as`("template renders %s", field).contains(field)
@@ -84,6 +83,23 @@ class SubjectAccessRequestTemplateIntegrationTest : IntegrationTestBase() {
       .returnResult().responseBody!!
 
     assertThat(template).doesNotContain("prisonerNumber")
+  }
+
+  /**
+   * The Offender SAR team decided at the data review (MAPB-768) that where in the establishment property was
+   * stored is not to be shown. The response still carries the ids while V1 of the template is live in preprod
+   * and production, so this guards against them being rendered again.
+   */
+  @Test
+  fun `the template does not render storage locations`() {
+    val template = webTestClient.get().uri(TEMPLATE_URL)
+      .headers(setAuthorisation(roles = listOf("ROLE_SAR_DATA_ACCESS")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody(String::class.java)
+      .returnResult().responseBody!!
+
+    assertThat(template).doesNotContain("fromLocationId", "toLocationId", "getLocationNameByDpsId")
   }
 
   private companion object {
