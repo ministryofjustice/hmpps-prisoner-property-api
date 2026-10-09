@@ -196,7 +196,10 @@ template resolves them to names at render time.
 
 #### The report template
 
-`src/main/resources/sar/templates/V1__sar_template.mustache` is the report the prisoner actually receives.
+`src/main/resources/sar/templates/V2__sar_template.mustache` is the report the prisoner actually receives.
+V2 drops where in the establishment property was stored (the "Moved from" and "Moved to" rows), which the
+Offender SAR team decided at the data review (MAPB-768) is not to be shown. V1 stays until V2 has been signed
+off and registered in preprod and production.
 It is Handlebars-flavoured mustache, and it carries no `<style>` block or `<html>` wrapper of its own — the
 SAR service prepends its own stylesheet, so the template only uses the classes that stylesheet defines
 (`title`, `summary-list`, `data-table`). Helpers such as `getPrisonName`, `getLocationNameByDpsId` and
@@ -225,7 +228,9 @@ reach the prisoner's report. It is not derived from the sensitivity classificati
 different question — whether the column's own content is personal data. Most of what the report discloses
 is not personal data in itself, because the personal data is the link to the prisoner that every row
 already carries, so deriving one from the other would mark 8 of 59 elements as in scope when the true
-figure is 25. Change what the response discloses and `V20` needs changing with it.
+figure is 25. `V22__sar_data_review_outcome.sql` applies the outcome of the data review, which marked four
+of those 25 as not to be shown. Change what the report shows and the tags need changing with it, in a new
+migration.
 
 #### Changing any of this
 
