@@ -75,14 +75,14 @@ data class SarPropertyEvent(
       eventDateTime = event.eventDateTime,
       eventDate = event.eventDate,
       eventUsername = event.eventUserId,
-      sealNumber = event.sealNumber,
+      sealNumber = sarSealNumber(event.sealNumber),
       fromLocationId = event.fromInternalLocationId,
       toLocationId = event.toInternalLocationId,
       toStorageLocationType = event.toStorageLocationType?.sarLabel,
       fromPrisonId = event.fromPrisonId,
       toPrisonId = event.toPrisonId,
       containerType = event.containerType.sarLabel,
-      relatedContainerSealNumber = event.relatedContainerSealNumber,
+      relatedContainerSealNumber = sarSealNumber(event.relatedContainerSealNumber),
     )
   }
 }

@@ -2,6 +2,7 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sar
 
 import io.swagger.v3.oas.annotations.media.Schema
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.sync.NomisContainerTransformer
 import java.time.LocalDate
 import java.time.LocalDateTime
 
@@ -16,7 +17,8 @@ import java.time.LocalDateTime
  *    query performance, not something held about the prisoner, and repeating them would duplicate data;
  *  - nothing owned by another service is fetched or included: no prisoner name, no movement history, no
  *    location or prison names. Codes travel raw and the template resolves them;
- *  - no NOMIS booking id, and no sync-only field such as the NOMIS property container id.
+ *  - no NOMIS booking id, and no sync-only field such as the NOMIS property container id. That includes the
+ *    placeholder seal given to a container NOMIS held no seal for, which embeds that id - see [sarSealNumber].
  *
  * [prisonerNumber] is the one identifier that is included, which the guiding principles single out as an
  * exception so a report can be tied back to its subject. It is not rendered in the template body - the SAR
@@ -67,7 +69,7 @@ data class SarPropertyContainer(
       containerType = container.containerType.sarLabel,
       prisonId = container.prisonId,
       status = container.currentStatus().sarLabel,
-      sealNumber = container.currentSealNumber,
+      sealNumber = sarSealNumber(container.currentSealNumber),
       createdDateTime = container.createDateTime,
       createdByUsername = container.createdByUserId,
       proposedDisposalDate = container.proposedDisposalDate,
@@ -77,3 +79,11 @@ data class SarPropertyContainer(
     )
   }
 }
+
+/**
+ * A seal number as it should appear in the report. Where NOMIS held no seal, the migration and the sync record a
+ * placeholder built from the NOMIS property container id so that staff are prompted to enter the real one. That
+ * is not a seal number, and it would disclose a NOMIS identifier, so the report treats it as no seal held - which
+ * the template shows as "No Data Held". MAPB-982.
+ */
+internal fun sarSealNumber(sealNumber: String?): String? = sealNumber?.takeUnless { NomisContainerTransformer.isMissingSealPlaceholder(it) }

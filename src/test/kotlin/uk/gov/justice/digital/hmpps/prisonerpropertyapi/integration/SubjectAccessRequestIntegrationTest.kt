@@ -188,6 +188,72 @@ class SubjectAccessRequestIntegrationTest : IntegrationTestBase() {
       .expectBody().isEmpty
   }
 
+  /**
+   * A container NOMIS held no seal for carries a placeholder built from the NOMIS property container id. It is not a
+   * seal number and it would disclose a NOMIS identifier, so wherever it appears the report gets no seal number,
+   * which the template shows as "No Data Held". MAPB-982.
+   */
+  @Test
+  fun `leaves out the placeholder seal given to a container NOMIS held no seal for`() {
+    repository.deleteAll()
+    val container = PropertyContainer(
+      prisonerNumber = PRISONER,
+      prisonId = "LEI",
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "USER1",
+      currentSealNumber = "MISSING-610811",
+      createDateTime = LocalDateTime.parse("2025-03-01T10:00:00"),
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, LocalDateTime.parse("2025-03-01T10:00:00"), "USER1", sealNumber = "MISSING-610811"),
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.COMBINED, LocalDateTime.parse("2025-04-01T10:00:00"), "USER1").apply {
+        relatedContainerSealNumber = "MISSING-610812"
+      },
+    )
+    container.refreshDerivedState()
+    repository.save(container)
+
+    webTestClient.get().uri("$BASE_URL?prn=$PRISONER")
+      .headers(setAuthorisation(roles = listOf(SAR_ROLE)))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content.length()").isEqualTo(1)
+      .jsonPath("$.content[0].sealNumber").doesNotExist()
+      .jsonPath("$.content[0].events[0].sealNumber").doesNotExist()
+      .jsonPath("$.content[0].events[1].eventType").isEqualTo("Combined into another sealed container")
+      .jsonPath("$.content[0].events[1].relatedContainerSealNumber").doesNotExist()
+  }
+
+  /** Only the generated placeholder is left out - a real seal that happens to begin the same way is reported. */
+  @Test
+  fun `reports a real seal that only looks like the placeholder`() {
+    repository.deleteAll()
+    val container = PropertyContainer(
+      prisonerNumber = PRISONER,
+      prisonId = "LEI",
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "USER1",
+      currentSealNumber = "MISSING-TAG1",
+      createDateTime = LocalDateTime.parse("2025-03-01T10:00:00"),
+    )
+    container.events.add(
+      PropertyEvent(container, PropertyEventType.CREATED_SEALED, LocalDateTime.parse("2025-03-01T10:00:00"), "USER1", sealNumber = "MISSING-TAG1"),
+    )
+    container.refreshDerivedState()
+    repository.save(container)
+
+    webTestClient.get().uri("$BASE_URL?prn=$PRISONER")
+      .headers(setAuthorisation(roles = listOf(SAR_ROLE)))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.content[0].sealNumber").isEqualTo("MISSING-TAG1")
+      .jsonPath("$.content[0].events[0].sealNumber").isEqualTo("MISSING-TAG1")
+  }
+
   /** Property belonging to someone else must never appear, whatever the range. */
   @Test
   fun `does not return another prisoner's property`() {

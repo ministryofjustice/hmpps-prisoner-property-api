@@ -38,6 +38,15 @@ class NomisContainerTransformerTest {
   }
 
   @Test
+  fun `recognises only the placeholder it generates`() {
+    assertThat(NomisContainerTransformer.isMissingSealPlaceholder(transformer.resolveSeal(610811, null))).isTrue()
+    assertThat(NomisContainerTransformer.isMissingSealPlaceholder("SN8842K1")).isFalse()
+    assertThat(NomisContainerTransformer.isMissingSealPlaceholder("MISSING-TAG1")).isFalse()
+    assertThat(NomisContainerTransformer.isMissingSealPlaceholder("MISSING-")).isFalse()
+    assertThat(NomisContainerTransformer.isMissingSealPlaceholder("XMISSING-123")).isFalse()
+  }
+
+  @Test
   fun `resolves an internal location for a normal container`() {
     val location = transformer.resolveLocation(request(NomisContainerCode.BULK, internalLocationId = INTERNAL_LOCATION))
 
