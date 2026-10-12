@@ -58,6 +58,14 @@ class NomisContainerTransformer {
   companion object {
     const val MISSING_SEAL_PREFIX = "MISSING-"
 
+    private val MISSING_SEAL_PLACEHOLDER = Regex("$MISSING_SEAL_PREFIX\\d+")
+
+    /**
+     * Whether [sealNumber] is the placeholder [resolveSeal] generates rather than a seal anyone recorded. Only the
+     * exact generated shape matches, so a real seal that happens to begin with the prefix is left alone.
+     */
+    fun isMissingSealPlaceholder(sealNumber: String): Boolean = MISSING_SEAL_PLACEHOLDER.matches(sealNumber)
+
     private val log = LoggerFactory.getLogger(this::class.java)
   }
 }
