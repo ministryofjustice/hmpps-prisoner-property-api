@@ -94,7 +94,7 @@ see [Subject access requests](#subject-access-requests).
 | Method & path | Role | Description |
 | --- | --- | --- |
 | `GET /prisoner/{prisonerNumber}` | RO | All containers held for a prisoner |
-| `GET /prisoner/{prisonerNumber}/summary` | RO | Property counts for one prisoner (feeds the profile tile) |
+| `GET /prisoner/{prisonerNumber}/summary?prisonId=` | RO | Property counts for one prisoner as seen from the viewing prison (feeds the profile card) |
 | `GET /prisoner/{prisonerNumber}/events` | RO | The prisoner's property timeline across all their containers |
 | `GET /prison/{prisonId}` | RO | All containers held in a prison — searchable, filterable, paged by prisoner |
 | `GET /prison/{prisonId}/summary` | RO | The establishment summary tiles |

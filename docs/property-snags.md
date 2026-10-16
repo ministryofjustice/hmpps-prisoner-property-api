@@ -268,6 +268,5 @@ the cluster the source of truth instead of the chart, and it will drift again.
 - **`getById` / `PropertyContainerDto` has no owner context**, so the remove and change journeys tag from the
   container's own status. Fixing it means a prisoner-search call on a DTO that is also the write-endpoint
   response. Deliberately deferred.
-- **Profile tile semantics.** `PrisonerPropertySummaryDto.overdueForReturn` now uses the shared rule, but
-  `dueForTransferOut`/`dueForTransferIn` were left alone — that DTO feeds the prisoner-profile front end, not
-  this UI, so redefining them needs that team.
+- **Profile tile semantics.** Resolved in MAPB-1006: the summary now
+  takes the viewing prison (`prisonId`), and every count uses the shared rule from that prison's point of view.
