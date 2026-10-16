@@ -131,16 +131,19 @@ class PropertyContainerResource(
 
   @GetMapping("/prisoner/{prisonerNumber}/summary")
   @Operation(
-    summary = "Get a prisoner's property summary counts for the profile tile",
-    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns just the totals a prisoner-profile " +
-      "\"Property containers\" tile needs, over the person's active (not removed) containers: how many are " +
-      "held at their current establishment (from prisoner-search) versus other establishments, how many are " +
-      "due to be transferred in or out, and how many are overdue for disposal or return - plus whether they " +
-      "have ever had any property recorded. The current establishment (and its name) is null when the " +
-      "prisoner is released or in transit.",
+    summary = "Get a prisoner's property summary counts for the profile card, as seen from a prison",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Returns the totals a prisoner-profile \"Property " +
+      "containers\" card needs, worked out for the prison the member of staff is viewing from (prisonId - their " +
+      "active caseload), using the statuses the property service shows. Counts the containers held at that prison " +
+      "and how many are due to transfer out, be returned or be disposed of; property held at other prisons and " +
+      "property due to transfer in are only counted when the prisoner is held at that prison. " +
+      "When to show the card: only when the member of staff's active caseload is in activeAgencies on /info; then " +
+      "when prisonerHeldHere is true or heldAtThisPrison is above 0, however the prisoner was found (including " +
+      "global search, and prisoners in transit or released). Otherwise the prison holds nothing for this person " +
+      "and no card is shown.",
     responses = [
       ApiResponse(responseCode = "200", description = "Prisoner property summary returned"),
-      ApiResponse(responseCode = "400", description = "Invalid prisoner number", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "400", description = "Invalid prisoner number, or prison id missing or invalid", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RO role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
@@ -150,7 +153,11 @@ class PropertyContainerResource(
     @Pattern(regexp = "([a-zA-Z][0-9]{4}[a-zA-Z]{2})", message = "Prisoner number must be in the format A1234BC")
     @PathVariable
     prisonerNumber: String,
-  ): PrisonerPropertySummaryDto = propertyContainerService.getPrisonerPropertySummary(prisonerNumber)
+    @Parameter(description = "The prison the member of staff is viewing from: their active caseload", example = "LEI", required = true)
+    @Pattern(regexp = "^[A-Z]{2}I|ZZGHI$", message = "Prison id must be 3 characters ending in an I, or ZZGHI")
+    @RequestParam
+    prisonId: String,
+  ): PrisonerPropertySummaryDto = propertyContainerService.getPrisonerPropertySummary(prisonerNumber, prisonId)
 
   @GetMapping("/prison/{prisonId}")
   @Operation(

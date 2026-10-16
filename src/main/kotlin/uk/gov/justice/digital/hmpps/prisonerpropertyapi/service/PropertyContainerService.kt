@@ -97,35 +97,54 @@ class PropertyContainerService(
   }
 
   /**
-   * A single prisoner's property totals for the profile "Property containers" tile. Counts are over the
-   * prisoner's active (not removed) containers, split by where they are held relative to their current
-   * establishment (from prisoner-search; null when released or in transit). Derived in code from the
-   * container set - it is small per prisoner - so no dedicated count query is needed. [hasEverHadProperty]
-   * covers every recorded container (including ones since returned/disposed/transferred) so the tile can
-   * tell "never had property" apart from "no longer has any".
+   * A single prisoner's property totals for the profile "Property containers" card, seen from [prisonId] - the
+   * prison the member of staff is viewing from (their active caseload). What a prison needs to know about
+   * someone's property depends on where it is: containers often stay at a prison after their owner has been
+   * transferred or released, until they are sent on or handed back, so the same person reads differently at
+   * Leeds than at Hull.
+   *
+   * The viewing prison's own containers are always counted, by the status [ContainerStatusResolver] gives them,
+   * so the card agrees with the person view and the establishment tiles. Property at other prisons, and what is
+   * due to transfer in, is only counted when the prisoner is held here: that is the "this prison only" view the
+   * property service gives anyone else. Derived in code from the container set - it is small per prisoner - so
+   * no dedicated count query is needed. [hasEverHadProperty] covers every recorded container at any prison so
+   * the card can tell "never had property" apart from "no longer has any".
    */
   @Transactional(readOnly = true)
-  fun getPrisonerPropertySummary(prisonerNumber: String): PrisonerPropertySummaryDto {
+  fun getPrisonerPropertySummary(prisonerNumber: String, prisonId: String): PrisonerPropertySummaryDto {
     val containers = repository.findByPrisonerNumber(prisonerNumber)
     val prisoner = prisonerSearchClient.getPrisoner(prisonerNumber)
-    // The prisoner's real establishment: prisoner-search reports TRN/OUT while in transit or released - treat
-    // those as no current establishment, so all their property counts as held "in other establishments".
+    // prisoner-search reports TRN/OUT while in transit or released, which are not prisons.
     val currentEstablishmentId = prisoner.realPrisonId()
+    val prisonerHeldHere = currentEstablishmentId == prisonId
+    val prisonNames = prisonRegisterClient.getPrisonNames()
 
-    val active = containers.filterNot { it.isRemoved() }
-    val (here, elsewhere) = active.partition { currentEstablishmentId != null && it.prisonId == currentEstablishmentId }
+    val (active, removed) = containers.partition { !it.isRemoved() }
+    val (here, elsewhere) = active.partition { it.prisonId == prisonId }
+    val statusesHere = here.map { statusResolver.effectiveStatus(it, prisoner) }
+
+    val heldAtOtherPrisons = if (prisonerHeldHere) elsewhere else emptyList()
+    // Incoming, as the establishment list's transfer-in filter has it: held elsewhere and now needing to follow
+    // the owner here, or already sent here and not yet logged on arrival.
+    val dueToTransferIn = if (prisonerHeldHere) {
+      heldAtOtherPrisons.count { statusResolver.effectiveStatus(it, prisoner) == ContainerStatus.DUE_FOR_TRANSFER_OUT } +
+        removed.count { it.receivingPrison() == prisonId }
+    } else {
+      0
+    }
 
     return PrisonerPropertySummaryDto(
+      prisonId = prisonId,
+      prisonName = prisonNames[prisonId],
+      prisonerHeldHere = prisonerHeldHere,
       currentEstablishmentId = currentEstablishmentId,
-      currentEstablishmentName = currentEstablishmentId?.let { prisonRegisterClient.getPrisonNames()[it] },
-      heldInCurrentEstablishment = here.size,
-      heldInOtherEstablishments = elsewhere.size,
-      dueForTransferIn = elsewhere.count { currentEstablishmentId != null && it.receivingPrisonId == currentEstablishmentId },
-      dueForTransferOut = here.count { it.currentStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT },
-      overdueForDisposal = active.count { it.isDisposalDue() },
-      // The status the person's property list shows, so the tile cannot read 0 while the list shows rows due
-      // for return. The two fields above are left on the container's own status deliberately - see the class doc.
-      overdueForReturn = active.count { statusResolver.effectiveStatus(it, prisoner) == ContainerStatus.DUE_FOR_RETURN },
+      currentEstablishmentName = currentEstablishmentId?.let { prisonNames[it] },
+      heldAtThisPrison = here.size,
+      dueToTransferOut = statusesHere.count { it == ContainerStatus.DUE_FOR_TRANSFER_OUT },
+      dueToBeReturned = statusesHere.count { it == ContainerStatus.DUE_FOR_RETURN },
+      dueToBeDisposed = statusesHere.count { it == ContainerStatus.DISPOSAL_REQUIRED },
+      heldAtOtherPrisons = heldAtOtherPrisons.size,
+      dueToTransferIn = dueToTransferIn,
       hasEverHadProperty = containers.isNotEmpty(),
     )
   }

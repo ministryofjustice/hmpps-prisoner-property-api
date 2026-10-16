@@ -128,8 +128,8 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   /**
    * The regression this guards: the person view surfaced stored property as due for return ahead of release
    * while the establishment list and summary still called it stored, so the same container read differently
-   * depending on which page you opened. All four surfaces must now agree - including the status filter, whose
-   * disagreeing with the summary tile was the "tile says 100, filter returns nothing" bug.
+   * depending on which page you opened. Every surface must now agree - the profile card's counts too, and the
+   * status filter, whose disagreeing with the summary tile was the "tile says 100, filter returns nothing" bug.
    */
   @Test
   fun `stored property reads due for return on the person view, the prison list, the summary and the filter before release`() {
@@ -195,6 +195,14 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.content[0].containers[0].currentStatus").isEqualTo(status)
 
     webTestClient.get().uri("/property-containers/prison/LEI/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath(summaryField).isEqualTo(1)
+
+    // The profile card, seen from the prison holding the container, names its counts as the tiles do.
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary?prisonId=LEI")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
@@ -1524,14 +1532,23 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `returns a prisoner's property summary counts split by establishment and status`() {
+  fun `prisoner summary at the prisoner's own prison counts property here and at other prisons`() {
     hmppsAuth.stubGrantToken()
     // The prisoner is currently at Leeds; setUp already seeded one STORED container held there.
     prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "LEI")
     prisonRegister.stubGetPrisons()
     // Held elsewhere (MDI) and due to transfer in to Leeds.
     repository.save(dueForTransferInContainer("SEALIN", prisonerNumber = "A1234BC", heldAt = "MDI", receivedAt = "LEI"))
-    // Held at Leeds and due to transfer out (owner received elsewhere).
+    // Already sent from MDI to Leeds and not yet logged on arrival: removed at MDI, but still incoming here.
+    repository.save(
+      containerWithStatus("SEALTRN", prisonId = "MDI") {
+        events.add(PropertyEvent(this, PropertyEventType.TRANSFERRED, baseTime.plusHours(1), "USER2", fromPrisonId = "MDI", toPrisonId = "LEI"))
+        removalOutcome = RemovalOutcome.TRANSFERRED
+        removalDate = baseTime.toLocalDate()
+      },
+    )
+    // Flagged due for transfer out on its own record, but the owner is here, so it reads stored - as it does on
+    // the prisoner's property page.
     repository.save(
       containerWithStatus("SEALT") {
         events.add(PropertyEvent(this, PropertyEventType.PRISONER_RECEIVED, baseTime.plusHours(1), "USER1"))
@@ -1553,70 +1570,140 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       },
     )
 
-    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary")
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary?prisonId=LEI")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
       .expectBody()
+      .jsonPath("$.prisonId").isEqualTo("LEI")
+      .jsonPath("$.prisonName").isEqualTo("Leeds (HMP)")
+      .jsonPath("$.prisonerHeldHere").isEqualTo(true)
       .jsonPath("$.currentEstablishmentId").isEqualTo("LEI")
       .jsonPath("$.currentEstablishmentName").isEqualTo("Leeds (HMP)")
-      // Held at Leeds and active: the seed (STORED), the transfer-out, the return and the disposal one.
-      .jsonPath("$.heldInCurrentEstablishment").isEqualTo(4)
-      // Only the incoming container is held elsewhere.
-      .jsonPath("$.heldInOtherEstablishments").isEqualTo(1)
-      .jsonPath("$.dueForTransferIn").isEqualTo(1)
-      .jsonPath("$.dueForTransferOut").isEqualTo(1)
-      .jsonPath("$.overdueForDisposal").isEqualTo(1)
-      .jsonPath("$.overdueForReturn").isEqualTo(1)
+      // Held at Leeds and active: the seed, the flagged one, the return and the disposal one.
+      .jsonPath("$.heldAtThisPrison").isEqualTo(4)
+      .jsonPath("$.dueToTransferOut").isEqualTo(0)
+      .jsonPath("$.dueToBeReturned").isEqualTo(1)
+      .jsonPath("$.dueToBeDisposed").isEqualTo(1)
+      // Only the incoming container is still held elsewhere; the one already sent is also on its way.
+      .jsonPath("$.heldAtOtherPrisons").isEqualTo(1)
+      .jsonPath("$.dueToTransferIn").isEqualTo(2)
       .jsonPath("$.hasEverHadProperty").isEqualTo(true)
   }
 
   @Test
-  fun `prisoner summary reports no property and no establishment counts when the prisoner has none`() {
+  fun `prisoner summary reads differently at the prison holding the property and at the prisoner's prison`() {
     hmppsAuth.stubGrantToken()
-    prisonerSearch.stubGetPrisoner("B5678CD")
+    // The prisoner is at Moorland; setUp seeded a container still held at Leeds.
+    prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "MDI")
     prisonRegister.stubGetPrisons()
+    repository.save(containerWithStatus("SEALM", prisonId = "MDI") {})
 
-    webTestClient.get().uri("/property-containers/prisoner/B5678CD/summary")
+    // Leeds, found through global search: only what Leeds holds, which has to follow them to Moorland.
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary?prisonId=LEI")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      // The establishment is still resolved from prisoner-search even with no property.
+      .jsonPath("$.prisonId").isEqualTo("LEI")
+      .jsonPath("$.prisonerHeldHere").isEqualTo(false)
       .jsonPath("$.currentEstablishmentId").isEqualTo("MDI")
-      .jsonPath("$.currentEstablishmentName").isEqualTo("Moorland (HMP & YOI)")
-      .jsonPath("$.heldInCurrentEstablishment").isEqualTo(0)
-      .jsonPath("$.heldInOtherEstablishments").isEqualTo(0)
-      .jsonPath("$.dueForTransferIn").isEqualTo(0)
-      .jsonPath("$.dueForTransferOut").isEqualTo(0)
-      .jsonPath("$.overdueForDisposal").isEqualTo(0)
-      .jsonPath("$.overdueForReturn").isEqualTo(0)
-      .jsonPath("$.hasEverHadProperty").isEqualTo(false)
+      .jsonPath("$.heldAtThisPrison").isEqualTo(1)
+      .jsonPath("$.dueToTransferOut").isEqualTo(1)
+      .jsonPath("$.heldAtOtherPrisons").isEqualTo(0)
+      .jsonPath("$.dueToTransferIn").isEqualTo(0)
+
+    // Moorland: their own property here, plus the Leeds container due to come in.
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary?prisonId=MDI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.prisonId").isEqualTo("MDI")
+      .jsonPath("$.prisonName").isEqualTo("Moorland (HMP & YOI)")
+      .jsonPath("$.prisonerHeldHere").isEqualTo(true)
+      .jsonPath("$.heldAtThisPrison").isEqualTo(1)
+      .jsonPath("$.dueToTransferOut").isEqualTo(0)
+      .jsonPath("$.heldAtOtherPrisons").isEqualTo(1)
+      .jsonPath("$.dueToTransferIn").isEqualTo(1)
   }
 
   @Test
-  fun `prisoner summary has no current establishment when the prisoner is released, so their property counts as held elsewhere`() {
+  fun `prisoner summary counts property left at the viewing prison as due to transfer out while the prisoner is in transit`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "TRN", lastMovementTypeCode = "TRN")
+    prisonRegister.stubGetPrisons()
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary?prisonId=LEI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.prisonerHeldHere").isEqualTo(false)
+      .jsonPath("$.currentEstablishmentId").doesNotExist()
+      .jsonPath("$.currentEstablishmentName").doesNotExist()
+      .jsonPath("$.heldAtThisPrison").isEqualTo(1)
+      .jsonPath("$.dueToTransferOut").isEqualTo(1)
+      .jsonPath("$.dueToBeReturned").isEqualTo(0)
+  }
+
+  @Test
+  fun `prisoner summary for a released prisoner counts only property the viewing prison still holds`() {
     hmppsAuth.stubGrantToken()
     prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "OUT", lastMovementTypeCode = "REL")
     prisonRegister.stubGetPrisons()
 
-    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary")
+    // Leeds still holds the seeded container, which is due back to them.
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary?prisonId=LEI")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isOk
       .expectBody()
+      .jsonPath("$.prisonerHeldHere").isEqualTo(false)
       .jsonPath("$.currentEstablishmentId").doesNotExist()
-      .jsonPath("$.currentEstablishmentName").doesNotExist()
-      // The seeded container (held at LEI) counts as "other establishments" with no current establishment.
-      .jsonPath("$.heldInCurrentEstablishment").isEqualTo(0)
-      .jsonPath("$.heldInOtherEstablishments").isEqualTo(1)
-      .jsonPath("$.dueForTransferIn").isEqualTo(0)
+      .jsonPath("$.heldAtThisPrison").isEqualTo(1)
+      .jsonPath("$.dueToBeReturned").isEqualTo(1)
+      .jsonPath("$.dueToTransferOut").isEqualTo(0)
+
+    // Moorland holds nothing for them, so there is nothing to show there.
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary?prisonId=MDI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.prisonerHeldHere").isEqualTo(false)
+      .jsonPath("$.heldAtThisPrison").isEqualTo(0)
+      .jsonPath("$.dueToBeReturned").isEqualTo(0)
+      .jsonPath("$.heldAtOtherPrisons").isEqualTo(0)
       .jsonPath("$.hasEverHadProperty").isEqualTo(true)
   }
 
   @Test
+  fun `prisoner summary reports no property when the prisoner has none`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("B5678CD")
+    prisonRegister.stubGetPrisons()
+
+    webTestClient.get().uri("/property-containers/prisoner/B5678CD/summary?prisonId=MDI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.prisonerHeldHere").isEqualTo(true)
+      .jsonPath("$.currentEstablishmentId").isEqualTo("MDI")
+      .jsonPath("$.currentEstablishmentName").isEqualTo("Moorland (HMP & YOI)")
+      .jsonPath("$.heldAtThisPrison").isEqualTo(0)
+      .jsonPath("$.dueToTransferOut").isEqualTo(0)
+      .jsonPath("$.dueToBeReturned").isEqualTo(0)
+      .jsonPath("$.dueToBeDisposed").isEqualTo(0)
+      .jsonPath("$.heldAtOtherPrisons").isEqualTo(0)
+      .jsonPath("$.dueToTransferIn").isEqualTo(0)
+      .jsonPath("$.hasEverHadProperty").isEqualTo(false)
+  }
+
+  @Test
   fun `prisoner summary returns forbidden without the read role`() {
-    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary")
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary?prisonId=LEI")
       .headers(setAuthorisation(roles = listOf("ROLE_WRONG")))
       .exchange()
       .expectStatus().isForbidden
@@ -1624,16 +1711,32 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   @Test
   fun `prisoner summary returns bad request for an invalid prisoner number`() {
-    webTestClient.get().uri("/property-containers/prisoner/NOTVALID/summary")
+    webTestClient.get().uri("/property-containers/prisoner/NOTVALID/summary?prisonId=LEI")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
       .exchange()
       .expectStatus().isBadRequest
   }
 
-  private fun containerWithStatus(seal: String, configure: PropertyContainer.() -> Unit): PropertyContainer {
+  @Test
+  fun `prisoner summary returns bad request without the viewing prison`() {
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
+  @Test
+  fun `prisoner summary returns bad request for an invalid viewing prison`() {
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary?prisonId=ZZZ")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
+  private fun containerWithStatus(seal: String, prisonId: String = "LEI", configure: PropertyContainer.() -> Unit): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
-      prisonId = "LEI",
+      prisonId = prisonId,
       containerType = ContainerType.STANDARD,
       createdByUserId = "USER1",
       currentSealNumber = seal,
