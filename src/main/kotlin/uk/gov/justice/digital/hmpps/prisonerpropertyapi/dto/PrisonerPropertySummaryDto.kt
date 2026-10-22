@@ -49,6 +49,21 @@ data class PrisonerPropertySummaryDto(
   )
   val dueToTransferIn: Int,
 
+  @Schema(
+    description = "Containers held at other prisons that are due to be returned, because the prisoner has been " +
+      "released or is about to be. Not counted in dueToTransferIn, as the property is not coming here. Only " +
+      "counted when the prisoner is held at the viewing prison, otherwise 0.",
+    example = "1",
+  )
+  val dueToBeReturnedAtOtherPrisons: Int,
+
+  @Schema(
+    description = "Containers held at other prisons whose proposed disposal date has arisen (today or earlier). " +
+      "Not counted in dueToTransferIn. Only counted when the prisoner is held at the viewing prison, otherwise 0.",
+    example = "1",
+  )
+  val dueToBeDisposedAtOtherPrisons: Int,
+
   @Schema(description = "Whether the prisoner has any recorded property at all, at any prison (including containers since returned, disposed or transferred). Lets the card tell \"never had property\" apart from \"no longer has any\".", example = "true")
   val hasEverHadProperty: Boolean,
 )

@@ -1588,7 +1588,54 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       // Only the incoming container is still held elsewhere; the one already sent is also on its way.
       .jsonPath("$.heldAtOtherPrisons").isEqualTo(1)
       .jsonPath("$.dueToTransferIn").isEqualTo(2)
+      // Property elsewhere that is coming here is counted as incoming only.
+      .jsonPath("$.dueToBeReturnedAtOtherPrisons").isEqualTo(0)
+      .jsonPath("$.dueToBeDisposedAtOtherPrisons").isEqualTo(0)
       .jsonPath("$.hasEverHadProperty").isEqualTo(true)
+  }
+
+  /**
+   * Found on a dev prisoner viewed from Leeds: property held at another prison read "Due for return" on the
+   * prisoner's property page, under "Property due to be transferred in", but the summary only had it in
+   * heldAtOtherPrisons, so the profile card could not say so. It is not coming here, so it must not be counted
+   * as due to transfer in either.
+   */
+  @Test
+  fun `prisoner summary at the prisoner's own prison counts property elsewhere that is due for return or disposal`() {
+    hmppsAuth.stubGrantToken()
+    // Held at Leeds and released tomorrow, so property anywhere reads due for return.
+    prisonerSearch.stubGetPrisoner("A1234BC", prisonId = "LEI", confirmedReleaseDate = LocalDate.now().plusDays(1).toString())
+    prisonRegister.stubGetPrisons()
+    repository.save(containerWithStatus("SEALMR", prisonId = "MDI") {})
+    repository.save(containerWithStatus("SEALMD", prisonId = "MDI") { proposedDisposalDate = baseTime.toLocalDate() })
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary?prisonId=LEI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.prisonerHeldHere").isEqualTo(true)
+      // The seeded Leeds container.
+      .jsonPath("$.heldAtThisPrison").isEqualTo(1)
+      .jsonPath("$.dueToBeReturned").isEqualTo(1)
+      .jsonPath("$.heldAtOtherPrisons").isEqualTo(2)
+      .jsonPath("$.dueToTransferIn").isEqualTo(0)
+      .jsonPath("$.dueToBeReturnedAtOtherPrisons").isEqualTo(1)
+      .jsonPath("$.dueToBeDisposedAtOtherPrisons").isEqualTo(1)
+
+    // Moorland, where the prisoner is not held: the same two containers are its own to return and dispose of.
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/summary?prisonId=MDI")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.prisonerHeldHere").isEqualTo(false)
+      .jsonPath("$.heldAtThisPrison").isEqualTo(2)
+      .jsonPath("$.dueToBeReturned").isEqualTo(1)
+      .jsonPath("$.dueToBeDisposed").isEqualTo(1)
+      .jsonPath("$.heldAtOtherPrisons").isEqualTo(0)
+      .jsonPath("$.dueToBeReturnedAtOtherPrisons").isEqualTo(0)
+      .jsonPath("$.dueToBeDisposedAtOtherPrisons").isEqualTo(0)
   }
 
   @Test
@@ -1698,6 +1745,8 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.dueToBeDisposed").isEqualTo(0)
       .jsonPath("$.heldAtOtherPrisons").isEqualTo(0)
       .jsonPath("$.dueToTransferIn").isEqualTo(0)
+      .jsonPath("$.dueToBeReturnedAtOtherPrisons").isEqualTo(0)
+      .jsonPath("$.dueToBeDisposedAtOtherPrisons").isEqualTo(0)
       .jsonPath("$.hasEverHadProperty").isEqualTo(false)
   }
 
