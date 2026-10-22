@@ -324,14 +324,14 @@ class PropertyContainerWriteService(
    * reconciled against the record the receiving prison creates. COMBINED is not accepted here - use combine.
    */
   @Transactional
-  fun remove(id: UUID, request: RemoveContainerRequest, username: String): WriteResult {
+  fun remove(id: UUID, request: RemoveContainerRequest, username: String, force: Boolean = false): WriteResult {
     if (request.outcome == RemovalOutcome.COMBINED) {
       throw ValidationException("Use the combine endpoint to combine containers")
     }
     if (request.outcome == RemovalOutcome.TRANSFERRED && request.toPrisonId.isNullOrBlank()) {
       throw ValidationException("toPrisonId is required when transferring a container")
     }
-    val container = loadActive(id)
+    val container = if (force) load(id) else loadActive(id)
     val date = request.date ?: LocalDate.now()
     if (request.outcome == RemovalOutcome.TRANSFERRED) {
       return container.transferTo(request.toPrisonId!!, username, date)
@@ -654,8 +654,11 @@ class PropertyContainerWriteService(
       }
   }
 
+  private fun load(id: UUID): PropertyContainer = repository
+    .findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
+
   private fun loadActive(id: UUID): PropertyContainer {
-    val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
+    val container = load(id)
     container.removalOutcome?.let { throw ContainerAlreadyRemovedException(id, it) }
     return container
   }
