@@ -124,10 +124,13 @@ class PropertyContainerService(
     val statusesHere = here.map { statusResolver.effectiveStatus(it, prisoner) }
 
     val heldAtOtherPrisons = if (prisonerHeldHere) elsewhere else emptyList()
+    val statusesElsewhere = heldAtOtherPrisons.map { statusResolver.effectiveStatus(it, prisoner) }
     // Incoming, as the establishment list's transfer-in filter has it: held elsewhere and now needing to follow
-    // the owner here, or already sent here and not yet logged on arrival.
+    // the owner here, or already sent here and not yet logged on arrival. Property elsewhere that is due for
+    // return or disposal is not coming here, so it is counted separately - together the three cover everything
+    // the property service lists under "Property due to be transferred in".
     val dueToTransferIn = if (prisonerHeldHere) {
-      heldAtOtherPrisons.count { statusResolver.effectiveStatus(it, prisoner) == ContainerStatus.DUE_FOR_TRANSFER_OUT } +
+      statusesElsewhere.count { it == ContainerStatus.DUE_FOR_TRANSFER_OUT } +
         removed.count { it.receivingPrison() == prisonId }
     } else {
       0
@@ -145,6 +148,8 @@ class PropertyContainerService(
       dueToBeDisposed = statusesHere.count { it == ContainerStatus.DISPOSAL_REQUIRED },
       heldAtOtherPrisons = heldAtOtherPrisons.size,
       dueToTransferIn = dueToTransferIn,
+      dueToBeReturnedAtOtherPrisons = statusesElsewhere.count { it == ContainerStatus.DUE_FOR_RETURN },
+      dueToBeDisposedAtOtherPrisons = statusesElsewhere.count { it == ContainerStatus.DISPOSAL_REQUIRED },
       hasEverHadProperty = containers.isNotEmpty(),
     )
   }
