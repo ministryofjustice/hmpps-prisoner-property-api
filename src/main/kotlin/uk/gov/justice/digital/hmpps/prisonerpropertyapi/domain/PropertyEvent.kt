@@ -98,5 +98,6 @@ class PropertyEvent(
    */
   fun affectsLocation(): Boolean = toInternalLocationId != null ||
     toStorageLocationType != null ||
-    eventType == PropertyEventType.TRANSFERRED
+    eventType == PropertyEventType.TRANSFERRED ||
+    eventType == PropertyEventType.RECEIVED
 }

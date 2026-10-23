@@ -22,6 +22,7 @@ import java.util.UUID
  */
 data class ContainerState(
   val prisonerNumber: String,
+  val prisonId: String,
   val sealNumber: String?,
   val containerType: ContainerType,
   val status: ContainerStatus,
@@ -35,6 +36,7 @@ data class ContainerState(
   companion object {
     fun of(container: PropertyContainer) = ContainerState(
       prisonerNumber = container.prisonerNumber,
+      prisonId = container.prisonId,
       sealNumber = container.currentSealNumber,
       containerType = container.containerType,
       // The read-time status, not the denormalised currentStatusValue, so this matches what a subscriber
@@ -65,6 +67,7 @@ fun PropertyContainer.changedFieldsSince(before: ContainerState): List<String> {
     // Only a NOMIS prisoner-number merge can move a container between people; every other write path
     // leaves the owner alone, so this can never fire spuriously.
     if (after.prisonerNumber != before.prisonerNumber) add("prisonerNumber")
+    if (after.prisonId != before.prisonId) add("prisonId")
     if (after.sealNumber != before.sealNumber) add("sealNumber")
     if (after.containerType != before.containerType) add("containerType")
     if (after.internalLocationId != before.internalLocationId || after.storageLocationType != before.storageLocationType) {

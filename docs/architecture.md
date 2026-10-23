@@ -453,8 +453,9 @@ Five rules worth carrying in your head:
 
 1. **`removalOutcome` wins.** Once set, the container is removed: `currentStatus()` reports the removal
    status regardless of events, and `currentLocation()` returns null — it isn't anywhere any more.
-   `REMOVED` is the odd one out among the outcomes: it is *reversible*, and clearing it alongside a
-   `REACTIVATED` event brings the container back. That is why there is no `archived` flag; there was one,
+   `REMOVED` can be cleared alongside a `REACTIVATED` event to bring the container back. A pending
+   `TRANSFERRED` removal is also cleared when `RECEIVED` confirms arrival of the same container.
+   That is why there is no `archived` flag; there was one,
    and `V14__drop_archived.sql` dropped it in favour of this.
 2. **Disposal is time-based.** `isDisposalDue()` compares `proposedDisposalDate` to today, so a
    container becomes overdue with no write happening. This is why it is never denormalised.
@@ -466,8 +467,9 @@ Five rules worth carrying in your head:
 4. **A transfer out is a removal, not a move.** This is the most counter-intuitive thing in the domain and
    the easiest to get wrong. Sending a container to another prison does **not** reassign its `prisonId`.
    It removes the source container with outcome `TRANSFERRED` and exposes `receivingPrisonId`; the
-   destination gets a *separate* record when receiving staff log the arrival. The two are reconciled by
-   `relatedContainerId` when the seals are matched, in either order. A live container therefore never
+   receipt endpoint receives that same record in place, reassigning its prison and recording a `RECEIVED`
+   event. The add-with-previous-seal flow instead creates a *separate* receiving record, reconciled by
+   `relatedContainerId`. A live container therefore never
    shows `TRANSFER` — `baseEventStatus()` deliberately steps over it — and `currentLocation()` returns null
    after a transfer so the receiving prison assigns its own.
 5. **Some questions the columns cannot answer at all**, because they depend on where a container's *owner*

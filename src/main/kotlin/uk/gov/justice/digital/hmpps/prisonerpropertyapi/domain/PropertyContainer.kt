@@ -113,7 +113,8 @@ class PropertyContainer(
    * correction (e.g. a seal fix) does not "un-remove" the container; otherwise DISPOSAL_REQUIRED once
    * the proposed disposal date has arisen (see [isDisposalDue]), else it derives from the most recent
    * event (defaulting to STORED before any event). A live (non-removed) container never shows TRANSFER;
-   * a transfer-out removes the container (outcome TRANSFERRED) and the receiving prison holds a separate record.
+   * a transfer-out removes the container (outcome TRANSFERRED). Receipt can restore the same record at the
+   * receiving prison; the previous-seal create flow instead reconciles it against a separate receiving record.
    */
   fun currentStatus(): ContainerStatus = when {
     removalOutcome != null -> removalOutcome!!.status
