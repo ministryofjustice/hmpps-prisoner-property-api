@@ -26,16 +26,12 @@ data class CreatePropertyContainerRequest(
   val sealNumber: String,
 
   @Schema(
-    description = "If this container is arriving on transfer from another establishment, the seal it was " +
-      "recorded under there. Matches any container the person has at another prison that is either still in " +
-      "storage there, or already transferred out and not yet logged anywhere - so neither a sending prison " +
-      "that never flags transfers, nor one that named a different destination, prevents the match. Matched " +
-      "ignoring case and surrounding whitespace. The matched record is linked to this one and deactivated " +
-      "(TRANSFERRED), and both histories name the other's seal. Rejected with 400 (errorCode " +
-      "PREVIOUS_SEAL_NUMBER_NOT_FOUND) if it matches nothing, so a mistyped seal cannot silently leave two " +
-      "records for one box. Leave blank for genuinely new property.",
+    description = "Deprecated. Do not use to receive an existing container. A non-blank value is rejected; " +
+      "use the receive endpoint with the existing container id instead. Null or blank is accepted for " +
+      "backwards compatibility.",
     example = "SN8842K1",
     nullable = true,
+    deprecated = true,
   )
   val previousSealNumber: String? = null,
 

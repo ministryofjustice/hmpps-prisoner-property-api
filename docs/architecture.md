@@ -236,8 +236,7 @@ The result types carry the events out of the transaction:
 
 | Type | Returned by | Events |
 | --- | --- | --- |
-| `WriteResult` | update, dispose, remove, move | `event: HmppsDomainEvent?` — **null when nothing changed** (e.g. a move to the same location) |
-| `CreateResult` | create | the new container, plus an update for a reconciled transfer-in source |
+| `WriteResult` | create, update, receive, dispose, remove, move | `event: HmppsDomainEvent?` — **null when nothing changed** (e.g. a move to the same location) |
 | `CombineResult` | combine | one created (the new container) + one updated per source |
 | `SyncResult` | sync, migrate | `event?` — always null for `migrate`; null for a sync that changed nothing |
 
@@ -362,7 +361,7 @@ filters on `changedFields` must therefore match on the field it cares about, not
 
 | Write | Events |
 |---|---|
-| create | one `.created` for the new container — plus one `.updated` for the source when a transfer-in was reconciled |
+| create | one `.created` for the new container |
 | update / move / dispose / remove | one `.updated` — or **none**, when the write changed nothing observable |
 | combine | one `.created` for the new container **plus one `.updated` per source**, each naming its own `dpsId` |
 | prisoner received / released / died | one `.updated` per container actually changed; none for containers already in that state |

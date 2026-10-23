@@ -78,6 +78,25 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `rejects create with a previous seal and leaves the existing container unchanged`() {
+    val sourceId = repository.save(seedContainer(seal = "OLDSEAL")).id!!
+
+    webTestClient.post().uri("/property-containers")
+      .headers(setAuthorisation(username = "RECEPTION", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(createRequest(sealNumber = "NEWSEAL").copy(previousSealNumber = "OLDSEAL"))
+      .exchange()
+      .expectStatus().isBadRequest
+      .expectBody()
+      .jsonPath("$.userMessage").value<String> { assertThat(it).contains("receive the existing container") }
+
+    val unchanged = repository.findById(sourceId).orElseThrow()
+    assertThat(repository.count()).isEqualTo(1)
+    assertThat(unchanged.removalOutcome).isNull()
+    assertThat(unchanged.currentSealNumber).isEqualTo("OLDSEAL")
+    assertNoEventsPublished()
+  }
+
+  @Test
   fun `creates excess property offsite at Branston when locationType is BRANSTON`() {
     val created = webTestClient.post().uri("/property-containers")
       .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))

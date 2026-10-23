@@ -114,45 +114,21 @@ class PropertyContainerWriteService(
   private fun PropertyContainer.isAwaitingArrival(): Boolean = removalOutcome == RemovalOutcome.TRANSFERRED && latestTransferEvent()?.relatedContainerId == null
 
   /**
-   * Create a new sealed container. When [CreatePropertyContainerRequest.previousSealNumber] is supplied it names
-   * the record the property was held under at the prison it has come from: that container is the same physical
-   * property, so it is linked to this new record and deactivated (TRANSFERRED), freeing its seal and location
-   * and leaving no ghost record behind. Both records' histories name the other's seal, so the match is
-   * visible rather than implied.
-   *
-   * A previous seal that matches nothing is rejected, not ignored - silently creating the container is how one
-   * box ended up recorded twice, once here and once still awaiting transfer at the sending prison.
-   *
-   * Returns the created container plus the events to publish after commit - one for the new container, and one
-   * for the source when a transfer-in was reconciled.
+   * Create a new sealed container. Receiving an existing container is handled by [receive], which preserves its
+   * id and history rather than creating a second record.
    */
   @Transactional
-  fun create(request: CreatePropertyContainerRequest, username: String): CreateResult {
+  fun create(request: CreatePropertyContainerRequest, username: String): WriteResult {
+    if (!request.previousSealNumber.isNullOrBlank()) {
+      throw ValidationException("previousSealNumber is not supported when creating a container; receive the existing container by id")
+    }
     requireValidLocation(request.internalLocationId)
     // Where the container is stored: an internal prison location (given by internalLocationId), or offsite at
     // Branston (BRANSTON, no internal location - used for excess property held offsite). INTERNAL is implied by
     // an internalLocationId; a null type with no location is left unset (unknown location).
     val locationType = resolveLocationType(request.locationType, request.internalLocationId)
 
-    // The property physically arriving here on transfer: the prisoner's container at another prison held under
-    // the previous seal. Any container still in storage there qualifies - plenty of prisons never record the
-    // transfer out, so requiring them to have flagged it first meant the common case never matched and a second
-    // record was created for the same box. Staff typing that seal are asserting the property arrived here, so
-    // deactivating the sending record is the intent. A container already transferred out but not yet logged
-    // anywhere also matches: this add is what reconciles it.
-    val source = request.previousSealNumber?.trim()?.takeIf { it.isNotEmpty() }?.let { previousSeal ->
-      repository.findByPrisonerNumber(request.prisonerNumber).firstOrNull { candidate ->
-        !candidate.prisonId.equalsPrisonId(request.prisonId) &&
-          // Case- and whitespace-insensitive, like the establishment seal search: staff should not have to
-          // reproduce the exact form the sending prison recorded.
-          candidate.currentSealNumber?.trim().equals(previousSeal, ignoreCase = true) &&
-          (!candidate.isRemoved() || candidate.isAwaitingArrival())
-      } ?: throw PreviousSealNumberNotFoundException(previousSeal)
-    }
-
-    val sealInUse = source?.let { repository.existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot(request.sealNumber, it.id!!) }
-      ?: repository.existsByCurrentSealNumberAndRemovalOutcomeIsNull(request.sealNumber)
-    if (sealInUse) {
+    if (repository.existsByCurrentSealNumberAndRemovalOutcomeIsNull(request.sealNumber)) {
       throw DuplicateSealNumberException(request.sealNumber)
     }
 
@@ -176,10 +152,6 @@ class PropertyContainerWriteService(
         toInternalLocationId = request.internalLocationId,
         toStorageLocationType = locationType,
         toPrisonId = request.prisonId,
-        relatedContainerId = source?.id,
-        // The seal it arrived under, so the history reads "matched to previous seal X" rather than leaving
-        // staff to guess whether the two records were joined up.
-        relatedContainerSealNumber = source?.currentSealNumber,
       ),
     )
     if (request.proposedDisposalDate != null) {
@@ -190,45 +162,13 @@ class PropertyContainerWriteService(
 
     container.refreshDerivedState()
     val saved = repository.save(container)
-    val events = mutableListOf(
-      PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_CREATED, saved.id!!, request.prisonerNumber, changedFields = null),
+    val event = PropertyContainerEventFactory.changeEvent(
+      PropertyDomainEventType.CONTAINER_CREATED,
+      saved.id!!,
+      request.prisonerNumber,
+      changedFields = null,
     )
-
-    source?.let {
-      val before = ContainerState.of(it)
-      if (it.isRemoved()) {
-        // Already transferred out by the sending prison: reconcile by linking its TRANSFERRED event to this
-        // new record, so it stops surfacing as awaiting at this prison. It is already removed - don't re-remove.
-        // The existing event is amended rather than a new one appended, so the history keeps the real
-        // transfer date and simply gains the seal it was matched to.
-        it.latestTransferEvent()?.apply {
-          relatedContainerId = saved.id
-          relatedContainerSealNumber = request.sealNumber
-        }
-        it.refreshDerivedState()
-      } else {
-        // Still held at the sending prison: mark it transferred out and linked to this new record in one step.
-        it.events.add(
-          PropertyEvent(
-            it,
-            PropertyEventType.TRANSFERRED,
-            now,
-            username,
-            eventDate = LocalDate.now(),
-            fromPrisonId = it.prisonId,
-            toPrisonId = request.prisonId,
-            relatedContainerId = saved.id,
-            relatedContainerSealNumber = request.sealNumber,
-          ),
-        )
-        it.removalOutcome = RemovalOutcome.TRANSFERRED
-        it.removalDate = LocalDate.now()
-        it.refreshDerivedState()
-      }
-      events += PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, it.id!!, it.prisonerNumber, it.changedFieldsSince(before))
-    }
-
-    return CreateResult(PropertyContainerDto.from(saved), events)
+    return WriteResult(PropertyContainerDto.from(saved), event)
   }
 
   @Transactional
@@ -368,8 +308,8 @@ class PropertyContainerWriteService(
    * Remove a container from active storage for a given [RemovalOutcome.RETURNED], [RemovalOutcome.DISPOSED],
    * [RemovalOutcome.CREATED_IN_ERROR], or [RemovalOutcome.TRANSFERRED]. Returned/disposed/created-in-error are
    * terminal (the container leaves active storage and its location and seal are freed). Transferred also
-   * removes it from the sending prison (see [transferTo]) but records the destination and is later
-   * received in place or reconciled against a new receiving record. COMBINED is not accepted here - use combine.
+   * removes it from the sending prison (see [transferTo]) and records the destination; the receiving prison
+   * later records arrival on the same container with [receive]. COMBINED is not accepted here - use combine.
    */
   @Transactional
   fun remove(id: UUID, request: RemoveContainerRequest, username: String, force: Boolean = false): WriteResult {
@@ -715,9 +655,8 @@ class PropertyContainerWriteService(
    * Transfer a container out to the prisoner's new establishment. The container is
    * marked removed with outcome [RemovalOutcome.TRANSFERRED] at the sending prison - its prison is NOT
    * reassigned - so it leaves the sending list and shows in the person's returned/transferred history.
-   * The receiving prison either receives this record in place ([receive]) or creates a destination record
-   * (add + previous seal-match, see [create]), which reconciles this one by linking it. Until then the TRANSFERRED event carries no
-   * related container, so this container still surfaces as awaiting at [toPrisonId] (see
+   * The receiving prison later records arrival on this same record with [receive]. Until then the TRANSFERRED
+   * event carries no related container, so this container still surfaces as awaiting at [toPrisonId] (see
    * [PropertyContainer.receivingPrison]).
    */
   private fun PropertyContainer.transferTo(toPrisonId: String, username: String, date: LocalDate): WriteResult {
@@ -771,10 +710,3 @@ data class WriteResult(val container: PropertyContainerDto, val event: HmppsDoma
  * transaction commits (a created event for the new container and an updated event per source).
  */
 data class CombineResult(val container: PropertyContainerDto, val events: List<HmppsDomainEvent>)
-
-/**
- * The outcome of a create: the new [container] plus the domain [events] to publish *after* the
- * transaction commits (a created event for the new container, and - when an arriving container was
- * reconciled against a due-for-transfer-out record - an updated event for that source).
- */
-data class CreateResult(val container: PropertyContainerDto, val events: List<HmppsDomainEvent>)

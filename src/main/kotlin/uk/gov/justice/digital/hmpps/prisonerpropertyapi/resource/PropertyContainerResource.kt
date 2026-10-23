@@ -50,7 +50,6 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublish
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyTelemetry
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.BoxLocationService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.CombineResult
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.CreateResult
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerWriteService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.WriteResult
@@ -92,12 +91,6 @@ class PropertyContainerResource(
 
   /** Publishes all the combine domain events after the service transaction has committed. */
   private fun CombineResult.publishAllAfterCommit(): PropertyContainerDto {
-    events.forEach(domainEventPublisher::publish)
-    return container
-  }
-
-  /** Publishes all the create domain events (the new container, plus any reconciled transfer-in source) after commit. */
-  private fun CreateResult.publishAllAfterCommit(): PropertyContainerDto {
     events.forEach(domainEventPublisher::publish)
     return container
   }
@@ -363,19 +356,15 @@ class PropertyContainerResource(
   @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
   @Operation(
     summary = "Create a new property container",
-    description = "Requires role ROLE_PRISONER_PROPERTY__RW. When `previousSealNumber` is given it must match a " +
-      "container the prisoner has at another prison that is either still in storage there or already " +
-      "transferred out and not yet logged anywhere (ignoring case and surrounding whitespace); that container " +
-      "is reconciled as the property arriving here on transfer - linked to the new record and deactivated " +
-      "(transferred) - and both histories record the seal they were matched to. A previous seal that matches " +
-      "nothing is rejected with 400 rather than ignored, so a mistyped seal cannot leave two records for the " +
-      "same property.",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RW. Creates a new container record for genuinely new " +
+      "property. To receive an existing container from another establishment, use the receive endpoint with " +
+      "that container's id; receipt updates the existing record and preserves its id and history. " +
+      "`previousSealNumber` is deprecated and any non-blank value is rejected.",
     responses = [
       ApiResponse(responseCode = "201", description = "Property container created"),
       ApiResponse(
         responseCode = "400",
-        description = "Invalid request, or `previousSealNumber` matched no property held for this person at " +
-          "another establishment (errorCode PREVIOUS_SEAL_NUMBER_NOT_FOUND)",
+        description = "Invalid request, including a non-blank deprecated `previousSealNumber` (use the receive endpoint for an existing container)",
         content = [Content(schema = Schema(implementation = ErrorResponse::class))],
       ),
       ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
@@ -383,16 +372,17 @@ class PropertyContainerResource(
       ApiResponse(responseCode = "409", description = "The seal number is already in use by another active container", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )
-  fun create(@Valid @RequestBody request: CreatePropertyContainerRequest): PropertyContainerDto = propertyContainerWriteService.create(request, currentUsername()).publishAllAfterCommit()
+  fun create(@Valid @RequestBody request: CreatePropertyContainerRequest): PropertyContainerDto = propertyContainerWriteService.create(request, currentUsername()).publishAfterCommit()
 
   @PostMapping("/{id}/receive")
   @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
   @Operation(
     summary = "Confirm receipt of an incoming property container",
-    description = "Requires role ROLE_PRISONER_PROPERTY__RW. Receives the existing container without creating a " +
-      "new record, retaining its id and history. Accepts property held at another establishment or transferred " +
-      "out and not yet reconciled. Records a RECEIVED event with the authenticated user, confirmation time, " +
-      "sending and receiving establishments, seal and location. Returns the updated property container.",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RW. Receives an existing container from another " +
+      "establishment without creating a new record, retaining its id and history. Accepts property still held " +
+      "at the sending establishment (even if it was not marked transferred out) or already transferred out " +
+      "and awaiting receipt. Records a RECEIVED event with the authenticated user, confirmation time, sending " +
+      "and receiving establishments, seal and location. Returns the updated property container.",
     responses = [
       ApiResponse(responseCode = "200", description = "Existing property container received"),
       ApiResponse(responseCode = "400", description = "Invalid request, location, or container already held at the receiving establishment", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),

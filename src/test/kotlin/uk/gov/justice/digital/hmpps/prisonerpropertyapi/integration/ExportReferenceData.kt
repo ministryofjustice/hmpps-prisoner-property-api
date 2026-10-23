@@ -50,7 +50,7 @@ class ExportReferenceData {
         PropertyEventType.PRISONER_TRANSFERRED_OUT to "The owner was transferred out of the establishment, so the property is due to follow them. Carries no destination - the transfer-out movement does not say where they are going.",
         PropertyEventType.PRISONER_RELEASED to "The owner was released, so the property is due to be returned to them.",
         PropertyEventType.DIED_IN_CUSTODY to "The owner died in custody, so the property is due to be returned.",
-        PropertyEventType.TRANSFERRED to "The container was transferred out to another prison. This removes it from the sending prison; the receiving prison holds a separate record, reconciled via related_container_id.",
+        PropertyEventType.TRANSFERRED to "The container was transferred out to another prison, removing it from the sending prison's active stock. The receiving establishment records arrival on the existing container with a RECEIVED event.",
         PropertyEventType.RECEIVED to "The existing container was confirmed as received from another establishment.",
         PropertyEventType.RETURNED to "The container was returned to the prisoner.",
         PropertyEventType.DISPOSAL_REQUIRED to "Disposal was recorded as required. Note the DISPOSAL_REQUIRED status is derived by comparing proposed_disposal_date with today, not from this event.",

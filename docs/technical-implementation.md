@@ -106,8 +106,7 @@ private fun WriteResult.publishAfterCommit(): PropertyContainerDto {
 
 | Result type | Returned by | Carries |
 | --- | --- | --- |
-| `WriteResult` | update, receive, dispose, remove, move | `event: HmppsDomainEvent?` — **null when nothing actually changed** |
-| `CreateResult` | create | the new container's event, plus an update for a reconciled transfer-in source |
+| `WriteResult` | create, update, receive, dispose, remove, move | `event: HmppsDomainEvent?` — **null when nothing actually changed** |
 | `CombineResult` | combine | one created + one updated per source container |
 | `SyncResult` | sync, migrate | `event?` — **always null for `migrate`** (a bulk load must not flood the topic) |
 
