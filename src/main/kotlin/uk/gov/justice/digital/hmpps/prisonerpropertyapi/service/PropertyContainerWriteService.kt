@@ -331,7 +331,7 @@ class PropertyContainerWriteService(
     if (request.outcome == RemovalOutcome.TRANSFERRED && request.toPrisonId.isNullOrBlank()) {
       throw ValidationException("toPrisonId is required when transferring a container")
     }
-    val container = if (force) load(id) else loadActive(id)
+    val container = if (force && request.outcome == RemovalOutcome.CREATED_IN_ERROR) load(id) else loadActive(id)
     val date = request.date ?: LocalDate.now()
     if (request.outcome == RemovalOutcome.TRANSFERRED) {
       return container.transferTo(request.toPrisonId!!, username, date)
