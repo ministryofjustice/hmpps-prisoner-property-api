@@ -443,8 +443,11 @@ class PropertyContainerResource(
     @Parameter(description = "Property container id", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d", required = true)
     @PathVariable
     id: UUID,
+    @Parameter(description = "Override when the property is already REMOVED, which would normally be an error")
+    @RequestParam(required = false, defaultValue = "false")
+    force: Boolean,
     @Valid @RequestBody request: RemoveContainerRequest,
-  ): PropertyContainerDto = propertyContainerWriteService.remove(id, request, currentUsername()).publishAfterCommit()
+  ): PropertyContainerDto = propertyContainerWriteService.remove(id, request, currentUsername(), force).publishAfterCommit()
 
   @PostMapping("/combine")
   @ResponseStatus(HttpStatus.CREATED)

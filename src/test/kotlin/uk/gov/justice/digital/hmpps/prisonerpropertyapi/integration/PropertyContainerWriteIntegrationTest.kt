@@ -5,7 +5,6 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.check
-import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
@@ -369,6 +368,45 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       assertThat(it.eventType).isEqualTo("prison-property.container.updated")
       assertThat(it.changedFields).containsExactly("location", "removalOutcome", "currentStatus")
     })
+  }
+
+  @Test
+  fun `rejects removing a container as created in error when it is already removed`() {
+    val id = repository.save(
+      seedContainer(removalOutcome = RemovalOutcome.REMOVED, removalDate = LocalDate.parse("2026-02-01")),
+    ).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/remove", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(RemoveContainerRequest(outcome = RemovalOutcome.CREATED_IN_ERROR))
+      .exchange()
+      .expectStatus().isEqualTo(409)
+      .expectBody()
+      .jsonPath("$.userMessage").isEqualTo("Property container has already left active storage (REMOVED): $id")
+  }
+
+  @Test
+  fun `allows removing a container as created in error when it is already removed but action is forced`() {
+    val id = repository.save(
+      seedContainer(removalOutcome = RemovalOutcome.REMOVED, removalDate = LocalDate.parse("2026-02-01")),
+    ).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/remove?force=true", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(RemoveContainerRequest(outcome = RemovalOutcome.CREATED_IN_ERROR))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.currentStatus").isEqualTo("CREATED_IN_ERROR")
+      .jsonPath("$.removalOutcome").isEqualTo("CREATED_IN_ERROR")
+      .jsonPath("$.currentLocation").doesNotExist()
+
+    assertThat(publishedEventsFor(id)).singleElement().satisfies(
+      {
+        assertThat(it.eventType).isEqualTo("prison-property.container.updated")
+        assertThat(it.changedFields).containsExactly("removalOutcome", "currentStatus")
+      },
+    )
   }
 
   @Test
