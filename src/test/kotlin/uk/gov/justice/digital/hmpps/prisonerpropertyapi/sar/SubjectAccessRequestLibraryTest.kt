@@ -83,10 +83,10 @@ class SubjectAccessRequestLibraryTest :
 
   /**
    * The test library asks for "a complete representation of all possible data", because anything not
-   * represented here is a shape of report nobody has ever looked at. Between them these three containers
+   * represented here is a shape of report nobody has ever looked at. Between them these four containers
    * exercise every field in the response and every helper the template calls: an internal move and an offsite
-   * move to Branston, a reseal, a type change, a transfer out reconciled against another record, a return,
-   * and a container waiting on disposal.
+   * move to Branston, a reseal, a type change, a transfer out reconciled against another record, a container
+   * due to follow its owner to another prison, a return, and a container waiting on disposal.
    *
    * Dates are fixed rather than relative so the approved files stay stable. The disposal date is in the past
    * for the same reason - the disposal-due status is derived by comparing it with today, so a future date
@@ -96,7 +96,7 @@ class SubjectAccessRequestLibraryTest :
    */
   override fun setupTestData() {
     repository.deleteAll()
-    repository.saveAll(listOf(storedContainer(), transferredContainer(), returnedContainer()))
+    repository.saveAll(listOf(storedContainer(), transferredContainer(), dueForTransferContainer(), returnedContainer()))
   }
 
   /** Created, resealed, moved within the prison, then moved offsite to Branston. Disposal now due. */
@@ -209,6 +209,44 @@ class SubjectAccessRequestLibraryTest :
         eventDate = LocalDate.parse("2025-07-18"),
         relatedContainerId = UUID.fromString("33333333-3333-3333-3333-333333333333"),
         relatedContainerSealNumber = "SEAL0099",
+      ),
+    )
+    container.refreshDerivedState()
+    return container
+  }
+
+  /**
+   * Still stored at Leeds after the prisoner arrived at Moorland, so it is due to be transferred there - the
+   * only shape of container with a prison it is being transferred to.
+   */
+  private fun dueForTransferContainer(): PropertyContainer {
+    val container = PropertyContainer(
+      prisonerNumber = PRISONER,
+      prisonId = "LEI",
+      containerType = ContainerType.EXCESS,
+      createdByUserId = "SAR_USER2",
+      currentSealNumber = "SEAL0005",
+      createDateTime = LocalDateTime.parse("2025-06-03T10:10:00"),
+    )
+    container.events.add(
+      PropertyEvent(
+        container,
+        PropertyEventType.CREATED_SEALED,
+        LocalDateTime.parse("2025-06-03T10:10:00"),
+        "SAR_USER2",
+        sealNumber = "SEAL0005",
+        toInternalLocationId = LOCATION_A,
+        toStorageLocationType = StorageLocationType.INTERNAL,
+      ),
+    )
+    container.events.add(
+      PropertyEvent(
+        container,
+        PropertyEventType.PRISONER_RECEIVED,
+        LocalDateTime.parse("2025-07-10T16:20:00"),
+        "SAR_USER1",
+        fromPrisonId = "LEI",
+        toPrisonId = "MDI",
       ),
     )
     container.refreshDerivedState()
