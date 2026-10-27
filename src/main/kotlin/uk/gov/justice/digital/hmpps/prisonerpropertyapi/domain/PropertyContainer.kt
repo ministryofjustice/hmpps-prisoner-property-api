@@ -122,14 +122,22 @@ class PropertyContainer(
   fun isDisposalDue(): Boolean = removalOutcome == null && proposedDisposalDate?.let { !it.isAfter(LocalDate.now()) } == true
 
   /**
+   * Whether the container is waiting for staff to confirm where it is, after its owner was admitted while it was
+   * still held from before. Reads the latest event rather than [currentStatusValue], so it is right mid-write.
+   */
+  fun requiresReview(): Boolean = removalOutcome == null && baseEventStatus() == ContainerStatus.REVIEW_REQUIRED
+
+  /**
    * The current status. A removal outcome takes precedence over the latest event so that a later
-   * correction (e.g. a seal fix) does not "un-remove" the container; otherwise DISPOSAL_REQUIRED once
-   * the proposed disposal date has arisen (see [isDisposalDue]), else it derives from the most recent
-   * event (defaulting to STORED before any event). A live (non-removed) container never shows TRANSFER;
+   * correction (e.g. a seal fix) does not "un-remove" the container; then REVIEW_REQUIRED, which outranks
+   * disposal because nobody knows where the property is; otherwise DISPOSAL_REQUIRED once the proposed
+   * disposal date has arisen (see [isDisposalDue]), else it derives from the most recent event (defaulting
+   * to STORED before any event). A live (non-removed) container never shows TRANSFER;
    * a transfer-out removes the container (outcome TRANSFERRED) and the receiving prison holds a separate record.
    */
   fun currentStatus(): ContainerStatus = when {
     removalOutcome != null -> removalOutcome!!.status
+    requiresReview() -> ContainerStatus.REVIEW_REQUIRED
     isDisposalDue() -> ContainerStatus.DISPOSAL_REQUIRED
     else -> baseEventStatus()
   }
@@ -147,10 +155,12 @@ class PropertyContainer(
    * Events are appended chronologically, so when two share a timestamp - e.g. a REMOVED and the REACTIVATED
    * that reverses it in one sync snapshot - the later-appended one wins.
    */
-  private fun baseEventStatus(): ContainerStatus = events
+  private fun baseEventStatus(): ContainerStatus = latestStatusEvent()?.eventType?.status?.takeUnless { it == ContainerStatus.TRANSFER } ?: ContainerStatus.STORED
+
+  /** The most recent non-disposal event - the one [baseEventStatus] derives from. */
+  private fun latestStatusEvent(): PropertyEvent? = events
     .filter { it.eventType != PropertyEventType.DISPOSAL_REQUIRED }
     .reduceOrNull { latest, event -> if (event.eventDateTime >= latest.eventDateTime) event else latest }
-    ?.eventType?.status?.takeUnless { it == ContainerStatus.TRANSFER } ?: ContainerStatus.STORED
 
   /**
    * The prison this container is due to be transferred in to (denormalised into [receivingPrisonId] for
@@ -160,6 +170,10 @@ class PropertyContainer(
    *  - transferred out but not yet reconciled: the sending prison has marked it TRANSFERRED, but the
    *    receiving prison has not yet logged the arrival (the TRANSFERRED event has no related container) -
    *    the destination is on that TRANSFERRED event, so it still shows as awaiting at the receiving prison.
+   *
+   * Property for someone admitted at another prison carries the destination the same way, on the
+   * PRISONER_ADMITTED that put it under review and then on the LOCATION_CONFIRMED that cleared it, so it shows
+   * as due in at the admitting prison throughout.
    * Once reconciled (the TRANSFERRED event gains a related container id) it is null again.
    *
    * A transfer written by a legacy clean-up job (the TRANSFERRED event carries a job id) is the exception: it
@@ -169,6 +183,7 @@ class PropertyContainer(
    */
   fun receivingPrison(): String? = when {
     baseStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT -> events.maxByOrNull { it.eventDateTime }?.toPrisonId
+    removalOutcome == null && latestStatusEvent()?.eventType in REVIEW_EVENT_TYPES -> latestStatusEvent()?.toPrisonId
     removalOutcome == RemovalOutcome.TRANSFERRED ->
       latestTransferEvent()?.takeIf { it.relatedContainerId == null && it.legacyCleanupJobId == null }?.toPrisonId
     else -> null
@@ -227,4 +242,9 @@ class PropertyContainer(
   private fun latestLocationEvent(): PropertyEvent? = events
     .filter { it.affectsLocation() }
     .maxByOrNull { it.eventDateTime }
+
+  private companion object {
+    /** The events that put property under review and clear it again, both of which carry the admitting prison. */
+    val REVIEW_EVENT_TYPES = setOf(PropertyEventType.PRISONER_ADMITTED, PropertyEventType.LOCATION_CONFIRMED)
+  }
 }
