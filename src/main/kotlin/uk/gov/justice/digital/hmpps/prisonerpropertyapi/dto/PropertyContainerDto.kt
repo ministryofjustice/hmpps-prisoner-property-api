@@ -48,6 +48,9 @@ data class PropertyContainerDto(
   @Schema(description = "When the container was created")
   val createDateTime: LocalDateTime,
 
+  @Schema(description = "When a person last changed the container, in this service or in NOMIS. Starts at createDateTime. Changes the service makes by itself, such as flagging property due for return when the prisoner is released, do not move it")
+  val lastUpdatedDateTime: LocalDateTime,
+
   @Schema(description = "Id of the user who created the container", example = "AUSER_GEN")
   val createdByUserId: String,
 ) {
@@ -65,6 +68,7 @@ data class PropertyContainerDto(
       removalOutcome = container.removalOutcome,
       removalDate = container.removalDate,
       createDateTime = container.createDateTime,
+      lastUpdatedDateTime = container.lastUpdatedDateTime,
       createdByUserId = container.createdByUserId,
     )
   }

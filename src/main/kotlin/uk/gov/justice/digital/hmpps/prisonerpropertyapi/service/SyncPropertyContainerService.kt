@@ -218,6 +218,9 @@ class SyncPropertyContainerService(
 
     var event: HmppsDomainEvent? = null
     if (changed.isNotEmpty()) {
+      // Every NOMIS change counts as an update, including the ones that write no event (a cleared disposal
+      // date, a removal re-dated, a disposal date on a container NOMIS holds as inactive).
+      existing.recordUpdate(now)
       existing.refreshDerivedState()
       repository.save(existing)
       if (!migrating) {

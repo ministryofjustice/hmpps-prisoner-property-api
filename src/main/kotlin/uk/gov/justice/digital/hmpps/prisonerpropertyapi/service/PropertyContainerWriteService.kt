@@ -201,6 +201,7 @@ class PropertyContainerWriteService(
           relatedContainerId = saved.id
           relatedContainerSealNumber = request.sealNumber
         }
+        it.recordUpdate(now)
         it.refreshDerivedState()
       } else {
         // Still held at the sending prison: mark it transferred out and linked to this new record in one step.
@@ -298,6 +299,8 @@ class PropertyContainerWriteService(
 
     container.refreshDerivedState()
     val changed = container.changedFieldsSince(before)
+    // Clearing the disposal date writes no event, so the events alone would not move the last updated date.
+    if (changed.isNotEmpty()) container.recordUpdate(now)
     val event = changed.takeIf { it.isNotEmpty() }?.let {
       PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, it)
     }

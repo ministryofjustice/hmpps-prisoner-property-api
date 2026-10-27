@@ -165,6 +165,59 @@ class PropertyContainerTest {
     }
   }
 
+  @Nested
+  inner class LastUpdated {
+    private fun created(): PropertyContainer {
+      val container = PropertyContainer(
+        prisonerNumber = "A1234BC",
+        prisonId = "LEI",
+        containerType = ContainerType.STANDARD,
+        createdByUserId = "USER1",
+        createDateTime = BASE_TIME,
+        currentSealNumber = "SEAL1",
+      )
+      container.events.add(PropertyEvent(container, PropertyEventType.CREATED_SEALED, BASE_TIME, "USER1"))
+      container.refreshDerivedState()
+      return container
+    }
+
+    private fun PropertyContainer.add(type: PropertyEventType, at: LocalDateTime, user: String = "USER2") {
+      events.add(PropertyEvent(this, type, at, user))
+      refreshDerivedState()
+    }
+
+    @Test
+    fun `starts at the creation time`() {
+      assertThat(created().lastUpdatedDateTime).isEqualTo(BASE_TIME)
+    }
+
+    @Test
+    fun `moves on with a change a member of staff makes`() {
+      val container = created()
+      container.add(PropertyEventType.MOVED, BASE_TIME.plusDays(2))
+      assertThat(container.lastUpdatedDateTime).isEqualTo(BASE_TIME.plusDays(2))
+    }
+
+    @Test
+    fun `does not move for a change the service makes by itself`() {
+      val container = created()
+      container.add(PropertyEventType.PRISONER_RELEASED, BASE_TIME.plusDays(2), PropertySystemUsers.PRISONER_PROPERTY_API)
+      container.add(PropertyEventType.REMOVED, BASE_TIME.plusDays(3), PropertySystemUsers.LEGACY_CLEANUP)
+      assertThat(container.lastUpdatedDateTime).isEqualTo(BASE_TIME)
+    }
+
+    @Test
+    fun `a change with no event moves it on, but never back`() {
+      val container = created()
+      container.recordUpdate(BASE_TIME.plusDays(2))
+      assertThat(container.lastUpdatedDateTime).isEqualTo(BASE_TIME.plusDays(2))
+
+      container.recordUpdate(BASE_TIME.plusDays(1))
+      container.add(PropertyEventType.SEAL_CHANGED, BASE_TIME.plusDays(1))
+      assertThat(container.lastUpdatedDateTime).isEqualTo(BASE_TIME.plusDays(2))
+    }
+  }
+
   private companion object {
     private val BASE_TIME: LocalDateTime = LocalDateTime.parse("2026-01-01T09:00:00")
   }

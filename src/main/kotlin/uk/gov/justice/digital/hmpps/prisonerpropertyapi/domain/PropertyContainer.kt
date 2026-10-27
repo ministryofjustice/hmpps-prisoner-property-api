@@ -82,6 +82,19 @@ class PropertyContainer(
   @Column(name = "receiving_prison_id")
   var receivingPrisonId: String? = null,
 
+  /**
+   * When a person last changed the container - a member of staff in this service, or in NOMIS while the prison
+   * still uses it - starting at [createDateTime]. Shown to staff as "Last updated". Changes the service makes by
+   * itself do not move it: flagging property due for return or transfer when its owner moves, a legacy clean-up
+   * closure, or a prisoner-number merge. Staff read the date as "someone has looked at this", so an automatic
+   * status change moving it would suggest the record had already been dealt with.
+   *
+   * Kept up to date by [refreshDerivedState] from the events, and by [recordUpdate] for the few changes that
+   * write no event. It only ever moves forward.
+   */
+  @Column(name = "last_updated_datetime", nullable = false)
+  var lastUpdatedDateTime: LocalDateTime = createDateTime,
+
   @OneToMany(mappedBy = "container", cascade = [CascadeType.ALL], orphanRemoval = true)
   val events: MutableList<PropertyEvent> = mutableListOf(),
 
@@ -192,13 +205,23 @@ class PropertyContainer(
   /**
    * Refresh the denormalised [currentStatusValue]/[currentInternalLocationId]/[currentStorageLocationType]
    * mirrors from the authoritative event-derived state. Must be called by every write path after appending
-   * events or changing the removal outcome, so the establishment-wide list query stays in step.
+   * events or changing the removal outcome, so the establishment-wide list query stays in step. Also moves
+   * [lastUpdatedDateTime] on to the latest event a person wrote.
    */
   fun refreshDerivedState() {
     currentStatusValue = baseStatus()
     currentInternalLocationId = currentLocation()
     currentStorageLocationType = currentLocationType()
     receivingPrisonId = receivingPrison()
+    events.filterNot { PropertySystemUsers.isSystem(it.eventUserId) }.maxOfOrNull { it.eventDateTime }?.let { recordUpdate(it) }
+  }
+
+  /**
+   * Move [lastUpdatedDateTime] on to [at] for a change a person made that writes no event - clearing a disposal
+   * date, say. Never moves it back, so a NOMIS change dated before the last one recorded here does not rewind it.
+   */
+  fun recordUpdate(at: LocalDateTime) {
+    if (at > lastUpdatedDateTime) lastUpdatedDateTime = at
   }
 
   private fun latestLocationEvent(): PropertyEvent? = events
