@@ -996,6 +996,66 @@ class PropertyContainerWriteServiceTest {
     verify(telemetryClient, never()).trackEvent(eq("prison-property-merge"), any(), isNull())
   }
 
+  @Test
+  fun `a staff change moves the last updated date on`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    val before = LocalDateTime.now()
+
+    service.update(existing.id!!, updateRequest(sealNumber = "SEAL2"), "A_USER")
+
+    assertThat(existing.lastUpdatedDateTime).isAfterOrEqualTo(before)
+  }
+
+  @Test
+  fun `clearing the disposal date moves the last updated date on though it writes no event`() {
+    val existing = existingContainer().apply {
+      proposedDisposalDate = LocalDate.parse("2026-06-01")
+      events.add(PropertyEvent(this, PropertyEventType.DISPOSAL_REQUIRED, LocalDateTime.parse("2026-01-01T09:00:00"), "A_USER", eventDate = LocalDate.parse("2026-06-01")))
+      refreshDerivedState()
+    }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    val before = LocalDateTime.now()
+
+    service.update(existing.id!!, updateRequest(proposedDisposalDate = null), "A_USER")
+
+    assertThat(existing.events).hasSize(2)
+    assertThat(existing.lastUpdatedDateTime).isAfterOrEqualTo(before)
+  }
+
+  @Test
+  fun `an update that changes nothing leaves the last updated date alone`() {
+    val existing = existingContainer().apply { refreshDerivedState() }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.update(existing.id!!, updateRequest(), "A_USER")
+
+    assertThat(existing.lastUpdatedDateTime).isEqualTo(LocalDateTime.parse("2026-01-01T09:00:00"))
+  }
+
+  @Test
+  fun `flagging property due for return on release leaves the last updated date alone`() {
+    val container = containerAt("LEI", "SEAL1").apply { refreshDerivedState() }
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+
+    service.prisonerReleased("A1234BC")
+
+    assertThat(container.currentStatus()).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+    assertThat(container.lastUpdatedDateTime).isEqualTo(LocalDateTime.parse("2026-01-01T09:00:00"))
+  }
+
+  @Test
+  fun `logging the arrival of property already transferred out moves the sending record's last updated date on`() {
+    stubSaveAssigningId()
+    val source = transferredOut("LEI", "OLDSEAL", toPrisonId = "MDI")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    val before = LocalDateTime.now()
+
+    service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
+
+    assertThat(source.lastUpdatedDateTime).isAfterOrEqualTo(before)
+  }
+
   private fun containerAt(prisonId: String, seal: String): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
