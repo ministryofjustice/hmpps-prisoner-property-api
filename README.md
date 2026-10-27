@@ -190,16 +190,19 @@ Two things about it are load-bearing and easy to undo by accident:
   it is returned with its full history, because a partial history reads as a misleading account of what
   happened to someone's property.
 
-The response deliberately omits internal ids and the denormalised `current*` columns, and carries prison
-codes, DPS location ids and staff usernames as raw values in dedicated attributes — the SAR report
-template resolves them to names at render time.
+The response deliberately omits internal ids and the current internal location, and carries prison codes,
+DPS location ids and staff usernames as raw values in dedicated attributes — the SAR report template resolves
+them to names at render time. The container's current position (status, where it is stored now and the prison
+it is being transferred to) is derived from its events, not read from the denormalised `current*` columns.
 
 #### The report template
 
-`src/main/resources/sar/templates/V2__sar_template.mustache` is the report the prisoner actually receives.
-V2 drops where in the establishment property was stored (the "Moved from" and "Moved to" rows), which the
-Offender SAR team decided at the data review (MAPB-768) is not to be shown. V1 stays until V2 has been signed
-off and registered in preprod and production.
+`src/main/resources/sar/templates/V3__sar_template.mustache` is the report the prisoner actually receives.
+V2 dropped where in the establishment property was stored (the "Moved from" and "Moved to" rows), which the
+Offender SAR team decided at the data review (MAPB-768) is not to be shown. V3 adds where each container is
+stored now and the prison it is being transferred to, which the Offender SAR team found missing at the report
+review (MAPB-772). Each environment's template is set in helm, and moves to V3 only once the SAR tool has V3
+registered there. V1 and V2 stay until every environment is on V3.
 It is Handlebars-flavoured mustache, and it carries no `<style>` block or `<html>` wrapper of its own — the
 SAR service prepends its own stylesheet, so the template only uses the classes that stylesheet defines
 (`title`, `summary-list`, `data-table`). Helpers such as `getPrisonName`, `getLocationNameByDpsId` and
