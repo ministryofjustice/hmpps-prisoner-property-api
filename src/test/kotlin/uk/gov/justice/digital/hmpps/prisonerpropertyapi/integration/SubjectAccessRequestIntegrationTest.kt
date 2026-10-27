@@ -104,6 +104,8 @@ class SubjectAccessRequestIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.content[0].prisonId").isEqualTo("LEI")
       .jsonPath("$.content[0].containerType").isEqualTo("Standard property")
       .jsonPath("$.content[0].status").isEqualTo("In storage")
+      .jsonPath("$.content[0].currentStorageLocationType").isEqualTo("In the establishment")
+      .jsonPath("$.content[0].receivingPrisonId").isEmpty
       .jsonPath("$.content[0].createdByUsername").isEqualTo("USER1")
       .jsonPath("$.content[0].events.length()").isEqualTo(2)
       .jsonPath("$.content[0].events[0].eventType").isEqualTo("Sealed into storage")
@@ -119,10 +121,11 @@ class SubjectAccessRequestIntegrationTest : IntegrationTestBase() {
 
   /**
    * The response is what is disclosed to the person the report is about, so the absences matter as much as
-   * the contents: internal identifiers and derived mirror columns must not appear.
+   * the contents: internal identifiers must not appear, and nor must the current storage location, which the
+   * Offender SAR team asked not to be shown (MAPB-768).
    */
   @Test
-  fun `does not expose internal identifiers or derived state`() {
+  fun `does not expose internal identifiers or the storage location`() {
     webTestClient.get().uri("$BASE_URL?prn=$PRISONER")
       .headers(setAuthorisation(roles = listOf(SAR_ROLE)))
       .exchange()
@@ -131,8 +134,6 @@ class SubjectAccessRequestIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.content[0].id").doesNotExist()
       .jsonPath("$.content[0].currentStatusValue").doesNotExist()
       .jsonPath("$.content[0].currentInternalLocationId").doesNotExist()
-      .jsonPath("$.content[0].currentStorageLocationType").doesNotExist()
-      .jsonPath("$.content[0].receivingPrisonId").doesNotExist()
       .jsonPath("$.content[0].events[0].id").doesNotExist()
       .jsonPath("$.content[0].events[0].relatedContainerId").doesNotExist()
   }

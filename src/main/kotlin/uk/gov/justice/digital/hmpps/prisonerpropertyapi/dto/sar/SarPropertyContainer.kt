@@ -13,8 +13,10 @@ import java.time.LocalDateTime
  * What is left out is as deliberate as what is included, and follows the SAR integration guiding principles:
  *  - the container's own id, and the id of any related container, are internal identifiers and are excluded;
  *    [SarPropertyEvent.relatedContainerSealNumber] carries the part a person can actually recognise;
- *  - the denormalised `current*` mirror columns on the entity are excluded - they are derived state kept for
- *    query performance, not something held about the prisoner, and repeating them would duplicate data;
+ *  - the container's current position - its status, where it is stored now and the prison it is being transferred
+ *    to - is derived from the events rather than read from the denormalised mirror columns on the entity, which
+ *    exist for query performance. The current internal location is left out altogether: the Offender SAR team
+ *    asked for storage locations not to be shown (MAPB-768), so only the kind of storage is included;
  *  - nothing owned by another service is fetched or included: no prisoner name, no movement history, no
  *    location or prison names. Codes travel raw and the template resolves them;
  *  - no NOMIS booking id, and no sync-only field such as the NOMIS property container id. That includes the
@@ -34,6 +36,12 @@ data class SarPropertyContainer(
 
   @Schema(description = "Prison holding the container", example = "LEI")
   val prisonId: String,
+
+  @Schema(description = "Where the container is stored now, if it is still held and its location is known", example = "In the national property store", nullable = true)
+  val currentStorageLocationType: String?,
+
+  @Schema(description = "Prison the container is being transferred to, while it is due to move or on its way", example = "MDI", nullable = true)
+  val receivingPrisonId: String?,
 
   @Schema(description = "The container's current status", example = "In storage")
   val status: String,
@@ -68,6 +76,8 @@ data class SarPropertyContainer(
       prisonerNumber = container.prisonerNumber,
       containerType = container.containerType.sarLabel,
       prisonId = container.prisonId,
+      currentStorageLocationType = container.currentLocationType()?.sarLabel,
+      receivingPrisonId = container.receivingPrison(),
       status = container.currentStatus().sarLabel,
       sealNumber = sarSealNumber(container.currentSealNumber),
       createdDateTime = container.createDateTime,

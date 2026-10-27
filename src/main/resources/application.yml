@@ -128,7 +128,7 @@ api:
 hmpps.sar:
   template:
     enabled: true
-    path: ${HMPPS_SAR_TEMPLATE_PATH:/sar/templates/V2__sar_template.mustache}
+    path: ${HMPPS_SAR_TEMPLATE_PATH:/sar/templates/V3__sar_template.mustache}
 
 hmpps.sqs:
   queueAdminRole: ROLE_PRISONER_PROPERTY_QUEUE_ADMIN
