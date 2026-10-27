@@ -5,8 +5,8 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain
  * the matching [PropertyEventType] recorded in history), and drives the derived [ContainerStatus]. While set,
  * the container is no longer active: its location is cleared and its seal is freed for re-use. Most outcomes
  * are terminal; [REMOVED] is reversible (a container can be reactivated), and [TRANSFERRED] records a
- * hand-off to another prison - the container leaves this prison and is reconciled against the new record
- * the receiving prison creates.
+ * hand-off to another prison - the container leaves this prison and is later received in place, preserving
+ * its id and history.
  */
 enum class RemovalOutcome(val status: ContainerStatus, val eventType: PropertyEventType) {
   DISPOSED(ContainerStatus.DISPOSED, PropertyEventType.DISPOSED),

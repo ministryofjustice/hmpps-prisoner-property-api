@@ -34,6 +34,7 @@ internal val PropertyEventType.sarLabel: String
     PropertyEventType.PRISONER_RELEASED -> "Due to be returned on release"
     PropertyEventType.DIED_IN_CUSTODY -> "Due to be returned"
     PropertyEventType.TRANSFERRED -> "Sent to another establishment"
+    PropertyEventType.RECEIVED -> "Confirmed as received from another establishment"
     PropertyEventType.RETURNED -> "Returned"
     PropertyEventType.DISPOSAL_REQUIRED -> "Due for disposal"
     PropertyEventType.DISPOSED -> "Disposed of"

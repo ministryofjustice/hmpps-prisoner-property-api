@@ -36,6 +36,15 @@ class ContainerChangedFieldsTest {
   }
 
   @Test
+  fun `receipt reports the change in holding establishment`() {
+    val container = storedContainer()
+    val before = ContainerState.of(container)
+    container.prisonId = "MDI"
+
+    assertThat(container.changedFieldsSince(before)).containsExactly("prisonId")
+  }
+
+  @Test
   fun `a removal reports the status and location it gives up, not just the outcome`() {
     val container = storedContainer()
     val before = ContainerState.of(container)

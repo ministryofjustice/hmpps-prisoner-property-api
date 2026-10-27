@@ -49,7 +49,8 @@ hmpps.sar:
     # adds only a removed count to the clean-up job and relaxes its old window column - the job's own
     # working state again; the archived container shows in the report as its REMOVED event. V22 changes
     # comments only, recording the data review's decision to leave storage locations out of the report.
-    expected-flyway-schema-version: 22
+    # V23 documents RECEIVED; the SAR response shape is unchanged and its label is decoded like other events.
+    expected-flyway-schema-version: 23
     expected-api-response:
       path: /sar/expected-api-response.json
     expected-jpa-entity-schema:
