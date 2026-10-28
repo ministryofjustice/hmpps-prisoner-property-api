@@ -50,8 +50,9 @@ hmpps.sar:
     # working state again; the archived container shows in the report as its REMOVED event. V22 changes
     # comments only, recording the data review's decision to leave storage locations out of the report.
     # V23 adds the container's last updated date for the property screens. It is not in the SAR response:
-    # the report already lists every change with its date as the container's history.
-    expected-flyway-schema-version: 23
+    # the report already lists every change with its date as the container's history. V24 changes comments
+    # only, adding the review-required status and its two event types.
+    expected-flyway-schema-version: 24
     expected-api-response:
       path: /sar/expected-api-response.json
     expected-jpa-entity-schema:

@@ -15,6 +15,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.HmppsDomainEvent
 import uk.gov.justice.hmpps.sqs.HmppsQueueService
 
@@ -78,6 +79,58 @@ class PrisonerReceivedIntegrationTest : IntegrationTestBase() {
     assertThat(publishedEventsFor(container.id).last().changedFields).containsExactly("receivingPrisonId")
   }
 
+  @Test
+  fun `an admission puts all property still held under review, until staff confirm where it is (MAPB-849)`() {
+    val here = createContainer(prisonId = "MDI", sealNumber = "SEAL1")
+    val elsewhere = createContainer(prisonId = "LEI", sealNumber = "SEAL2")
+    val lastUpdatedBefore = repository.findById(here.id).orElseThrow().lastUpdatedDateTime
+
+    publishPrisonerReceived(prisonerNumber = "A1234BC", prisonId = "MDI", reason = "ADMISSION")
+
+    await untilAsserted {
+      assertThat(listOf(here.id, elsewhere.id).map { repository.findById(it).orElseThrow().currentStatus() })
+        .containsOnly(ContainerStatus.REVIEW_REQUIRED)
+    }
+    repository.findById(here.id).orElseThrow().also {
+      assertThat(it.events.last().eventType).isEqualTo(PropertyEventType.PRISONER_ADMITTED)
+      assertThat(it.receivingPrisonId).isNull()
+      // The service did this, not a person, so it is not a change anyone made.
+      assertThat(it.lastUpdatedDateTime).isEqualTo(lastUpdatedBefore)
+    }
+    // Property held elsewhere is still due in at the prison the owner was admitted to.
+    assertThat(repository.findById(elsewhere.id).orElseThrow().receivingPrisonId).isEqualTo("MDI")
+    assertThat(publishedEventsFor(here.id).last().changedFields).containsExactly("currentStatus")
+
+    webTestClient.put().uri("/property-containers/{id}", here.id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(UpdatePropertyContainerRequest(containerType = ContainerType.STANDARD, sealNumber = "SEAL1", internalLocationId = null))
+      .exchange()
+      .expectStatus().isOk
+
+    repository.findById(here.id).orElseThrow().also {
+      assertThat(it.currentStatus()).isEqualTo(ContainerStatus.STORED)
+      assertThat(it.events.last().eventType).isEqualTo(PropertyEventType.LOCATION_CONFIRMED)
+      assertThat(it.lastUpdatedDateTime).isAfter(lastUpdatedBefore)
+    }
+  }
+
+  @Test
+  fun `the seal number cannot be changed while property requires review`() {
+    val container = createContainer(prisonId = "MDI")
+    publishPrisonerReceived(prisonerNumber = "A1234BC", prisonId = "MDI", reason = "ADMISSION")
+    await untilAsserted {
+      assertThat(repository.findById(container.id).orElseThrow().currentStatus()).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
+    }
+
+    webTestClient.put().uri("/property-containers/{id}", container.id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(UpdatePropertyContainerRequest(containerType = ContainerType.STANDARD, sealNumber = "SEAL9", internalLocationId = null))
+      .exchange()
+      .expectStatus().isBadRequest
+
+    assertThat(repository.findById(container.id).orElseThrow().currentStatus()).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
+  }
+
   private fun publishPrisonerReleased(prisonerNumber: String, reason: String) {
     val topic = hmppsQueueService.findByTopicId("domainevents")!!
     val event = HmppsDomainEvent(
@@ -127,14 +180,14 @@ class PrisonerReceivedIntegrationTest : IntegrationTestBase() {
     }
   }
 
-  private fun createContainer(prisonId: String): PropertyContainerDto = webTestClient.post().uri("/property-containers")
+  private fun createContainer(prisonId: String, sealNumber: String = "SEAL1"): PropertyContainerDto = webTestClient.post().uri("/property-containers")
     .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
     .bodyValue(
       CreatePropertyContainerRequest(
         prisonerNumber = "A1234BC",
         prisonId = prisonId,
         containerType = ContainerType.STANDARD,
-        sealNumber = "SEAL1",
+        sealNumber = sealNumber,
         internalLocationId = null,
       ),
     )
@@ -166,11 +219,11 @@ class PrisonerReceivedIntegrationTest : IntegrationTestBase() {
     ).get()
   }
 
-  private fun publishPrisonerReceived(prisonerNumber: String, prisonId: String) {
+  private fun publishPrisonerReceived(prisonerNumber: String, prisonId: String, reason: String = "TRANSFERRED") {
     val topic = hmppsQueueService.findByTopicId("domainevents")!!
     val event = HmppsDomainEvent(
       eventType = "prison-offender-events.prisoner.received",
-      additionalInformation = mapOf("nomsNumber" to prisonerNumber, "prisonId" to prisonId, "reason" to "TRANSFERRED"),
+      additionalInformation = mapOf("nomsNumber" to prisonerNumber, "prisonId" to prisonId, "reason" to reason),
     )
     topic.snsClient.publish(
       PublishRequest.builder()

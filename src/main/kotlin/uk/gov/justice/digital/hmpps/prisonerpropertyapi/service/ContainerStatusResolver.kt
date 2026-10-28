@@ -18,6 +18,7 @@ import java.time.LocalDate
  *
  * Precedence, highest first:
  *  # a removal outcome - the container has left active storage, and nothing about its owner changes that;
+ *  # a review after the owner was admitted - nobody knows where the property is until staff confirm it;
  *  # a proposed disposal date that has arisen - disposal is the more urgent instruction;
  *  # the owner's location ([OwnerLocation]) - a live container follows its owner;
  *  # the container's own base status, when the owner could not be resolved.
@@ -58,6 +59,7 @@ class ContainerStatusResolver {
     today: LocalDate,
   ): ContainerStatus = when {
     container.removalOutcome != null -> container.removalOutcome!!.status
+    baseStatus == ContainerStatus.REVIEW_REQUIRED -> ContainerStatus.REVIEW_REQUIRED
     container.isDisposalDue() -> ContainerStatus.DISPOSAL_REQUIRED
     else -> ownerLocation(prisoner, container.prisonId, today).statusFor(baseStatus)
   }
