@@ -8,13 +8,17 @@ import io.awspring.cloud.sqs.annotation.SqsListener
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerWriteService
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
 
 /**
  * Consumes HMPPS domain events from the `prisonerproperty` SQS queue, which is subscribed to the
  * shared `hmpps-domain-events` SNS topic.
  *
- * Handles `prison-offender-events.prisoner.received` (property held at a different prison is flagged due
- * for transfer out), `prison-offender-events.prisoner.released` with reason RELEASED (the prisoner's
+ * Handles `prison-offender-events.prisoner.received` (on an admission all property still held is put under
+ * review, otherwise property held at a different prison is flagged due for transfer out),
+ * `prison-offender-events.prisoner.released` with reason RELEASED (the prisoner's
  * property is flagged due for return), and `prison-offender-events.prisoner.merged` (NOMIS resolved two
  * prisoner numbers for the same person into one, so the retired number's containers move to the survivor).
  * The service is the transaction boundary; the resulting domain events are published here only after it
@@ -48,9 +52,24 @@ class PrisonerEventListener(
       ignored(event, "missing prisoner number or prisonId")
       return
     }
-    propertyContainerWriteService.prisonerReceived(prisonerNumber, newPrisonId)
-      .publishOrTrackNoChange(event, prisonerNumber)
+    val results = if (event.additionalInformation?.get("reason") == ADMISSION_REASON) {
+      propertyContainerWriteService.prisonerAdmitted(prisonerNumber, newPrisonId, event.occurredAtLocal())
+    } else {
+      propertyContainerWriteService.prisonerReceived(prisonerNumber, newPrisonId)
+    }
+    results.publishOrTrackNoChange(event, prisonerNumber)
   }
+
+  /**
+   * When the movement happened, in the same local time the service records events in. Falls back to now if the
+   * timestamp cannot be read, which only widens the admission to property recorded up to the moment we handle it.
+   */
+  private fun HmppsDomainEvent.occurredAtLocal(): LocalDateTime = runCatching { OffsetDateTime.parse(occurredAt).atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime() }
+    .recoverCatching { LocalDateTime.parse(occurredAt) }
+    .getOrElse {
+      log.warn("Could not read occurredAt {} on {}, using now", occurredAt, eventType)
+      LocalDateTime.now()
+    }
 
   /**
    * The release event fires whenever someone leaves an establishment, so the reason decides what it means for
@@ -150,6 +169,9 @@ class PrisonerEventListener(
     private const val PRISONER_RELEASED_EVENT_TYPE = "prison-offender-events.prisoner.released"
     private const val PRISONER_MERGED_EVENT_TYPE = "prison-offender-events.prisoner.merged"
     private const val RELEASED_REASON = "RELEASED"
+
+    /** The received-event reason for a new period of custody or a recall, as opposed to a transfer or a return from court or temporary absence. */
+    private const val ADMISSION_REASON = "ADMISSION"
 
     /** The released-event reason for a move between establishments, as opposed to a permanent release. */
     private const val TRANSFERRED_REASON = "TRANSFERRED"

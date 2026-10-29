@@ -97,7 +97,7 @@ This is the part worth reading twice.
 
 ### 4.1 The event types
 
-Sixteen event types, each carrying the `ContainerStatus` it implies
+Eighteen event types, each carrying the `ContainerStatus` it implies
 (`domain/PropertyEventType.kt`):
 
 | Event type | Status it carries | Notes |
@@ -109,6 +109,8 @@ Sixteen event types, each carrying the `ContainerStatus` it implies
 | `PRISONER_RECEIVED` | `DUE_FOR_TRANSFER_OUT` | The owner turned up at another prison — the property must follow. |
 | `PRISONER_TRANSFERRED_OUT` | `DUE_FOR_TRANSFER_OUT` | The owner left on transfer. Carries **no destination** — the movement does not say where they are going, so the later `PRISONER_RECEIVED` is what records it. |
 | `PRISONER_RELEASED` | `DUE_FOR_RETURN` | |
+| `PRISONER_ADMITTED` | `REVIEW_REQUIRED` | The owner was admitted (new custody or a recall) while the property was held from before. Carries the admitting prison as the destination when the property is held elsewhere. |
+| `LOCATION_CONFIRMED` | `STORED` | Staff confirmed where property under review is, by saving the manage journey or moving it. Keeps the admission's destination. |
 | `DIED_IN_CUSTODY` | `DUE_FOR_RETURN` | Released with NOMIS movement reason `DEC`. |
 | `TRANSFERRED` | `TRANSFER` | Sent to another prison. **A removal** — see 4.5. |
 | `RETURNED` | `RETURNED` | Given back. |
@@ -121,12 +123,14 @@ Sixteen event types, each carrying the `ContainerStatus` it implies
 
 ### 4.2 The precedence ladder
 
-`PropertyContainer.currentStatus()` asks three questions in this order, and stops at the first hit:
+`PropertyContainer.currentStatus()` asks four questions in this order, and stops at the first hit:
 
 1. **Is `removalOutcome` set?** → that outcome's status wins. Nothing later can un-remove a container;
    a correction such as a reseal must not resurrect a box that has left.
-2. **Is disposal due?** (`proposedDisposalDate` today or earlier, and not removed) → `DISPOSAL_REQUIRED`.
-3. **Otherwise** → the latest event's status, with two adjustments:
+2. **Does it require review?** (latest event is `PRISONER_ADMITTED`) → `REVIEW_REQUIRED`. It outranks
+   disposal, and the owner-location overlay never changes it: only staff can clear it.
+3. **Is disposal due?** (`proposedDisposalDate` today or earlier, and not removed) → `DISPOSAL_REQUIRED`.
+4. **Otherwise** → the latest event's status, with two adjustments:
    - `DISPOSAL_REQUIRED` events are **skipped** — they record a date, not a state.
    - `TRANSFER` is mapped to `STORED`. **A live container never shows `TRANSFER`**; that status only
      ever appears via the removal outcome.
@@ -146,6 +150,10 @@ stateDiagram-v2
     STORED --> STORED: SEAL_CHANGED · CONTAINER_TYPE_CHANGE · MOVED
     STORED --> DUE_FOR_TRANSFER_OUT: PRISONER_RECEIVED
     STORED --> DUE_FOR_RETURN: PRISONER_RELEASED · DIED_IN_CUSTODY
+    STORED --> REVIEW_REQUIRED: PRISONER_ADMITTED
+    DUE_FOR_RETURN --> REVIEW_REQUIRED: PRISONER_ADMITTED
+    DUE_FOR_TRANSFER_OUT --> REVIEW_REQUIRED: PRISONER_ADMITTED
+    REVIEW_REQUIRED --> STORED: LOCATION_CONFIRMED
 
     DUE_FOR_TRANSFER_OUT --> STORED: MOVED · SEAL_CHANGED
     DUE_FOR_RETURN --> STORED: MOVED · SEAL_CHANGED

@@ -17,6 +17,15 @@ enum class PropertyEventType(val status: ContainerStatus, val carriesSeal: Boole
   // container for one move, and both are true: they left, and later they were received somewhere.
   PRISONER_TRANSFERRED_OUT(ContainerStatus.DUE_FOR_TRANSFER_OUT),
   PRISONER_RELEASED(ContainerStatus.DUE_FOR_RETURN),
+
+  // The person was admitted - a new period of custody or a recall - while this property was still held from
+  // before, so it needs checking. Carries the admitting prison as toPrisonId when the property is held elsewhere,
+  // as PRISONER_RECEIVED does, so it still shows as due in at that prison.
+  PRISONER_ADMITTED(ContainerStatus.REVIEW_REQUIRED),
+
+  // A member of staff confirmed where property that required review is, which clears the review. Carries the
+  // toPrisonId of the PRISONER_ADMITTED it answers, so property held elsewhere still shows as due in there.
+  LOCATION_CONFIRMED(ContainerStatus.STORED),
   DIED_IN_CUSTODY(ContainerStatus.DUE_FOR_RETURN),
   TRANSFERRED(ContainerStatus.TRANSFER),
   RETURNED(ContainerStatus.RETURNED),
