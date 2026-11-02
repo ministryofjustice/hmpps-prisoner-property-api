@@ -686,6 +686,42 @@ class PropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `timeline puts COMBINED source events before CREATED_SEALED at the same timestamp`() {
+    hmppsAuth.stubGrantToken()
+    prisonerSearch.stubGetPrisoner("A1234BC")
+    prisonRegister.stubGetPrisons()
+    prisonApi.stubGetPrisonTimeline("A1234BC")
+    repository.deleteAll()
+
+    val combinedAt = baseTime.plusDays(1)
+    val destination = containerWithStatus("NEWSEAL") {}.apply {
+      events.clear()
+      events.add(PropertyEvent(this, PropertyEventType.CREATED_SEALED, combinedAt, "USER1", sealNumber = "NEWSEAL", toPrisonId = "LEI"))
+      refreshDerivedState()
+    }
+    val destinationId = repository.save(destination).id!!
+    listOf("SEALA", "SEALB").forEach { seal ->
+      val source = containerWithStatus(seal) {}.apply {
+        events.add(PropertyEvent(this, PropertyEventType.COMBINED, combinedAt, "USER1", eventDate = combinedAt.toLocalDate(), relatedContainerId = destinationId))
+        removalOutcome = RemovalOutcome.COMBINED
+        removalDate = combinedAt.toLocalDate()
+        refreshDerivedState()
+      }
+      repository.save(source)
+    }
+
+    webTestClient.get().uri("/property-containers/prisoner/A1234BC/events")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$[0].eventType").isEqualTo("COMBINED")
+      .jsonPath("$[1].eventType").isEqualTo("COMBINED")
+      .jsonPath("$[2].eventType").isEqualTo("CREATED_SEALED")
+      .jsonPath("$[2].containerId").isEqualTo(destinationId.toString())
+  }
+
+  @Test
   fun `timeline shows each container event's type as at that event, not the container's current type`() {
     hmppsAuth.stubGrantToken()
     prisonerSearch.stubGetPrisoner("A1234BC")
