@@ -494,7 +494,12 @@ class PropertyContainerService(
     // Newest first; at the same instant a movement sits above the container events it triggered.
     return (containerItems + movementItems + scheduledItems + dpsRolloutItems).sortedWith(
       compareByDescending<PrisonerTimelineItemDto> { it.eventDateTime }
-        .thenByDescending { it.itemType == TimelineItemType.PRISONER_MOVEMENT },
+        .thenByDescending { it.itemType == TimelineItemType.PRISONER_MOVEMENT }
+        // When containers are combined, the events have the same timestamp.
+        // The CREATED_SEALED event should appear after COMBINED events for ease of understanding.
+        .thenBy {
+          if (it.eventType == PropertyEventType.CREATED_SEALED) 1 else 0
+        },
     )
   }
 
