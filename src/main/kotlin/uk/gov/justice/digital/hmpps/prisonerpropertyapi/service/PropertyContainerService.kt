@@ -50,6 +50,20 @@ class PropertyContainerService(
   private val prisonRollFactory: PrisonRollFactory,
 ) {
 
+  @Transactional(readOnly = true)
+  fun findIncoming(prisonerNumber: String, prisonId: String, sealNumber: String): PropertyContainerDto {
+    val matches = repository.findByPrisonerNumber(prisonerNumber)
+      .filter {
+        it.canBeReceivedAt(prisonId) &&
+          it.currentSealNumber?.trim().equals(sealNumber.trim(), ignoreCase = true)
+      }
+    return when (matches.size) {
+      0 -> throw IncomingContainerNotFoundException()
+      1 -> PropertyContainerDto.from(matches.single())
+      else -> throw AmbiguousIncomingContainerException()
+    }
+  }
+
   /**
    * The property containers held for a prisoner, enriched with the prisoner, prison and location names.
    * Optionally filtered to the given [statuses] (empty = all) and sorted by when each container was last

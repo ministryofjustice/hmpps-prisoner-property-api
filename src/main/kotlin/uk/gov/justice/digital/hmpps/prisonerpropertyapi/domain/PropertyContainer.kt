@@ -106,6 +106,15 @@ class PropertyContainer(
   /** Whether the container has left active storage (disposed, returned, transferred, combined). */
   fun isRemoved(): Boolean = removalOutcome != null
 
+  fun canBeReceivedAt(receivingPrisonId: String): Boolean = !prisonId.trim().equals(receivingPrisonId.trim(), ignoreCase = true) &&
+    (
+      !isRemoved() ||
+        (
+          removalOutcome == RemovalOutcome.TRANSFERRED &&
+            latestTransferEvent()?.let { it.relatedContainerId == null } == true
+          )
+      )
+
   /**
    * Whether the container is currently removed because a legacy clean-up job closed it under the retention rule,
    * rather than because NOMIS marked it inactive: the outcome is REMOVED and the REMOVED event that put it there

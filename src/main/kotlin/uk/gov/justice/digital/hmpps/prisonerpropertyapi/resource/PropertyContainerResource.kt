@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
 import org.springdoc.core.annotations.ParameterObject
 import org.springframework.data.domain.Page
@@ -101,6 +102,39 @@ class PropertyContainerResource(
     events.forEach(domainEventPublisher::publish)
     return container
   }
+
+  @GetMapping("/incoming")
+  @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RO')")
+  @Operation(
+    summary = "Find an incoming property container by seal",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RO. Matches the prisoner's property held at another " +
+      "establishment, either still active or transferred out and not yet reconciled. Seal and establishment " +
+      "comparisons ignore case and surrounding whitespace. The recorded transfer destination need not match " +
+      "the receiving prison. Returns basic container details without enrichment. Lookup makes no changes; " +
+      "use the returned id with the receive endpoint, which revalidates eligibility under a lock.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "One matching incoming container found"),
+      ApiResponse(responseCode = "400", description = "Invalid or missing lookup parameters", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RO role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "404", description = "No match (INCOMING_CONTAINER_NOT_FOUND)", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "409", description = "Multiple matches (AMBIGUOUS_INCOMING_CONTAINER)", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun findIncomingContainer(
+    @Parameter(description = "Prisoner number owning the container", example = "A1234BC", required = true)
+    @Pattern(regexp = "([a-zA-Z][0-9]{4}[a-zA-Z]{2})", message = "Prisoner number must be in the format A1234BC")
+    @RequestParam
+    prisonerNumber: String,
+    @Parameter(description = "Receiving establishment", example = "MDI", required = true)
+    @NotBlank
+    @RequestParam
+    prisonId: String,
+    @Parameter(description = "Current or previous seal to look up", example = "5678", required = true)
+    @NotBlank
+    @RequestParam
+    sealNumber: String,
+  ): PropertyContainerDto = propertyContainerService.findIncoming(prisonerNumber, prisonId, sealNumber)
 
   @GetMapping("/prisoner/{prisonerNumber}")
   @Operation(

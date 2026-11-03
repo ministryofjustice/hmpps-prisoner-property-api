@@ -238,7 +238,7 @@ class PropertyContainerWriteService(
     if (container.prisonId.equalsPrisonId(request.receivingPrisonId)) {
       throw ValidationException("Container is already held at ${request.receivingPrisonId}")
     }
-    if (container.isRemoved() && !container.isAwaitingArrival()) {
+    if (!container.canBeReceivedAt(request.receivingPrisonId)) {
       throw ContainerAlreadyRemovedException(id, container.removalOutcome!!)
     }
 

@@ -48,6 +48,103 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
   fun cleanUp() = repository.deleteAll()
 
   @Test
+  fun `incoming lookup normalizes seals and prisons and can be followed by receipt with a changed seal`() {
+    val id = repository.save(incoming().apply { currentSealNumber = " aBc5678 " }).id!!
+    val found = lookup(seal = " ABC5678 ", prison = " mdi ")
+      .expectStatus().isOk
+      .expectBody(PropertyContainerDto::class.java).returnResult().responseBody!!
+    assertThat(found.id).isEqualTo(id)
+    assertThat(found.prisonId).isEqualTo("LEI")
+    assertThat(repository.findById(id).orElseThrow().events).hasSize(2)
+    assertNoEventsPublished()
+
+    receive(found.id, request().copy(sealNumber = "NEWSEAL")).expectStatus().isOk
+    lookup(seal = "NEWSEAL").expectStatus().isNotFound
+    assertThat(repository.count()).isEqualTo(1)
+  }
+
+  @Test
+  fun `lookup accepts stored review and in flight property including a different expected destination`() {
+    val stored = incoming().apply {
+      events.removeIf { it.eventType == PropertyEventType.PRISONER_RECEIVED }
+      refreshDerivedState()
+    }
+    val id = repository.save(stored).id!!
+    lookup().expectStatus().isOk
+    stored.events.add(PropertyEvent(stored, PropertyEventType.PRISONER_ADMITTED, CREATED.plusDays(1), "PRISONER_PROPERTY_API", toPrisonId = "MDI"))
+    stored.refreshDerivedState()
+    repository.save(stored)
+    lookup().expectStatus().isOk
+    repository.deleteById(id)
+    repository.save(incoming(transferred = true))
+    lookup(prison = "IWI").expectStatus().isOk
+  }
+
+  @Test
+  fun `lookup returns not found for unmatched seals other prisoners and property already held here`() {
+    repository.save(incoming())
+    lookup(seal = "NOT_FOUND").expectStatus().isNotFound
+      .expectBody().jsonPath("$.errorCode").isEqualTo("INCOMING_CONTAINER_NOT_FOUND")
+    lookup(prisoner = "B1234CD").expectStatus().isNotFound
+    lookup(prison = " lei ").expectStatus().isNotFound
+    assertNoEventsPublished()
+  }
+
+  @Test
+  fun `lookup reports ambiguity instead of choosing one container`() {
+    repository.save(incoming())
+    repository.save(incoming(transferred = true))
+    lookup().expectStatus().isEqualTo(409)
+      .expectBody().jsonPath("$.errorCode").isEqualTo("AMBIGUOUS_INCOMING_CONTAINER")
+    assertNoEventsPublished()
+  }
+
+  @ParameterizedTest
+  @EnumSource(value = RemovalOutcome::class, names = ["TRANSFERRED"], mode = EnumSource.Mode.EXCLUDE)
+  fun `lookup excludes removed property`(outcome: RemovalOutcome) {
+    repository.save(
+      incoming().apply {
+        removalOutcome = outcome
+        refreshDerivedState()
+      },
+    )
+    lookup().expectStatus().isNotFound
+  }
+
+  @Test
+  fun `lookup excludes reconciled transfers and receipt revalidates a stale lookup`() {
+    val source = incoming(transferred = true)
+    val id = repository.save(source).id!!
+    lookup().expectStatus().isOk
+    source.latestTransferEvent()!!.relatedContainerId = UUID.randomUUID()
+    source.refreshDerivedState()
+    repository.save(source)
+    lookup().expectStatus().isNotFound
+    receive(id).expectStatus().isEqualTo(409)
+    assertNoEventsPublished()
+  }
+
+  @Test
+  fun `lookup requires valid parameters and the read role`() {
+    lookup(prisoner = "BAD").expectStatus().isBadRequest
+    lookup(prison = " ").expectStatus().isBadRequest
+    lookup(seal = " ").expectStatus().isBadRequest
+    webTestClient.get().uri("/property-containers/incoming")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange().expectStatus().isBadRequest
+    webTestClient.get().uri("/property-containers/incoming?prisonerNumber=A1234BC&prisonId=MDI&sealNumber=5678")
+      .exchange().expectStatus().isUnauthorized
+    webTestClient.get().uri("/property-containers/incoming?prisonerNumber=A1234BC&prisonId=MDI&sealNumber=5678")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .exchange().expectStatus().isForbidden
+  }
+
+  private fun lookup(seal: String = "5678", prison: String = "MDI", prisoner: String = "A1234BC") = webTestClient.get()
+    .uri { it.path("/property-containers/incoming").queryParam("prisonerNumber", prisoner).queryParam("prisonId", prison).queryParam("sealNumber", seal).build() }
+    .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+    .exchange()
+
+  @Test
   fun `receives a due container in place with a durable receipt timeline event`() {
     val source = repository.save(incoming())
     val before = LocalDateTime.now()

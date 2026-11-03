@@ -103,6 +103,7 @@ see [Subject access requests](#subject-access-requests).
 | `GET /prison/{prisonId}/box-locations` | RO | Storage locations with space, for the "where stored" step |
 | `GET /{id}` | RO | A single container by id |
 | `GET /{id}/events` | RO | One container's history |
+| `GET /incoming?prisonerNumber=&prisonId=&sealNumber=` | RO | Look up one eligible incoming container by current or previous seal |
 | `POST /` | RW | Create a new sealed container |
 | `PUT /{id}` | RW | Update a container's type, seal, location and proposed disposal date |
 | `POST /{id}/move` | RW | Move a container to an internal location or to Branston |
@@ -121,10 +122,21 @@ time. It records a `RECEIVED` timeline event with both establishments, user, tim
 can render **Property container [Seal] confirmed as received from [sending establishment]** using the
 timeline's `sealNumber` and `fromPrisonName`.
 
+The incoming lookup returns `200` with `PropertyContainerDto`, `404` with
+`INCOMING_CONTAINER_NOT_FOUND`, or `409` with `AMBIGUOUS_INCOMING_CONTAINER`. It scopes by prisoner,
+matches seals and establishment ids ignoring case and surrounding whitespace, and accepts active property
+held elsewhere or an unreconciled transfer (even if the sender named another destination). Removed or
+reconciled property and property already held at the receiving prison are excluded. Multiple matches are
+never resolved arbitrarily. The lookup does not change the record; receipt rechecks eligibility under its lock.
+The UI should look up the previous seal when explicitly supplied, otherwise the current seal. A matching
+id goes to receipt with the current seal and location. No current-seal match goes to ordinary create;
+no explicitly entered previous-seal match must produce a field error instead of creating new property.
+The lookup needs the RO role and receipt needs RW.
+
 This is an additive, staged rollout:
 
-1. Release the receipt endpoint alongside the unchanged create endpoint, including `previousSealNumber`.
-2. Update the UI to match incoming containers and call receipt; unmatched seals continue through create.
+1. Release receipt and incoming lookup alongside the unchanged create endpoint, including `previousSealNumber`.
+2. Update the UI to look up incoming containers and call receipt; unmatched current seals continue through create.
 3. Remove the old create-time transfer reconciliation in a later API release, after the UI has migrated.
 
 The create endpoint does not automatically match current seals. Until step 2, existing UI behavior is
