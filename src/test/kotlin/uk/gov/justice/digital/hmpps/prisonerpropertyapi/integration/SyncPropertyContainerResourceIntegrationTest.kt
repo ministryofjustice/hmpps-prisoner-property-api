@@ -7,17 +7,25 @@ import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
+import org.mockito.kotlin.check
+import org.mockito.kotlin.eq
+import org.mockito.kotlin.isNull
+import org.mockito.kotlin.times
+import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.http.MediaType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.ReceiveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.NomisContainerCode
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.ContainerState
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyEventSource
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyTelemetry
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
@@ -25,6 +33,9 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.Pri
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
@@ -46,6 +57,73 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   @AfterEach
   fun cleanUp() = repository.deleteAll()
+
+  @Test
+  fun `sending prison updates and migration replays leave a received container unchanged and are tracked`() {
+    val created = upsert(request())
+    webTestClient.post().uri("/property-containers/{id}/receive", created.dpsId)
+      .headers(setAuthorisation(username = "RECEPTION", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(ReceiveContainerRequest("MDI", "RECEIVED_SEAL"))
+      .exchange().expectStatus().isOk
+    val before = repository.findById(created.dpsId).orElseThrow()
+    val state = ContainerState.of(before)
+    val lastUpdated = before.lastUpdatedDateTime
+    val history = eventRepository.findByContainerIdOrderByEventDateTimeDesc(created.dpsId)
+    val publishedCount = publishedEvents().size
+
+    for (path in listOf("upsert", "migrate")) {
+      webTestClient.post().uri("/sync/property-containers/$path")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .bodyValue(request(dpsId = created.dpsId, sealMark = "STALE_SEAL").copy(active = false))
+        .exchange().expectStatus().isOk
+        .expectBody()
+        .jsonPath("$.dpsId").isEqualTo(created.dpsId.toString())
+        .jsonPath("$.mappingType").isEqualTo("UPDATED")
+    }
+
+    val after = repository.findById(created.dpsId).orElseThrow()
+    assertThat(ContainerState.of(after)).isEqualTo(state)
+    assertThat(after.lastUpdatedDateTime).isEqualTo(lastUpdated)
+    assertThat(eventRepository.findByContainerIdOrderByEventDateTimeDesc(created.dpsId).map { it.id }).containsExactlyElementsOf(history.map { it.id })
+    assertThat(publishedEvents()).hasSize(publishedCount)
+    verify(telemetryClient, times(2)).trackEvent(
+      eq(PropertyTelemetry.SYNC_IGNORED_AFTER_RECEIPT),
+      check {
+        assertThat(it["dpsId"]).isEqualTo(created.dpsId.toString())
+        assertThat(it["nomisPropertyContainerId"]).isEqualTo("123")
+      },
+      isNull(),
+    )
+  }
+
+  @Test
+  fun `a concurrent sending prison sync cannot overwrite receipt`() {
+    val created = upsert(request())
+    Executors.newFixedThreadPool(2).use { executor ->
+      val start = CountDownLatch(1)
+      val receipt = executor.submit {
+        start.await()
+        webTestClient.post().uri("/property-containers/{id}/receive", created.dpsId)
+          .headers(setAuthorisation(username = "RECEPTION", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+          .bodyValue(ReceiveContainerRequest("MDI", "RECEIVED_SEAL"))
+          .exchange().expectStatus().isOk
+      }
+      val sync = executor.submit {
+        start.await()
+        upsert(request(dpsId = created.dpsId, sealMark = "STALE_SEAL").copy(modifyDateTime = LocalDateTime.now()))
+      }
+      start.countDown()
+      receipt.get(30, TimeUnit.SECONDS)
+      sync.get(30, TimeUnit.SECONDS)
+    }
+
+    val received = repository.findById(created.dpsId).orElseThrow()
+    assertThat(received.prisonId).isEqualTo("MDI")
+    assertThat(received.currentSealNumber).isEqualTo("RECEIVED_SEAL")
+    assertThat(received.removalOutcome).isNull()
+    assertThat(received.currentLocation()).isNull()
+    assertThat(received.events.maxBy { it.eventDateTime }.eventType).isEqualTo(PropertyEventType.RECEIVED)
+  }
 
   @Test
   fun `creates a new container from a NOMIS snapshot`() {

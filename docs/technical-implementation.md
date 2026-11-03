@@ -122,6 +122,15 @@ admission review and advances the human `lastUpdatedDateTime`. The update event 
 Receipt replaces the old storage location even when no new location is supplied. Timeline derivation
 attributes receipt to the receiving establishment and preserves the original establishment on older events,
 including legacy create events without a recorded prison.
+
+NOMIS sync/migration updates acquire the same row lock as receipt before reading the container. Once a
+container has a `RECEIVED` event, snapshots naming any establishment other than its current holding prison
+(compared ignoring case and surrounding whitespace) are ignored in full, before transformations or writes.
+They retain the existing mapping response and publish no domain event. Both sync and migration track
+`prison-property-sync-ignored-after-receipt` with the DPS/NOMIS mapping ids; logs name the incoming and
+current prisons. Snapshots naming the current prison still follow the normal sync rules, including after
+a later receipt back at an earlier establishment. This guard does not change NOMIS mappings or define
+receipt write-back; those still require agreement with the sync team.
 `PrisonerEventListener` follows the same shape — call the write service, publish afterwards.
 
 If you add a write path: append the event, mutate the container, call `refreshDerivedState()`, return a

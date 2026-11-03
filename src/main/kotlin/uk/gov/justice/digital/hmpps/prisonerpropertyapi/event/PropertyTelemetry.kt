@@ -49,6 +49,9 @@ object PropertyTelemetry {
    */
   const val SYNC_LEGACY_CLEANUP_RETAINED = "prison-property-sync-legacy-cleanup-retained"
 
+  /** A snapshot from a different prison was ignored because the container has been received in DPS. */
+  const val SYNC_IGNORED_AFTER_RECEIPT = "prison-property-sync-ignored-after-receipt"
+
   /** A clean-up start message arrived for a job already running or finished - a redelivery, deliberately ignored. */
   const val LEGACY_CLEANUP_DUPLICATE_MESSAGE = "prison-property-legacy-cleanup-duplicate-message"
 
