@@ -106,13 +106,22 @@ private fun WriteResult.publishAfterCommit(): PropertyContainerDto {
 
 | Result type | Returned by | Carries |
 | --- | --- | --- |
-| `WriteResult` | update, dispose, remove, move | `event: HmppsDomainEvent?` — **null when nothing actually changed** |
+| `WriteResult` | update, receive, dispose, remove, move | `event: HmppsDomainEvent?` — **null when nothing actually changed** |
 | `CreateResult` | create | the new container's event, plus an update for a reconciled transfer-in source |
 | `CombineResult` | combine | one created + one updated per source container |
 | `SyncResult` | sync, migrate | `event?` — **always null for `migrate`** (a bulk load must not flood the topic) |
 
 Two failure modes this prevents: publishing an event for a transaction that then rolls back, and a
 subscriber reacting so fast it reads the API before the commit lands and sees stale state.
+
+Receipt is an additive write path; create-time previous-seal reconciliation remains unchanged until the UI
+has migrated. It locks the existing container row to serialize duplicate confirmations, appends `RECEIVED`,
+reassigns its prison, clears any pending transfer removal, and refreshes derived state. That also clears
+admission review and advances the human `lastUpdatedDateTime`. The update event includes `prisonId` in
+`changedFields`. The resource publishes after commit and returns `PropertyContainerDto` directly.
+Receipt replaces the old storage location even when no new location is supplied. Timeline derivation
+attributes receipt to the receiving establishment and preserves the original establishment on older events,
+including legacy create events without a recorded prison.
 `PrisonerEventListener` follows the same shape — call the write service, publish afterwards.
 
 If you add a write path: append the event, mutate the container, call `refreshDerivedState()`, return a

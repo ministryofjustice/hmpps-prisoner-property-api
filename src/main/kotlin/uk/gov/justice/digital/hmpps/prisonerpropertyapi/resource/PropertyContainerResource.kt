@@ -43,6 +43,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerPropertySumm
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PrisonerTimelineItemDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyEventDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.ReceiveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
@@ -383,6 +384,30 @@ class PropertyContainerResource(
     ],
   )
   fun create(@Valid @RequestBody request: CreatePropertyContainerRequest): PropertyContainerDto = propertyContainerWriteService.create(request, currentUsername()).publishAllAfterCommit()
+
+  @PostMapping("/{id}/receive")
+  @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")
+  @Operation(
+    summary = "Confirm receipt of an incoming property container",
+    description = "Requires role ROLE_PRISONER_PROPERTY__RW. Receives the existing container without creating a " +
+      "new record, retaining its id and history. Accepts property held at another establishment or transferred " +
+      "out and not yet reconciled. Records a RECEIVED event with the authenticated user, confirmation time, " +
+      "sending and receiving establishments, seal and location. Returns the updated property container.",
+    responses = [
+      ApiResponse(responseCode = "200", description = "Existing property container received"),
+      ApiResponse(responseCode = "400", description = "Invalid request, location, or container already held at the receiving establishment", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RW role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "404", description = "Property container not found", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "409", description = "Container already removed or reconciled, or seal already used by another active container", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun receive(
+    @Parameter(description = "Existing incoming property container id", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d", required = true)
+    @PathVariable
+    id: UUID,
+    @Valid @RequestBody request: ReceiveContainerRequest,
+  ): PropertyContainerDto = propertyContainerWriteService.receive(id, request, currentUsername()).publishAfterCommit()
 
   @PutMapping("/{id}")
   @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RW')")

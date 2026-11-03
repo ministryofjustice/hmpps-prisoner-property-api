@@ -28,6 +28,7 @@ enum class PropertyEventType(val status: ContainerStatus, val carriesSeal: Boole
   LOCATION_CONFIRMED(ContainerStatus.STORED),
   DIED_IN_CUSTODY(ContainerStatus.DUE_FOR_RETURN),
   TRANSFERRED(ContainerStatus.TRANSFER),
+  RECEIVED(ContainerStatus.STORED, carriesSeal = true),
   RETURNED(ContainerStatus.RETURNED),
   DISPOSAL_REQUIRED(ContainerStatus.DISPOSAL_REQUIRED),
   DISPOSED(ContainerStatus.DISPOSED),

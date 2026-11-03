@@ -57,7 +57,7 @@ PropertyContainer 1 ──────< * PropertyEvent
 ```
 
 - **Container types:** `STANDARD`, `EXCESS`, `VALUABLES`, `CONFISCATED`.
-- **Event types:** `CREATED_SEALED`, `SEAL_CHANGED`, `CONTAINER_TYPE_CHANGE`, `MOVED`, `TRANSFERRED`,
+- **Event types:** `CREATED_SEALED`, `SEAL_CHANGED`, `CONTAINER_TYPE_CHANGE`, `MOVED`, `TRANSFERRED`, `RECEIVED`,
   `RETURNED`, `DISPOSAL_REQUIRED`, `DISPOSED`, `COMBINED`, `CREATED_IN_ERROR`, `REMOVED`, `REACTIVATED`,
   the movement events driven by the prisoner event listener — `PRISONER_RECEIVED`,
   `PRISONER_TRANSFERRED_OUT`, `PRISONER_RELEASED`, `DIED_IN_CUSTODY`, `PRISONER_ADMITTED` — and
@@ -69,11 +69,12 @@ PropertyContainer 1 ──────< * PropertyEvent
   `BRANSTON` (the offsite warehouse, where there is no internal location id).
 - **Removal outcomes:** when a container leaves active storage its `removalOutcome` records why —
   `DISPOSED`, `RETURNED`, `TRANSFERRED`, `COMBINED`, `CREATED_IN_ERROR` or `REMOVED` — alongside the
-  `removalDate`. `REMOVED` is the only reversible one: clearing it with a `REACTIVATED` event brings the
-  container back, which is why there is no separate archived flag.
+  `removalDate`. Clearing `REMOVED` with a `REACTIVATED` event brings the container back.
+  Confirming receipt with `RECEIVED` clears a pending `TRANSFERRED` removal at the receiving establishment.
 - **A transfer out is a removal, not a move.** Sending a container to another prison does not reassign its
-  `prisonId`; it removes the source with outcome `TRANSFERRED` and the destination gets its own record when
-  staff there log the arrival. See [architecture.md](docs/architecture.md) §6.
+  `prisonId`; it removes the source with outcome `TRANSFERRED`. The receipt endpoint receives that existing
+  record in place. The existing add-with-previous-seal flow still creates a linked receiving record.
+  See [architecture.md](docs/architecture.md) §6.
 - Internal location ids reference the `hmpps-locations-inside-prison-api` location UUID.
 - A container is only created once a seal has been entered; changing a seal keeps the same
   container id.
@@ -105,9 +106,30 @@ see [Subject access requests](#subject-access-requests).
 | `POST /` | RW | Create a new sealed container |
 | `PUT /{id}` | RW | Update a container's type, seal, location and proposed disposal date |
 | `POST /{id}/move` | RW | Move a container to an internal location or to Branston |
+| `POST /{id}/receive` | RW | Confirm receipt of an existing incoming container, retaining its id and history |
 | `POST /combine` | RW | Combine two or more source containers into a new sealed container |
 | `POST /{id}/remove` | RW | Remove from storage — returned, transferred, disposed or created in error |
 | `POST /{id}/dispose` | RW | Dispose of (destroy) a container |
+
+`POST /property-containers/{id}/receive` accepts `receivingPrisonId`, `sealNumber`, and optional
+`internalLocationId` / `locationType` (`INTERNAL` or `BRANSTON`). The API derives the sending prison,
+confirmation time and user from the existing record and authenticated token. A system token carrying the
+signed-in user's username and RW role is supported. It returns `200 OK` with `PropertyContainerDto`,
+without additional read enrichment. Receipt retains creation details, replaces the location (omitting it
+leaves the location unknown), clears pending transfer removal or review, and updates the human "last updated"
+time. It records a `RECEIVED` timeline event with both establishments, user, time, seal and location. The UI
+can render **Property container [Seal] confirmed as received from [sending establishment]** using the
+timeline's `sealNumber` and `fromPrisonName`.
+
+This is an additive, staged rollout:
+
+1. Release the receipt endpoint alongside the unchanged create endpoint, including `previousSealNumber`.
+2. Update the UI to match incoming containers and call receipt; unmatched seals continue through create.
+3. Remove the old create-time transfer reconciliation in a later API release, after the UI has migrated.
+
+The create endpoint does not automatically match current seals. Until step 2, existing UI behavior is
+unchanged. Receipt rejects already-held containers with 400, removed/reconciled containers or duplicate
+active seals with 409, unknown containers with 404, and invalid/full/wrong-establishment locations with 400.
 
 **Rollout console** (`/active-agencies`) — which prisons manage property in DPS rather than NOMIS. The
 same list is published on the actuator `/info` payload, which is how the front end reads it.
