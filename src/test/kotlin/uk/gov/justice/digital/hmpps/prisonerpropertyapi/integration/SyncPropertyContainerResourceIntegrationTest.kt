@@ -241,7 +241,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     upsert(request(dpsId = created.dpsId, active = false, expiryDate = LocalDate.parse("2026-09-15")))
 
     // NOMIS reactivates the container (active again), re-allocating its location on the same snapshot.
-    upsert(request(dpsId = created.dpsId, active = true))
+    upsert(request(dpsId = created.dpsId, active = true).copy(modifyDateTime = LocalDateTime.parse("2026-02-01T09:00:01")))
 
     getById(created.dpsId)
       .jsonPath("$.currentStatus").isEqualTo("STORED")

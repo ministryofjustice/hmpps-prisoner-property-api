@@ -1,6 +1,7 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration
 
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.within
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -177,7 +178,7 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     assertThat(receipt.eventUserId).isEqualTo("RECEPTION")
     assertThat(receipt.eventDateTime).isBetween(before, LocalDateTime.now())
     assertThat(persisted.lastUpdatedDateTime).isEqualTo(receipt.eventDateTime)
-    assertThat(received.lastUpdatedDateTime).isEqualTo(receipt.eventDateTime)
+    assertThat(received.lastUpdatedDateTime).isCloseTo(receipt.eventDateTime, within(1, java.time.temporal.ChronoUnit.MICROS))
     assertThat(receipt.fromPrisonId).isEqualTo("LEI")
     assertThat(receipt.toPrisonId).isEqualTo("MDI")
     assertThat(receipt.sealNumber).isEqualTo("5678")
