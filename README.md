@@ -232,12 +232,14 @@ it is being transferred to) is derived from its events, not read from the denorm
 
 #### The report template
 
-`src/main/resources/sar/templates/V3__sar_template.mustache` is the report the prisoner actually receives.
+`src/main/resources/sar/templates/V4__sar_template.mustache` is the report the prisoner actually receives.
 V2 dropped where in the establishment property was stored (the "Moved from" and "Moved to" rows), which the
 Offender SAR team decided at the data review (MAPB-768) is not to be shown. V3 adds where each container is
 stored now and the prison it is being transferred to, which the Offender SAR team found missing at the report
-review (MAPB-772). Each environment's template is set in helm, and moves to V3 only once the SAR tool has V3
-registered there. V1 and V2 stay until every environment is on V3.
+review (MAPB-772). V4 puts a numbered "Activity" heading above each entry in a container's history, which the
+Offender SAR team asked for so that separate entries are not read as one block (MAPB-1094). Each environment's template is
+set in helm, and moves to a new version only once the SAR tool has that version registered there. Older versions
+stay until every environment has moved off them.
 It is Handlebars-flavoured mustache, and it carries no `<style>` block or `<html>` wrapper of its own — the
 SAR service prepends its own stylesheet, so the template only uses the classes that stylesheet defines
 (`title`, `summary-list`, `data-table`). Helpers such as `getPrisonName`, `getLocationNameByDpsId` and
