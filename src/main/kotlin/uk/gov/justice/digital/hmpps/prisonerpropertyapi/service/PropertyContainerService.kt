@@ -71,7 +71,7 @@ class PropertyContainerService(
 
     val containers = all
       .filter { statuses.isEmpty() || statusResolver.effectiveStatus(it, prisoner) in statuses }
-      .sortedWith(compareBy { it.lastUpdated() })
+      .sortedWith(compareBy { it.lastUpdatedDateTime })
       .let { if (sortDirection.isDescending) it.reversed() else it }
 
     if (containers.isEmpty()) return emptyList()
@@ -494,7 +494,12 @@ class PropertyContainerService(
     // Newest first; at the same instant a movement sits above the container events it triggered.
     return (containerItems + movementItems + scheduledItems + dpsRolloutItems).sortedWith(
       compareByDescending<PrisonerTimelineItemDto> { it.eventDateTime }
-        .thenByDescending { it.itemType == TimelineItemType.PRISONER_MOVEMENT },
+        .thenByDescending { it.itemType == TimelineItemType.PRISONER_MOVEMENT }
+        // When containers are combined, the events have the same timestamp.
+        // The CREATED_SEALED event should appear after COMBINED events for ease of understanding.
+        .thenBy {
+          if (it.eventType == PropertyEventType.CREATED_SEALED) 1 else 0
+        },
     )
   }
 
@@ -620,9 +625,6 @@ class PropertyContainerService(
     ?.takeIf { !dateInToPrison.isBefore(it) }
     ?.let { PropertySystem.DPS }
     ?: PropertySystem.NOMIS
-
-  /** When the container was last touched - the most recent event, falling back to its creation time. */
-  private fun PropertyContainer.lastUpdated() = events.maxOfOrNull { it.eventDateTime } ?: createDateTime
 
   private fun Prisoner?.fullName(): String? = this?.let {
     listOfNotNull(firstName, lastName).joinToString(" ").ifBlank { null }

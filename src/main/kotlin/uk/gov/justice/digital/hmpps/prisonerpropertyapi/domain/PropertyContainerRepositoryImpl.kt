@@ -235,9 +235,13 @@ class PropertyContainerRepositoryImpl(
     return cb.or(*parts.toTypedArray())
   }
 
-  /** Still in storage and past its proposed disposal date - the time-based DISPOSAL_REQUIRED status. */
+  /**
+   * Still in storage and past its proposed disposal date - the time-based DISPOSAL_REQUIRED status. Property
+   * that requires review reads as that instead, so it is left out here.
+   */
   private fun disposalDue(cb: CriteriaBuilder, root: Root<PropertyContainer>): Predicate = cb.and(
     cb.isNull(root.get<RemovalOutcome>("removalOutcome")),
+    cb.notEqual(root.get<ContainerStatus>("currentStatusValue"), ContainerStatus.REVIEW_REQUIRED),
     cb.lessThanOrEqualTo(root.get<LocalDate>("proposedDisposalDate"), LocalDate.now()),
   )
 

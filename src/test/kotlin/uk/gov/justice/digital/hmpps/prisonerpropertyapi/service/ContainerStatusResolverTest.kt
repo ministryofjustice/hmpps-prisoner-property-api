@@ -158,6 +158,55 @@ class ContainerStatusResolverTest {
   }
 
   @Test
+  fun `property that requires review reads as that wherever its owner is`() {
+    val container = storedContainer().apply {
+      events.add(PropertyEvent(this, PropertyEventType.PRISONER_ADMITTED, LocalDateTime.parse("2026-03-01T09:00:00"), "SYS", fromPrisonId = "LEI"))
+      refreshDerivedState()
+    }
+
+    listOf(prisoner("LEI"), prisoner("MDI"), prisoner("TRN", movement = "TRN"), prisoner("OUT", movement = "REL"), null).forEach {
+      assertThat(resolver.effectiveStatus(container, it, today)).describedAs("owner %s", it?.prisonId).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
+      assertThat(resolver.effectiveStatusFromColumns(container, it, today)).describedAs("owner %s", it?.prisonId).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
+    }
+  }
+
+  @Test
+  fun `review wins over a disposal that has arisen - nobody knows where the property is`() {
+    val container = storedContainer().apply {
+      proposedDisposalDate = today.minusDays(1)
+      events.add(PropertyEvent(this, PropertyEventType.PRISONER_ADMITTED, LocalDateTime.parse("2026-03-01T09:00:00"), "SYS", fromPrisonId = "LEI"))
+      refreshDerivedState()
+    }
+
+    assertThat(container.currentStatus()).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
+    assertThat(resolver.effectiveStatus(container, prisoner("LEI"), today)).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
+    assertThat(resolver.effectiveStatusFromColumns(container, prisoner("LEI"), today)).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
+  }
+
+  @Test
+  fun `once its location is confirmed the property follows its owner again`() {
+    val container = storedContainer().apply {
+      events.add(PropertyEvent(this, PropertyEventType.PRISONER_ADMITTED, LocalDateTime.parse("2026-03-01T09:00:00"), "SYS", fromPrisonId = "LEI", toPrisonId = "MDI"))
+      events.add(PropertyEvent(this, PropertyEventType.LOCATION_CONFIRMED, LocalDateTime.parse("2026-03-02T09:00:00"), "USER1", fromPrisonId = "LEI", toPrisonId = "MDI"))
+      refreshDerivedState()
+    }
+
+    assertThat(resolver.effectiveStatus(container, prisoner("MDI"), today)).isEqualTo(ContainerStatus.DUE_FOR_TRANSFER_OUT)
+    assertThat(resolver.effectiveStatus(container, prisoner("LEI"), today)).isEqualTo(ContainerStatus.STORED)
+    assertThat(container.receivingPrisonId).isEqualTo("MDI")
+  }
+
+  @Test
+  fun `review is never in a filter's persisted-status set for a live status`() {
+    OwnerLocation.entries.forEach { location ->
+      OwnerLocation.LIVE_STATUSES.forEach { shown ->
+        assertThat(location.persistedStatusesReadingAs(shown)).doesNotContain(ContainerStatus.REVIEW_REQUIRED)
+      }
+      assertThat(location.statusFor(ContainerStatus.REVIEW_REQUIRED)).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
+    }
+  }
+
+  @Test
   fun `an unresolved owner leaves the container's own status alone`() {
     val stored = storedContainer()
     val flagged = storedContainer().apply {

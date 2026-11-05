@@ -293,6 +293,49 @@ class SyncPropertyContainerServiceTest {
     assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.REMOVED)
   }
 
+  @Test
+  fun `a container synced from NOMIS was last updated by the latest change made in NOMIS`() {
+    stubSaveAssigningId()
+
+    service.sync(request(active = false))
+
+    assertThat(captureSaved().lastUpdatedDateTime).isEqualTo(MODIFY_TIME)
+  }
+
+  @Test
+  fun `a change made in NOMIS moves the last updated date to when it was made`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.sync(request(dpsId = existing.id, sealMark = "SEAL2"))
+
+    assertThat(existing.lastUpdatedDateTime).isEqualTo(MODIFY_TIME)
+  }
+
+  @Test
+  fun `a disposal date cleared in NOMIS moves the last updated date on though it writes no event`() {
+    val existing = existingContainer().apply {
+      proposedDisposalDate = LocalDate.parse("2026-06-01")
+      refreshDerivedState()
+    }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.sync(request(dpsId = existing.id, proposedDisposalDate = null))
+
+    assertThat(existing.events).hasSize(1)
+    assertThat(existing.lastUpdatedDateTime).isEqualTo(MODIFY_TIME)
+  }
+
+  @Test
+  fun `an unchanged snapshot leaves the last updated date alone`() {
+    val existing = existingContainer().apply { refreshDerivedState() }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.sync(request(dpsId = existing.id))
+
+    assertThat(existing.lastUpdatedDateTime).isEqualTo(CREATE_TIME)
+  }
+
   private fun stubSaveAssigningId() {
     whenever(repository.save(any<PropertyContainer>())).thenAnswer { invocation ->
       (invocation.arguments[0] as PropertyContainer).apply { if (id == null) id = UUID.randomUUID() }

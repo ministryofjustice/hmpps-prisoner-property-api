@@ -142,11 +142,12 @@ interface PropertyContainerRepository :
   /**
    * How many active (not removed) containers a prison holds whose proposed disposal date has now arisen
    * (today or earlier) - i.e. are due for disposal. Disposal is time-based, so this is queried on the date
-   * rather than the denormalised status.
+   * rather than the denormalised status. Property that requires review reads as that instead, so is not counted.
    */
   @Query(
     "select count(c) from PropertyContainer c " +
       "where c.prisonId = :prisonId and c.removalOutcome is null " +
+      "and c.currentStatusValue <> uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus.REVIEW_REQUIRED " +
       "and c.proposedDisposalDate is not null and c.proposedDisposalDate <= :today",
   )
   fun countDueForDisposal(@Param("prisonId") prisonId: String, @Param("today") today: LocalDate): Long

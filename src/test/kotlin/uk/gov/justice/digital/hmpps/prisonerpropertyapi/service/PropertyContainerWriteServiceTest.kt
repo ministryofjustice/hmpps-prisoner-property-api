@@ -855,6 +855,158 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
+  fun `prisonerAdmitted puts all property still held under review, wherever it is held`() {
+    val here = containerAt("MDI", "SEAL1")
+    val elsewhere = containerAt("LEI", "SEAL2")
+    val dueForReturn = containerAt("LEI", "SEAL3").apply {
+      events.add(PropertyEvent(this, PropertyEventType.PRISONER_RELEASED, LocalDateTime.parse("2026-03-01T09:00:00"), "PRISONER_PROPERTY_API", fromPrisonId = "LEI"))
+    }
+    val removed = containerAt("LEI", "SEAL4").apply { removalOutcome = RemovalOutcome.RETURNED }
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(here, elsewhere, dueForReturn, removed))
+
+    val events = service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)
+
+    assertThat(listOf(here, elsewhere, dueForReturn)).allSatisfy {
+      assertThat(it.currentStatus()).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
+      assertThat(it.events.last().eventType).isEqualTo(PropertyEventType.PRISONER_ADMITTED)
+      assertThat(it.events.last().eventUserId).isEqualTo("PRISONER_PROPERTY_API")
+    }
+    assertThat(removed.events.map { it.eventType }).doesNotContain(PropertyEventType.PRISONER_ADMITTED)
+    assertThat(events).hasSize(3).allSatisfy { assertThat(it.eventType).isEqualTo("prison-property.container.updated") }
+  }
+
+  @Test
+  fun `prisonerAdmitted records the admitting prison as the destination only for property held elsewhere`() {
+    val here = containerAt("MDI", "SEAL1")
+    val elsewhere = containerAt("LEI", "SEAL2")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(here, elsewhere))
+
+    service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)
+
+    assertThat(here.events.last().toPrisonId).isNull()
+    assertThat(here.receivingPrisonId).isNull()
+    assertThat(elsewhere.events.last().fromPrisonId).isEqualTo("LEI")
+    assertThat(elsewhere.events.last().toPrisonId).isEqualTo("MDI")
+    assertThat(elsewhere.receivingPrisonId).isEqualTo("MDI")
+  }
+
+  @Test
+  fun `prisonerAdmitted leaves property recorded after the admission alone - it was sealed on this visit`() {
+    val sealedInReception = PropertyContainer(
+      prisonerNumber = "A1234BC",
+      prisonId = "MDI",
+      containerType = ContainerType.STANDARD,
+      createdByUserId = "A_USER",
+      createDateTime = ADMITTED_AT.plusMinutes(5),
+      currentSealNumber = "SEAL1",
+      id = UUID.randomUUID(),
+    )
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(sealedInReception))
+
+    assertThat(service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)).isEmpty()
+    assertThat(sealedInReception.events.map { it.eventType }).doesNotContain(PropertyEventType.PRISONER_ADMITTED)
+  }
+
+  @Test
+  fun `prisonerAdmitted is idempotent, and a redelivery does not undo a confirmation`() {
+    val container = containerAt("MDI", "SEAL1")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findById(container.id!!)).thenReturn(Optional.of(container))
+
+    service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)
+    assertThat(service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)).isEmpty()
+
+    service.update(container.id!!, updateRequest(internalLocationId = null), "A_USER")
+    assertThat(container.currentStatus()).isEqualTo(ContainerStatus.STORED)
+
+    assertThat(service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)).isEmpty()
+    assertThat(container.currentStatus()).isEqualTo(ContainerStatus.STORED)
+    assertThat(container.events.count { it.eventType == PropertyEventType.PRISONER_ADMITTED }).isEqualTo(1)
+  }
+
+  @Test
+  fun `a later admission puts confirmed property under review again`() {
+    val container = containerAt("MDI", "SEAL1").also { it.underReview(LocalDateTime.parse("2026-02-01T09:00:00")) }
+    container.events.add(PropertyEvent(container, PropertyEventType.LOCATION_CONFIRMED, LocalDateTime.parse("2026-02-02T09:00:00"), "A_USER"))
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+
+    assertThat(service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)).hasSize(1)
+    assertThat(container.currentStatus()).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
+  }
+
+  @Test
+  fun `movement events leave property under review alone - only staff can clear it`() {
+    val container = containerAt("LEI", "SEAL1").also { it.underReview() }
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+
+    assertThat(service.prisonerReceived("A1234BC", "MDI")).isEmpty()
+    assertThat(service.prisonerTransferredOut("A1234BC")).isEmpty()
+    assertThat(service.prisonerReleased("A1234BC")).isEmpty()
+    assertThat(service.prisonerDied("A1234BC")).isEmpty()
+    assertThat(container.currentStatus()).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
+  }
+
+  @Test
+  fun `saving property under review with no other change confirms its location`() {
+    val existing = existingContainer().also { it.underReview() }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.update(existing.id!!, updateRequest(), "A_USER")
+
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.STORED)
+    assertThat(existing.events.last().eventType).isEqualTo(PropertyEventType.LOCATION_CONFIRMED)
+    assertThat(existing.events.last().eventUserId).isEqualTo("A_USER")
+    assertThat(existing.lastUpdatedDateTime).isAfter(LocalDateTime.parse("2026-01-01T09:00:00"))
+  }
+
+  @Test
+  fun `confirming property held elsewhere keeps it due in at the admitting prison`() {
+    val existing = existingContainer().also { it.underReview(toPrisonId = "MDI") }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    assertThat(existing.receivingPrisonId).isEqualTo("MDI")
+
+    service.update(existing.id!!, updateRequest(containerType = ContainerType.VALUABLES), "A_USER")
+
+    assertThat(existing.events.map { it.eventType }.takeLast(2)).containsExactly(PropertyEventType.CONTAINER_TYPE_CHANGE, PropertyEventType.LOCATION_CONFIRMED)
+    assertThat(existing.events.last().toPrisonId).isEqualTo("MDI")
+    assertThat(existing.receivingPrisonId).isEqualTo("MDI")
+  }
+
+  @Test
+  fun `the seal number cannot be changed while property requires review`() {
+    val existing = existingContainer().also { it.underReview() }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    assertThatThrownBy { service.update(existing.id!!, updateRequest(sealNumber = "SEAL2"), "A_USER") }
+      .isInstanceOf(ValidationException::class.java)
+      .hasMessageContaining("requires review")
+    assertThat(existing.currentSealNumber).isEqualTo("SEAL1")
+  }
+
+  @Test
+  fun `moving property under review confirms its location`() {
+    val existing = existingContainer().also { it.underReview() }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
+
+    service.move(existing.id!!, MoveContainerRequest(StorageLocationType.INTERNAL, newLocation), "A_USER")
+
+    assertThat(existing.currentLocation()).isEqualTo(newLocation)
+    assertThat(existing.events.map { it.eventType }.takeLast(2)).containsExactly(PropertyEventType.MOVED, PropertyEventType.LOCATION_CONFIRMED)
+    assertThat(existing.currentStatus()).isEqualTo(ContainerStatus.STORED)
+  }
+
+  @Test
+  fun `saving property that is not under review records no confirmation`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.update(existing.id!!, updateRequest(containerType = ContainerType.VALUABLES), "A_USER")
+
+    assertThat(existing.events.map { it.eventType }).doesNotContain(PropertyEventType.LOCATION_CONFIRMED)
+  }
+
+  @Test
   fun `prisonerTransferredOut flags all active containers as due for transfer out, wherever held`() {
     val here = containerAt("LEI", "SEAL1")
     val elsewhere = containerAt("MDI", "SEAL2")
@@ -996,6 +1148,66 @@ class PropertyContainerWriteServiceTest {
     verify(telemetryClient, never()).trackEvent(eq("prison-property-merge"), any(), isNull())
   }
 
+  @Test
+  fun `a staff change moves the last updated date on`() {
+    val existing = existingContainer()
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    val before = LocalDateTime.now()
+
+    service.update(existing.id!!, updateRequest(sealNumber = "SEAL2"), "A_USER")
+
+    assertThat(existing.lastUpdatedDateTime).isAfterOrEqualTo(before)
+  }
+
+  @Test
+  fun `clearing the disposal date moves the last updated date on though it writes no event`() {
+    val existing = existingContainer().apply {
+      proposedDisposalDate = LocalDate.parse("2026-06-01")
+      events.add(PropertyEvent(this, PropertyEventType.DISPOSAL_REQUIRED, LocalDateTime.parse("2026-01-01T09:00:00"), "A_USER", eventDate = LocalDate.parse("2026-06-01")))
+      refreshDerivedState()
+    }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    val before = LocalDateTime.now()
+
+    service.update(existing.id!!, updateRequest(proposedDisposalDate = null), "A_USER")
+
+    assertThat(existing.events).hasSize(2)
+    assertThat(existing.lastUpdatedDateTime).isAfterOrEqualTo(before)
+  }
+
+  @Test
+  fun `an update that changes nothing leaves the last updated date alone`() {
+    val existing = existingContainer().apply { refreshDerivedState() }
+    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+
+    service.update(existing.id!!, updateRequest(), "A_USER")
+
+    assertThat(existing.lastUpdatedDateTime).isEqualTo(LocalDateTime.parse("2026-01-01T09:00:00"))
+  }
+
+  @Test
+  fun `flagging property due for return on release leaves the last updated date alone`() {
+    val container = containerAt("LEI", "SEAL1").apply { refreshDerivedState() }
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+
+    service.prisonerReleased("A1234BC")
+
+    assertThat(container.currentStatus()).isEqualTo(ContainerStatus.DUE_FOR_RETURN)
+    assertThat(container.lastUpdatedDateTime).isEqualTo(LocalDateTime.parse("2026-01-01T09:00:00"))
+  }
+
+  @Test
+  fun `logging the arrival of property already transferred out moves the sending record's last updated date on`() {
+    stubSaveAssigningId()
+    val source = transferredOut("LEI", "OLDSEAL", toPrisonId = "MDI")
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    val before = LocalDateTime.now()
+
+    service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
+
+    assertThat(source.lastUpdatedDateTime).isAfterOrEqualTo(before)
+  }
+
   private fun containerAt(prisonId: String, seal: String): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
@@ -1061,6 +1273,12 @@ class PropertyContainerWriteServiceTest {
     return captor.firstValue
   }
 
+  /** Puts the container under review as an admission would, without going through the service. */
+  private fun PropertyContainer.underReview(at: LocalDateTime = LocalDateTime.parse("2026-02-01T09:00:00"), toPrisonId: String? = null) {
+    events.add(PropertyEvent(this, PropertyEventType.PRISONER_ADMITTED, at, "PRISONER_PROPERTY_API", fromPrisonId = prisonId, toPrisonId = toPrisonId))
+    refreshDerivedState()
+  }
+
   private fun existingContainer(): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = "A1234BC",
@@ -1106,5 +1324,6 @@ class PropertyContainerWriteServiceTest {
 
   private companion object {
     private val LOCATION: UUID = UUID.fromString("11111111-1111-1111-1111-111111111111")
+    private val ADMITTED_AT: LocalDateTime = LocalDateTime.parse("2026-06-01T09:00:00")
   }
 }

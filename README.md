@@ -59,9 +59,10 @@ PropertyContainer 1 ──────< * PropertyEvent
 - **Container types:** `STANDARD`, `EXCESS`, `VALUABLES`, `CONFISCATED`.
 - **Event types:** `CREATED_SEALED`, `SEAL_CHANGED`, `CONTAINER_TYPE_CHANGE`, `MOVED`, `TRANSFERRED`,
   `RETURNED`, `DISPOSAL_REQUIRED`, `DISPOSED`, `COMBINED`, `CREATED_IN_ERROR`, `REMOVED`, `REACTIVATED`,
-  and the three movement events driven by the prisoner event listener — `PRISONER_RECEIVED`,
-  `PRISONER_RELEASED`, `DIED_IN_CUSTODY`.
-- **Status (derived):** `STORED`, `DUE_FOR_TRANSFER_OUT`, `DUE_FOR_RETURN`, `DISPOSAL_REQUIRED`,
+  the movement events driven by the prisoner event listener — `PRISONER_RECEIVED`,
+  `PRISONER_TRANSFERRED_OUT`, `PRISONER_RELEASED`, `DIED_IN_CUSTODY`, `PRISONER_ADMITTED` — and
+  `LOCATION_CONFIRMED`, which clears a review.
+- **Status (derived):** `STORED`, `DUE_FOR_TRANSFER_OUT`, `DUE_FOR_RETURN`, `REVIEW_REQUIRED`, `DISPOSAL_REQUIRED`,
   `DISPOSED`, `RETURNED`, `TRANSFER`, `COMBINED`, `CREATED_IN_ERROR`, `REMOVED`. The first three drive the
   establishment summary tiles and list filters.
 - **Storage location types:** `INTERNAL` (a `hmpps-locations-inside-prison-api` location UUID) or

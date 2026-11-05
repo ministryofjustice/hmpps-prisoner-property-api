@@ -43,8 +43,11 @@ enum class OwnerLocation(
    * The status a live container reads when its owner is here and its own record says [baseStatus]. The single
    * mapping from owner location to status: the person view, the establishment list, the summary counts and the
    * list's status filter all derive from this one function, so they cannot disagree.
+   *
+   * REVIEW_REQUIRED is never overridden, wherever the owner is: it stands until a member of staff confirms where
+   * the property is, and the owner's location says nothing about that.
    */
-  fun statusFor(baseStatus: ContainerStatus): ContainerStatus = if (baseStatus in preservedStatuses) baseStatus else forcedStatus ?: baseStatus
+  fun statusFor(baseStatus: ContainerStatus): ContainerStatus = if (baseStatus == ContainerStatus.REVIEW_REQUIRED || baseStatus in preservedStatuses) baseStatus else forcedStatus ?: baseStatus
 
   /**
    * The persisted statuses that read as [status] for an owner in this location - i.e. what the establishment
@@ -55,8 +58,8 @@ enum class OwnerLocation(
   companion object {
     /**
      * The statuses a container still in storage can hold, and so also the ones it can be shown as once its
-     * owner's location is applied. Anything else - the removal outcomes, and the time-based DISPOSAL_REQUIRED -
-     * is decided by the container alone, with no owner lookup needed.
+     * owner's location is applied. Anything else - the removal outcomes, REVIEW_REQUIRED and the time-based
+     * DISPOSAL_REQUIRED - is decided by the container alone, with no owner lookup needed.
      */
     val LIVE_STATUSES: Set<ContainerStatus> = setOf(
       ContainerStatus.STORED,

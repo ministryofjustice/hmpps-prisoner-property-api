@@ -201,6 +201,7 @@ class PropertyContainerWriteService(
           relatedContainerId = saved.id
           relatedContainerSealNumber = request.sealNumber
         }
+        it.recordUpdate(now)
         it.refreshDerivedState()
       } else {
         // Still held at the sending prison: mark it transferred out and linked to this new record in one step.
@@ -251,7 +252,11 @@ class PropertyContainerWriteService(
       requireValidLocation(request.internalLocationId, excludingContainerIds = setOf(id))
     }
 
+    val underReview = container.requiresReview()
     if (request.sealNumber != container.currentSealNumber) {
+      if (underReview) {
+        throw ValidationException("The seal number cannot be changed while the property requires review")
+      }
       if (repository.existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot(request.sealNumber, id)) {
         throw DuplicateSealNumberException(request.sealNumber)
       }
@@ -296,8 +301,13 @@ class PropertyContainerWriteService(
       }
     }
 
+    // Saving the manage journey is how staff confirm where property that required review is.
+    if (underReview) container.confirmLocation(now, username)
+
     container.refreshDerivedState()
     val changed = container.changedFieldsSince(before)
+    // Clearing the disposal date writes no event, so the events alone would not move the last updated date.
+    if (changed.isNotEmpty()) container.recordUpdate(now)
     val event = changed.takeIf { it.isNotEmpty() }?.let {
       PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, it)
     }
@@ -473,17 +483,21 @@ class PropertyContainerWriteService(
     }
 
     val before = ContainerState.of(container)
+    val now = LocalDateTime.now()
+    val underReview = container.requiresReview()
     container.events.add(
       PropertyEvent(
         container,
         PropertyEventType.MOVED,
-        LocalDateTime.now(),
+        now,
         username,
         fromInternalLocationId = container.currentLocation(),
         toInternalLocationId = targetId,
         toStorageLocationType = request.locationType,
       ),
     )
+    // Moving property somewhere is as good as confirming where it is.
+    if (underReview) container.confirmLocation(now, username)
     container.refreshDerivedState()
     val event = PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, container.prisonerNumber, container.changedFieldsSince(before))
     return WriteResult(PropertyContainerDto.from(container), event)
@@ -494,15 +508,17 @@ class PropertyContainerWriteService(
    * different prison is flagged due for transfer out by appending a [PropertyEventType.PRISONER_RECEIVED]
    * event (the container itself stays at the sending prison until the receiving prison adds it - only its
    * derived status and history change). Idempotent: containers already due for transfer out to this same
-   * destination are skipped, so repeated/duplicate receive events do nothing. Returns one
-   * [PropertyDomainEventType.CONTAINER_UPDATED] event per container changed, for the caller to publish
-   * after commit.
+   * destination are skipped, so repeated/duplicate receive events do nothing. Property that requires review
+   * is skipped too: only staff can clear that. Returns one [PropertyDomainEventType.CONTAINER_UPDATED] event per
+   * container changed, for the caller to publish after commit.
+   *
+   * An admission - a new period of custody or a recall - is handled by [prisonerAdmitted] instead.
    */
   @Transactional
   fun prisonerReceived(prisonerNumber: String, newPrisonId: String): List<HmppsDomainEvent> {
     val now = LocalDateTime.now()
     return repository.findByPrisonerNumber(prisonerNumber)
-      .filter { !it.isRemoved() && it.prisonId != newPrisonId && !it.isAlreadyDueForTransferOut(newPrisonId) }
+      .filter { !it.isRemoved() && !it.requiresReview() && it.prisonId != newPrisonId && !it.isAlreadyDueForTransferOut(newPrisonId) }
       .map { container ->
         val before = ContainerState.of(container)
         container.events.add(
@@ -522,6 +538,55 @@ class PropertyContainerWriteService(
 
   private fun PropertyContainer.isAlreadyDueForTransferOut(newPrisonId: String): Boolean = currentStatus() == ContainerStatus.DUE_FOR_TRANSFER_OUT &&
     events.maxByOrNull { it.eventDateTime }?.toPrisonId == newPrisonId
+
+  /**
+   * Handle a prisoner being admitted to [newPrisonId] - a new period of custody, or a recall. They have been
+   * out of custody, so every container still held for them from before, at any prison, may not be where the
+   * record says: each is put under review by appending a [PropertyEventType.PRISONER_ADMITTED] event, and stays
+   * there until staff confirm its location or remove it. Property held at another prison also carries
+   * [newPrisonId] as its destination, as [prisonerReceived] would have given it.
+   *
+   * Only property recorded before [admittedAt] counts. Reception can seal property into storage within seconds
+   * of the admission, and the event can reach us after that; property sealed on this visit is not in doubt.
+   *
+   * Idempotent: a container already under review, or already put under review for this admission and since
+   * confirmed by staff, is skipped - so a redelivered event cannot undo a confirmation. Returns one
+   * [PropertyDomainEventType.CONTAINER_UPDATED] event per container changed, for the caller to publish after
+   * commit.
+   */
+  @Transactional
+  fun prisonerAdmitted(prisonerNumber: String, newPrisonId: String, admittedAt: LocalDateTime): List<HmppsDomainEvent> {
+    val now = LocalDateTime.now()
+    return repository.findByPrisonerNumber(prisonerNumber)
+      .filter { !it.isRemoved() && !it.requiresReview() && it.createDateTime < admittedAt && !it.admittedSince(admittedAt) }
+      .map { container ->
+        val before = ContainerState.of(container)
+        container.events.add(
+          PropertyEvent(
+            container,
+            PropertyEventType.PRISONER_ADMITTED,
+            now,
+            SYSTEM_USER,
+            fromPrisonId = container.prisonId,
+            toPrisonId = newPrisonId.takeUnless { it == container.prisonId },
+          ),
+        )
+        container.refreshDerivedState()
+        PropertyContainerEventFactory.changeEvent(PropertyDomainEventType.CONTAINER_UPDATED, container.id!!, prisonerNumber, container.changedFieldsSince(before))
+      }
+  }
+
+  private fun PropertyContainer.admittedSince(admittedAt: LocalDateTime): Boolean = events.any { it.eventType == PropertyEventType.PRISONER_ADMITTED && it.eventDateTime >= admittedAt }
+
+  /**
+   * Record that staff have confirmed where this container is, which clears the review. Appended after any other
+   * change in the same save so that it is the latest event. Keeps the destination the admission recorded, so
+   * property held elsewhere still shows as due in at the admitting prison.
+   */
+  private fun PropertyContainer.confirmLocation(now: LocalDateTime, username: String) {
+    val admission = events.filter { it.eventType == PropertyEventType.PRISONER_ADMITTED }.maxByOrNull { it.eventDateTime }
+    events.add(PropertyEvent(this, PropertyEventType.LOCATION_CONFIRMED, now, username, fromPrisonId = prisonId, toPrisonId = admission?.toPrisonId))
+  }
 
   /**
    * Handle a NOMIS prisoner-number merge: everything held under [removedPrisonerNumber] moves to
@@ -616,13 +681,14 @@ class PropertyContainerWriteService(
    *
    * Idempotent on status rather than event type, like [flagDueForReturn]: a container already due for transfer
    * out is skipped, so redelivered movement events are safe no-ops. A subsequent release still overrides this,
-   * since that guard tests for due-for-return.
+   * since that guard tests for due-for-return. Property that requires review is left alone: only staff can
+   * clear that, and the owner-location overlay shows it following them once they have.
    */
   @Transactional
   fun prisonerTransferredOut(prisonerNumber: String): List<HmppsDomainEvent> {
     val now = LocalDateTime.now()
     return repository.findByPrisonerNumber(prisonerNumber)
-      .filter { !it.isRemoved() && it.baseStatus() != ContainerStatus.DUE_FOR_TRANSFER_OUT }
+      .filter { !it.isRemoved() && !it.requiresReview() && it.baseStatus() != ContainerStatus.DUE_FOR_TRANSFER_OUT }
       .map { container ->
         val before = ContainerState.of(container)
         container.events.add(
@@ -637,13 +703,13 @@ class PropertyContainerWriteService(
    * Flag every active container the prisoner still has - at any prison - as due for return by appending
    * [eventType]; the container stays where it is, only its derived status and history change. Idempotent:
    * containers already due for return are skipped, so the delayed and potentially duplicated release
-   * events are safe no-ops. Returns one [PropertyDomainEventType.CONTAINER_UPDATED] event per container
+   * events are safe no-ops. Property that requires review is left alone, as in [prisonerTransferredOut]. Returns one [PropertyDomainEventType.CONTAINER_UPDATED] event per container
    * changed, to publish after commit.
    */
   private fun flagDueForReturn(prisonerNumber: String, eventType: PropertyEventType): List<HmppsDomainEvent> {
     val now = LocalDateTime.now()
     return repository.findByPrisonerNumber(prisonerNumber)
-      .filter { !it.isRemoved() && it.baseStatus() != ContainerStatus.DUE_FOR_RETURN }
+      .filter { !it.isRemoved() && !it.requiresReview() && it.baseStatus() != ContainerStatus.DUE_FOR_RETURN }
       .map { container ->
         val before = ContainerState.of(container)
         container.events.add(
