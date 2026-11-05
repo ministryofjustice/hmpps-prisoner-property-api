@@ -436,6 +436,39 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     receive(id, request().copy(locationType = StorageLocationType.BRANSTON)).expectStatus().isBadRequest
     receive(id, request().copy(receivingPrisonId = " ")).expectStatus().isBadRequest
     receive(id, request().copy(sealNumber = " ")).expectStatus().isBadRequest
+    receive(id, request().copy(prisonerNumber = " ")).expectStatus().isBadRequest
+    receive(id, request().copy(prisonerNumber = "INVALID")).expectStatus().isBadRequest
+    assertNoEventsPublished()
+  }
+
+  @Test
+  fun `rejects receipt for another prisoner without changing the container`() {
+    val id = repository.save(incoming(transferred = true)).id!!
+    val before = repository.findById(id).orElseThrow()
+    val eventIds = before.events.map { it.id }
+
+    receive(id, request().copy(prisonerNumber = "B1234CD"))
+      .expectStatus().isBadRequest
+      .expectBody()
+      .jsonPath("$.userMessage").value<String> { assertThat(it).contains("does not belong to prisoner B1234CD") }
+
+    val after = repository.findById(id).orElseThrow()
+    assertThat(after.prisonerNumber).isEqualTo("A1234BC")
+    assertThat(after.prisonId).isEqualTo(before.prisonId)
+    assertThat(after.currentSealNumber).isEqualTo(before.currentSealNumber)
+    assertThat(after.removalOutcome).isEqualTo(before.removalOutcome)
+    assertThat(after.events.map { it.id }).containsExactlyInAnyOrderElementsOf(eventIds)
+    assertNoEventsPublished()
+  }
+
+  @Test
+  fun `requires the prisoner number in the receipt request`() {
+    val id = repository.save(incoming()).id!!
+    webTestClient.post().uri("/property-containers/{id}/receive", id)
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(mapOf("receivingPrisonId" to "MDI", "sealNumber" to "5678"))
+      .exchange().expectStatus().isBadRequest
+    assertThat(repository.findById(id).orElseThrow().prisonId).isEqualTo("LEI")
     assertNoEventsPublished()
   }
 
@@ -469,7 +502,7 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     .expectBodyList(PrisonerTimelineItemDto::class.java)
     .returnResult().responseBody!!
 
-  private fun request() = ReceiveContainerRequest(receivingPrisonId = "MDI", sealNumber = "5678", internalLocationId = LOCATION)
+  private fun request() = ReceiveContainerRequest(prisonerNumber = "A1234BC", receivingPrisonId = "MDI", sealNumber = "5678", internalLocationId = LOCATION)
 
   private fun incoming(transferred: Boolean = false): PropertyContainer {
     val container = PropertyContainer(

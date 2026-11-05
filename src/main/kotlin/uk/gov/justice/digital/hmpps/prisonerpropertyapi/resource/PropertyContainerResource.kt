@@ -30,6 +30,10 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_MESSAGE
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_REGEX
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_MESSAGE
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_REGEX
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PersonLocation
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.BoxLocationDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.BoxLocationSort
@@ -123,7 +127,7 @@ class PropertyContainerResource(
   )
   fun findIncomingContainer(
     @Parameter(description = "Prisoner number owning the container", example = "A1234BC", required = true)
-    @Pattern(regexp = "([a-zA-Z][0-9]{4}[a-zA-Z]{2})", message = "Prisoner number must be in the format A1234BC")
+    @Pattern(regexp = PRISONER_NUMBER_REGEX, message = PRISONER_NUMBER_MESSAGE)
     @RequestParam
     prisonerNumber: String,
     @Parameter(description = "Receiving establishment", example = "MDI", required = true)
@@ -153,7 +157,7 @@ class PropertyContainerResource(
   )
   fun getByPrisonerNumber(
     @Parameter(description = "Prisoner (NOMS) number", example = "A1234BC", required = true)
-    @Pattern(regexp = "([a-zA-Z][0-9]{4}[a-zA-Z]{2})", message = "Prisoner number must be in the format A1234BC")
+    @Pattern(regexp = PRISONER_NUMBER_REGEX, message = PRISONER_NUMBER_MESSAGE)
     @PathVariable
     prisonerNumber: String,
     @Parameter(description = "Only return containers with one of these statuses. Repeatable; omit for all statuses.", example = "STORED")
@@ -185,11 +189,11 @@ class PropertyContainerResource(
   )
   fun getPrisonerSummary(
     @Parameter(description = "Prisoner (NOMS) number", example = "A1234BC", required = true)
-    @Pattern(regexp = "([a-zA-Z][0-9]{4}[a-zA-Z]{2})", message = "Prisoner number must be in the format A1234BC")
+    @Pattern(regexp = PRISONER_NUMBER_REGEX, message = PRISONER_NUMBER_MESSAGE)
     @PathVariable
     prisonerNumber: String,
     @Parameter(description = "The prison the member of staff is viewing from: their active caseload", example = "LEI", required = true)
-    @Pattern(regexp = "^[A-Z]{2}I|ZZGHI$", message = "Prison id must be 3 characters ending in an I, or ZZGHI")
+    @Pattern(regexp = PRISON_ID_REGEX, message = PRISON_ID_MESSAGE)
     @RequestParam
     prisonId: String,
   ): PrisonerPropertySummaryDto = propertyContainerService.getPrisonerPropertySummary(prisonerNumber, prisonId)
@@ -217,7 +221,7 @@ class PropertyContainerResource(
   )
   fun getByPrisonId(
     @Parameter(description = "Id of the prison", example = "LEI", required = true)
-    @Pattern(regexp = "^[A-Z]{2}I|ZZGHI$", message = "Prison id must be 3 characters ending in an I, or ZZGHI")
+    @Pattern(regexp = PRISON_ID_REGEX, message = PRISON_ID_MESSAGE)
     @PathVariable
     prisonId: String,
     @Parameter(description = "Free-text search matched against prisoner number (exact), or part of a seal number or storage location. * and ? are wildcards. A term matching a seal number also finds property that has left storage.", example = "A1234BC")
@@ -297,7 +301,7 @@ class PropertyContainerResource(
   )
   fun getBoxLocations(
     @Parameter(description = "Id of the prison", example = "LEI", required = true)
-    @Pattern(regexp = "^[A-Z]{2}I|ZZGHI$", message = "Prison id must be 3 characters ending in an I, or ZZGHI")
+    @Pattern(regexp = PRISON_ID_REGEX, message = PRISON_ID_MESSAGE)
     @PathVariable
     prisonId: String,
     @Parameter(description = "Ordering of the returned boxes.", example = "NAME")
@@ -326,7 +330,7 @@ class PropertyContainerResource(
   )
   fun getPrisonSummary(
     @Parameter(description = "Id of the prison", example = "LEI", required = true)
-    @Pattern(regexp = "^[A-Z]{2}I|ZZGHI$", message = "Prison id must be 3 characters ending in an I, or ZZGHI")
+    @Pattern(regexp = PRISON_ID_REGEX, message = PRISON_ID_MESSAGE)
     @PathVariable
     prisonId: String,
   ): PrisonPropertySummaryDto = propertyContainerService.getPrisonPropertySummary(prisonId)
@@ -387,7 +391,7 @@ class PropertyContainerResource(
   )
   fun getPrisonerEvents(
     @Parameter(description = "Prisoner (NOMS) number", example = "A1234BC", required = true)
-    @Pattern(regexp = "([a-zA-Z][0-9]{4}[a-zA-Z]{2})", message = "Prisoner number must be in the format A1234BC")
+    @Pattern(regexp = PRISONER_NUMBER_REGEX, message = PRISONER_NUMBER_MESSAGE)
     @PathVariable
     prisonerNumber: String,
   ): List<PrisonerTimelineItemDto> = propertyContainerService.getPrisonerTimeline(prisonerNumber)
@@ -424,12 +428,13 @@ class PropertyContainerResource(
   @Operation(
     summary = "Confirm receipt of an incoming property container",
     description = "Requires role ROLE_PRISONER_PROPERTY__RW. Receives the existing container without creating a " +
-      "new record, retaining its id and history. Accepts property held at another establishment or transferred " +
+      "new record, retaining its id and history. The supplied prisonerNumber must match the container's owner. " +
+      "Accepts property held at another establishment or transferred " +
       "out and not yet reconciled. Records a RECEIVED event with the authenticated user, confirmation time, " +
       "sending and receiving establishments, seal and location. Returns the updated property container.",
     responses = [
       ApiResponse(responseCode = "200", description = "Existing property container received"),
-      ApiResponse(responseCode = "400", description = "Invalid request, location, or container already held at the receiving establishment", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "400", description = "Invalid request, prisoner number mismatch, invalid location, or container already held at the receiving establishment", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RW role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "404", description = "Property container not found", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),

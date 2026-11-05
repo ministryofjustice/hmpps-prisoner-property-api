@@ -86,7 +86,8 @@ class SubjectAccessRequestLibraryTest :
    * represented here is a shape of report nobody has ever looked at. Between them these four containers
    * exercise every field in the response and every helper the template calls: an internal move and an offsite
    * move to Branston, a reseal, a type change, a transfer out reconciled against another record, a container
-   * due to follow its owner to another prison, a return, and a container waiting on disposal.
+   * due to follow its owner to another prison, receipt at another establishment followed by a return, and a
+   * container waiting on disposal.
    *
    * Dates are fixed rather than relative so the approved files stay stable. The disposal date is in the past
    * for the same reason - the disposal-due status is derived by comparing it with today, so a future date
@@ -253,7 +254,7 @@ class SubjectAccessRequestLibraryTest :
     return container
   }
 
-  /** Handed back to the prisoner on release. */
+  /** Received from Moorland, then handed back to the prisoner on release. */
   private fun returnedContainer(): PropertyContainer {
     val container = PropertyContainer(
       prisonerNumber = PRISONER,
@@ -272,6 +273,19 @@ class SubjectAccessRequestLibraryTest :
         LocalDateTime.parse("2025-08-01T07:45:00"),
         "SAR_USER1",
         sealNumber = "SEAL0004",
+        toInternalLocationId = LOCATION_B,
+        toStorageLocationType = StorageLocationType.INTERNAL,
+      ),
+    )
+    container.events.add(
+      PropertyEvent(
+        container,
+        PropertyEventType.RECEIVED,
+        LocalDateTime.parse("2025-08-15T10:30:00"),
+        "SAR_USER2",
+        sealNumber = "SEAL0004",
+        fromPrisonId = "MDI",
+        toPrisonId = "LEI",
         toInternalLocationId = LOCATION_B,
         toStorageLocationType = StorageLocationType.INTERNAL,
       ),

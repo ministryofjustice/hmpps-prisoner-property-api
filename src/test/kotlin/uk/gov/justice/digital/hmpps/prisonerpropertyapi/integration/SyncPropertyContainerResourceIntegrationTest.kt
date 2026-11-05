@@ -63,7 +63,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     val created = upsert(request())
     webTestClient.post().uri("/property-containers/{id}/receive", created.dpsId)
       .headers(setAuthorisation(username = "RECEPTION", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
-      .bodyValue(ReceiveContainerRequest("MDI", "RECEIVED_SEAL"))
+      .bodyValue(ReceiveContainerRequest(prisonerNumber = "A1234BC", receivingPrisonId = "MDI", sealNumber = "RECEIVED_SEAL"))
       .exchange().expectStatus().isOk
     val before = repository.findById(created.dpsId).orElseThrow()
     val state = ContainerState.of(before)
@@ -105,7 +105,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
         start.await()
         webTestClient.post().uri("/property-containers/{id}/receive", created.dpsId)
           .headers(setAuthorisation(username = "RECEPTION", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
-          .bodyValue(ReceiveContainerRequest("MDI", "RECEIVED_SEAL"))
+          .bodyValue(ReceiveContainerRequest(prisonerNumber = "A1234BC", receivingPrisonId = "MDI", sealNumber = "RECEIVED_SEAL"))
           .exchange().expectStatus().isOk
       }
       val sync = executor.submit {
