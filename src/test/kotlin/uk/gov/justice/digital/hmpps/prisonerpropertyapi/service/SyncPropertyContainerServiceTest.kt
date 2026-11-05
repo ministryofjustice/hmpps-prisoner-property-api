@@ -2,6 +2,8 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.service
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.mock
@@ -19,6 +21,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationTy
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.NomisContainerCode
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.ContainerState
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.sync.NomisContainerTransformer
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -29,6 +32,107 @@ class SyncPropertyContainerServiceTest {
 
   private val repository = mock<PropertyContainerRepository>()
   private val service = SyncPropertyContainerService(repository, NomisContainerTransformer())
+
+  @ParameterizedTest
+  @CsvSource("true, true", "true, false", "false, true", "false, false")
+  fun `old prison snapshots cannot change a received container`(active: Boolean, migrating: Boolean) {
+    val existing = receivedContainer()
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
+    val before = ContainerState.of(existing)
+    val events = existing.events.toList()
+    val updated = existing.lastUpdatedDateTime
+    val snapshot = request(
+      dpsId = existing.id,
+      active = active,
+      sealMark = "OLD_PRISON_SEAL",
+      containerCode = NomisContainerCode.BULK,
+      internalLocationId = UUID.randomUUID(),
+      proposedDisposalDate = LocalDate.parse("2027-01-01"),
+      expiryDate = LocalDate.parse("2026-03-01"),
+    ).copy(modifyDateTime = MODIFY_TIME.plusYears(1))
+
+    val result = if (migrating) service.migrate(snapshot) else service.sync(snapshot)
+
+    assertThat(result.ignoredAfterReceipt).isTrue()
+    assertThat(result.event).isNull()
+    assertThat(result.response.dpsId).isEqualTo(existing.id)
+    assertThat(result.response.mappingType).isEqualTo(SyncMappingType.UPDATED)
+    assertThat(ContainerState.of(existing)).isEqualTo(before)
+    assertThat(existing.events).containsExactlyElementsOf(events)
+    assertThat(existing.lastUpdatedDateTime).isEqualTo(updated)
+    verify(repository, never()).save(any<PropertyContainer>())
+  }
+
+  @Test
+  fun `a current prison snapshot can still update a received container`() {
+    val existing = receivedContainer()
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
+
+    val result = service.sync(request(dpsId = existing.id, sealMark = "NEWSEAL").copy(prisonId = " mdi "))
+
+    assertThat(result.ignoredAfterReceipt).isFalse()
+    assertThat(result.event).isNotNull()
+    assertThat(existing.currentSealNumber).isEqualTo("NEWSEAL")
+  }
+
+  @Test
+  fun `after receipt back at the original prison its updates are accepted and the intermediate prison is blocked`() {
+    val existing = receivedContainer().apply {
+      events.add(
+        PropertyEvent(this, PropertyEventType.RECEIVED, MODIFY_TIME.plusDays(2), "RECEPTION", fromPrisonId = "MDI", toPrisonId = "LEI"),
+      )
+      prisonId = "LEI"
+      refreshDerivedState()
+    }
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
+
+    for (migrating in listOf(false, true)) {
+      val snapshot = request(dpsId = existing.id, sealMark = if (migrating) "RETURNED_MIGRATION" else "RETURNED_SYNC")
+        .copy(modifyDateTime = MODIFY_TIME.plusDays(3))
+      val accepted = if (migrating) service.migrate(snapshot) else service.sync(snapshot)
+
+      assertThat(accepted.ignoredAfterReceipt).isFalse()
+      assertThat(existing.currentSealNumber).isEqualTo(snapshot.sealMark)
+      val state = ContainerState.of(existing)
+      val history = existing.events.toList()
+      val lastUpdated = existing.lastUpdatedDateTime
+      val oldPrisonSnapshot = snapshot.copy(prisonId = "MDI", sealMark = "STALE_B", active = false)
+      val ignored = if (migrating) service.migrate(oldPrisonSnapshot) else service.sync(oldPrisonSnapshot)
+
+      assertThat(ignored.ignoredAfterReceipt).isTrue()
+      assertThat(ignored.event).isNull()
+      assertThat(ContainerState.of(existing)).isEqualTo(state)
+      assertThat(existing.events).containsExactlyElementsOf(history)
+      assertThat(existing.lastUpdatedDateTime).isEqualTo(lastUpdated)
+      assertThat(existing.prisonId).isEqualTo("LEI")
+      assertThat(existing.removalOutcome).isNull()
+    }
+  }
+
+  @Test
+  fun `after a further receipt snapshots from both earlier prisons are ignored`() {
+    val existing = receivedContainer().apply {
+      events.add(PropertyEvent(this, PropertyEventType.RECEIVED, MODIFY_TIME.plusDays(2), "RECEPTION", fromPrisonId = "MDI", toPrisonId = "IWI"))
+      prisonId = "IWI"
+      refreshDerivedState()
+    }
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
+
+    for (prison in listOf("LEI", "MDI")) {
+      assertThat(service.sync(request(dpsId = existing.id).copy(prisonId = prison)).ignoredAfterReceipt).isTrue()
+    }
+    verify(repository, never()).save(any<PropertyContainer>())
+  }
+
+  private fun receivedContainer() = existingContainer().apply {
+    events.add(
+      PropertyEvent(this, PropertyEventType.RECEIVED, MODIFY_TIME.plusDays(1), "RECEPTION", sealNumber = "RECEIVED_SEAL", fromPrisonId = "LEI", toPrisonId = "MDI"),
+    )
+    prisonId = "MDI"
+    currentSealNumber = "RECEIVED_SEAL"
+    containerType = ContainerType.VALUABLES
+    refreshDerivedState()
+  }
 
   @Test
   fun `create builds a sealed container and returns a created event to publish`() {
@@ -91,7 +195,7 @@ class SyncPropertyContainerServiceTest {
   @Test
   fun `deactivating an existing container removes it and reports a removed change`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.sync(request(dpsId = existing.id, active = false, expiryDate = LocalDate.parse("2026-09-15")))
 
@@ -108,7 +212,7 @@ class SyncPropertyContainerServiceTest {
     existing.removalOutcome = RemovalOutcome.REMOVED
     existing.removalDate = LocalDate.parse("2026-09-15")
     existing.refreshDerivedState()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.sync(request(dpsId = existing.id, active = true))
 
@@ -125,7 +229,7 @@ class SyncPropertyContainerServiceTest {
   @Test
   fun `an active snapshot does not reactivate a container the legacy clean-up removed`() {
     val existing = closedByLegacyCleanup()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
     val eventsBefore = existing.events.size
 
     val result = service.sync(request(dpsId = existing.id, active = true, proposedDisposalDate = LocalDate.parse("2026-12-01")))
@@ -142,7 +246,7 @@ class SyncPropertyContainerServiceTest {
   @Test
   fun `an inactive snapshot leaves the removal date the legacy clean-up recorded`() {
     val existing = closedByLegacyCleanup()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.sync(request(dpsId = existing.id, active = false, expiryDate = LocalDate.parse("2026-09-15")))
 
@@ -155,7 +259,7 @@ class SyncPropertyContainerServiceTest {
   @Test
   fun `a seal correction from NOMIS still lands on a container the legacy clean-up removed`() {
     val existing = closedByLegacyCleanup()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.sync(request(dpsId = existing.id, active = true, sealMark = "SEAL2"))
 
@@ -179,7 +283,7 @@ class SyncPropertyContainerServiceTest {
     container.removalOutcome = RemovalOutcome.REMOVED
     container.removalDate = LocalDate.parse("2026-09-15")
     container.refreshDerivedState()
-    whenever(repository.findById(container.id!!)).thenReturn(Optional.of(container))
+    whenever(repository.findByIdForUpdate(container.id!!)).thenReturn(Optional.of(container))
 
     service.sync(request(dpsId = container.id, active = true, internalLocationId = null))
 
@@ -241,7 +345,7 @@ class SyncPropertyContainerServiceTest {
   @Test
   fun `re-syncing an unchanged snapshot is a no-op with no event`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.sync(request(dpsId = existing.id))
 
@@ -254,7 +358,7 @@ class SyncPropertyContainerServiceTest {
   @Test
   fun `a changed seal appends a seal-changed event and returns an update event`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.sync(request(dpsId = existing.id, sealMark = "SEAL2"))
 
@@ -267,7 +371,7 @@ class SyncPropertyContainerServiceTest {
   @Test
   fun `a changed location appends a move event`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
     val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
 
     service.sync(request(dpsId = existing.id, internalLocationId = newLocation))
@@ -282,7 +386,7 @@ class SyncPropertyContainerServiceTest {
   @Test
   fun `removing an existing container appends a removed event and clears the location`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.sync(request(dpsId = existing.id, active = false, expiryDate = LocalDate.parse("2026-09-15")))
 
@@ -305,7 +409,7 @@ class SyncPropertyContainerServiceTest {
   @Test
   fun `a change made in NOMIS moves the last updated date to when it was made`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.sync(request(dpsId = existing.id, sealMark = "SEAL2"))
 
@@ -318,7 +422,7 @@ class SyncPropertyContainerServiceTest {
       proposedDisposalDate = LocalDate.parse("2026-06-01")
       refreshDerivedState()
     }
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.sync(request(dpsId = existing.id, proposedDisposalDate = null))
 
@@ -329,7 +433,7 @@ class SyncPropertyContainerServiceTest {
   @Test
   fun `an unchanged snapshot leaves the last updated date alone`() {
     val existing = existingContainer().apply { refreshDerivedState() }
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.sync(request(dpsId = existing.id))
 

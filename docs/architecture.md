@@ -236,10 +236,10 @@ The result types carry the events out of the transaction:
 
 | Type | Returned by | Events |
 | --- | --- | --- |
-| `WriteResult` | update, dispose, remove, move | `event: HmppsDomainEvent?` — **null when nothing changed** (e.g. a move to the same location) |
+| `WriteResult` | update, receive, dispose, remove, move | `event: HmppsDomainEvent?` — **null when nothing changed** (e.g. a move to the same location) |
 | `CreateResult` | create | the new container, plus an update for a reconciled transfer-in source |
 | `CombineResult` | combine | one created (the new container) + one updated per source |
-| `SyncResult` | sync, migrate | `event?` — always null for `migrate`; null for a sync that changed nothing |
+| `SyncResult` | sync, migrate | `event?` — always null for `migrate`; null for an unchanged or ignored snapshot. Flags identify legacy-cleanup retention and snapshots ignored after receipt for telemetry |
 
 The inbound listener follows the same shape: it calls the write service, then publishes the returned
 events outside that transaction.
@@ -346,6 +346,8 @@ fixed set, ordered as listed here:
 
 | Field | Means |
 |---|---|
+| `prisonerNumber` | the container's owner number changed following a prisoner merge |
+| `prisonId` | the holding establishment changed when the existing container was received |
 | `sealNumber` | the seal changed |
 | `containerType` | standard/excess/valuables/confiscated changed |
 | `location` | the internal location *or* the storage location type changed — one entry covers both, because a subscriber sees one location either way |
@@ -363,11 +365,12 @@ filters on `changedFields` must therefore match on the field it cares about, not
 | Write | Events |
 |---|---|
 | create | one `.created` for the new container — plus one `.updated` for the source when a transfer-in was reconciled |
+| receive | one `.updated` for the existing container, including `prisonId` in `changedFields`; no new container is created |
 | update / move / dispose / remove | one `.updated` — or **none**, when the write changed nothing observable |
 | combine | one `.created` for the new container **plus one `.updated` per source**, each naming its own `dpsId` |
 | prisoner received / released / died | one `.updated` per container actually changed; none for containers already in that state |
 | prisoner merged | one `.updated` per container moved, `changedFields: ["prisonerNumber"]` and `removedNomsNumber` in `additionalInformation`; none when the retired number held nothing |
-| sync upsert | one `.created` or `.updated`, `source: NOMIS`; none when the snapshot changed nothing |
+| sync upsert | one `.created` or `.updated`, `source: NOMIS`; none when the snapshot changed nothing or was ignored after receipt |
 | sync migrate | **none, ever** — bulk replay must not flood the topic |
 | legacy clean-up | one `.updated` per container closed, `source: DPS`, published after that container's own commit; none for items skipped or failed |
 
@@ -453,8 +456,9 @@ Five rules worth carrying in your head:
 
 1. **`removalOutcome` wins.** Once set, the container is removed: `currentStatus()` reports the removal
    status regardless of events, and `currentLocation()` returns null — it isn't anywhere any more.
-   `REMOVED` is the odd one out among the outcomes: it is *reversible*, and clearing it alongside a
-   `REACTIVATED` event brings the container back. That is why there is no `archived` flag; there was one,
+   Clearing `REMOVED` alongside a `REACTIVATED` event brings the container back. Receipt also clears a
+   pending `TRANSFERRED` removal alongside a `RECEIVED` event at the receiving establishment.
+   There is no `archived` flag; there was one,
    and `V14__drop_archived.sql` dropped it in favour of this.
 2. **Disposal is time-based.** `isDisposalDue()` compares `proposedDisposalDate` to today, so a
    container becomes overdue with no write happening. This is why it is never denormalised.
@@ -466,8 +470,9 @@ Five rules worth carrying in your head:
 4. **A transfer out is a removal, not a move.** This is the most counter-intuitive thing in the domain and
    the easiest to get wrong. Sending a container to another prison does **not** reassign its `prisonId`.
    It removes the source container with outcome `TRANSFERRED` and exposes `receivingPrisonId`; the
-   destination gets a *separate* record when receiving staff log the arrival. The two are reconciled by
-   `relatedContainerId` when the seals are matched, in either order. A live container therefore never
+   new receipt endpoint receives this record in place, retaining its id and appending `RECEIVED`.
+   The existing create-with-previous-seal flow still creates a *separate* receiving record, reconciled by
+   `relatedContainerId`; it remains available until the UI has migrated to receipt. A live container never
    shows `TRANSFER` — `baseEventStatus()` deliberately steps over it — and `currentLocation()` returns null
    after a transfer so the receiving prison assigns its own.
 5. **Some questions the columns cannot answer at all**, because they depend on where a container's *owner*
@@ -476,6 +481,68 @@ Five rules worth carrying in your head:
 
 `ActiveAgency` is separate: one row per prison, recording whether that prison is live on DPS and when it
 switched. It gates writes in the UI and labels history in the API.
+
+### Incoming-container lookup and receipt
+
+The UI can identify an arriving container without duplicating seal-matching rules:
+
+1. Call `GET /property-containers/incoming?prisonerNumber=&prisonId=&sealNumber=` with the receiving
+   establishment and the previous seal if explicitly supplied, otherwise the current seal.
+2. On a match, send the returned id to `POST /property-containers/{id}/receive`, with `receivingPrisonId`,
+   the current `sealNumber`, and optional `internalLocationId` / `locationType`.
+3. If the current seal has no match, continue through ordinary create. If an explicitly entered previous
+   seal has no match, show a field error rather than silently creating new property. An ambiguous match
+   must be resolved rather than choosing an arbitrary container.
+
+Lookup requires `ROLE_PRISONER_PROPERTY__RO` and returns `200` with the basic `PropertyContainerDto`,
+`404` with `INCOMING_CONTAINER_NOT_FOUND`, or `409` with `AMBIGUOUS_INCOMING_CONTAINER`. It scopes candidates
+to the prisoner and compares seals and establishment ids ignoring case and surrounding whitespace.
+`PropertyContainer.canBeReceivedAt` is shared with receipt: the container must be held at another
+establishment and either be active, or have a `TRANSFERRED` removal with an existing transfer event whose
+`relatedContainerId` is null. Other removals and reconciled transfers are excluded. The sender's expected
+destination need not match the receiving establishment; staff confirming the physical arrival are the
+evidence. Active property can qualify even if the sender never flagged a transfer.
+
+Lookup is read-only and does not reserve anything. Receipt requires `ROLE_PRISONER_PROPERTY__RW`, loads
+the current record with `findByIdForUpdate` (`PESSIMISTIC_WRITE`), and revalidates eligibility while holding
+the row lock until commit. Two confirmations for the same receiving prison cannot both succeed: the second
+waits, then sees the updated holding prison and receives `400`. A container removed or reconciled since
+lookup receives `409`; an unknown id receives `404`. Receipt also rechecks seal uniqueness and location
+validity, capacity and membership of the receiving establishment.
+
+Receipt retains the container id, creation metadata and existing history. It records `RECEIVED` with the
+authenticated user, confirmation time, sending and receiving establishments, current seal and destination
+location. It changes `prisonId`, clears any pending transfer removal and refreshes derived state, clearing
+admission review and advancing the human `lastUpdatedDateTime`. Existing disposal dates remain effective.
+The supplied location replaces the sending location; omitting it leaves the new location unknown.
+`BRANSTON` has no internal location and cannot be supplied alongside an internal location id.
+
+The resource publishes the update after commit and returns `200` with `PropertyContainerDto` directly,
+without read enrichment. Individual container history and the prisoner timeline retain events across
+establishments. Earlier events keep their original establishment and location, including legacy create
+events with no recorded prison. Receipt is attributed to the receiving establishment. 
+
+### NOMIS updates after receipt
+
+Receipt moves the DPS record but does not itself change its old NOMIS mapping. To stop sending-prison
+edits from overwriting the received property, sync and migration updates acquire the same row lock as
+receipt before reading the container. `SyncPropertyContainerService.update` ignores the entire snapshot
+before transformations or mutations when:
+
+- the container has any `RECEIVED` event; and
+- the snapshot's prison differs from its current `prisonId`, ignoring case and surrounding whitespace.
+
+An ignored snapshot changes no fields, history, derived state or last-updated time, and publishes no domain
+event. The response retains the DPS/NOMIS ids and `UPDATED` mapping type; it does not introduce a new
+mapping status. Logs include the incoming and current prisons, and both sync and migration track
+`prison-property-sync-ignored-after-receipt` with the mapping ids.
+
+The guard follows the **current** establishment, not a blacklist of previous establishments. After
+A → B → A, A's snapshots are accepted and B's are blocked; after another receipt at B, the reverse applies.
+Multiple `RECEIVED` events do not change that rule. A limitation remains: a delayed snapshot from a
+previous stay at the now-current establishment is also accepted. This guard does not identify a holding
+period or distinguish old and new NOMIS mappings at the same establishment.
+
 
 ### 6a. Owner location — the status you see is not the status in the column
 

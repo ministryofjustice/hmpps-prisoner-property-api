@@ -50,6 +50,20 @@ class PropertyContainerService(
   private val prisonRollFactory: PrisonRollFactory,
 ) {
 
+  @Transactional(readOnly = true)
+  fun findIncoming(prisonerNumber: String, prisonId: String, sealNumber: String): PropertyContainerDto {
+    val matches = repository.findByPrisonerNumber(prisonerNumber)
+      .filter {
+        it.canBeReceivedAt(prisonId) &&
+          it.currentSealNumber?.trim().equals(sealNumber.trim(), ignoreCase = true)
+      }
+    return when (matches.size) {
+      0 -> throw IncomingContainerNotFoundException()
+      1 -> PropertyContainerDto.from(matches.single())
+      else -> throw AmbiguousIncomingContainerException()
+    }
+  }
+
   /**
    * The property containers held for a prisoner, enriched with the prisoner, prison and location names.
    * Optionally filtered to the given [statuses] (empty = all) and sorted by when each container was last
@@ -431,12 +445,14 @@ class PropertyContainerService(
       // The prison holding the container as at each event, walked forward in time (like sealAsOfEvent): a
       // CREATED_SEALED records the origin (toPrisonId) and each TRANSFERRED moves it on, so a historical event
       // keeps the establishment it actually happened at even after a transfer reassigns the container's current
-      // prisonId. Falls back to the current prisonId only when no event carries a prison (never-transferred or
-      // legacy data, where current == origin).
-      var heldPrisonId: String? = null
+      // prisonId. A legacy create may carry no prison, so seed the origin from the earliest known prison,
+      // including the sending prison on its first receipt, rather than relabelling old events after receipt.
+      var heldPrisonId: String? = container.events.sortedBy { it.eventDateTime }.firstNotNullOfOrNull {
+        if (it.eventType == PropertyEventType.CREATED_SEALED) it.toPrisonId else it.fromPrisonId
+      }
       container.events.sortedBy { it.eventDateTime }.map { event ->
         event.sealNumber?.let { sealAsOfEvent = it }
-        (if (event.eventType == PropertyEventType.CREATED_SEALED) event.toPrisonId else event.fromPrisonId)?.let { heldPrisonId = it }
+        (if (event.eventType == PropertyEventType.CREATED_SEALED || event.eventType == PropertyEventType.RECEIVED) event.toPrisonId else event.fromPrisonId)?.let { heldPrisonId = it }
         val actingPrisonId = heldPrisonId ?: container.prisonId
         val actingEstablishmentName = prisonNames[actingPrisonId]
         propertyAnchors += PropertyAnchor(actingPrisonId, event.eventDateTime)

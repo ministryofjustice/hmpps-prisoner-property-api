@@ -106,6 +106,15 @@ class PropertyContainer(
   /** Whether the container has left active storage (disposed, returned, transferred, combined). */
   fun isRemoved(): Boolean = removalOutcome != null
 
+  fun canBeReceivedAt(receivingPrisonId: String): Boolean = !prisonId.trim().equals(receivingPrisonId.trim(), ignoreCase = true) &&
+    (
+      !isRemoved() ||
+        (
+          removalOutcome == RemovalOutcome.TRANSFERRED &&
+            latestTransferEvent()?.let { it.relatedContainerId == null } == true
+          )
+      )
+
   /**
    * Whether the container is currently removed because a legacy clean-up job closed it under the retention rule,
    * rather than because NOMIS marked it inactive: the outcome is REMOVED and the REMOVED event that put it there
@@ -133,7 +142,8 @@ class PropertyContainer(
    * disposal because nobody knows where the property is; otherwise DISPOSAL_REQUIRED once the proposed
    * disposal date has arisen (see [isDisposalDue]), else it derives from the most recent event (defaulting
    * to STORED before any event). A live (non-removed) container never shows TRANSFER;
-   * a transfer-out removes the container (outcome TRANSFERRED) and the receiving prison holds a separate record.
+   * a transfer-out removes the container (outcome TRANSFERRED). Receipt can restore the same record at the
+   * receiving prison; the previous-seal create flow instead links it to a separate receiving record.
    */
   fun currentStatus(): ContainerStatus = when {
     removalOutcome != null -> removalOutcome!!.status

@@ -19,6 +19,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyContai
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.DisposeContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.MoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.ReceiveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.RemoveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.ContainerState
@@ -60,10 +61,13 @@ class PropertyContainerWriteService(
    * combined container. The capacity check is a best-effort backstop - the picker only offers locations with
    * space, but concurrent writes could still race, so the final guard is here.
    */
-  private fun requireValidLocation(internalLocationId: UUID?, excludingContainerIds: Set<UUID> = emptySet()) {
+  private fun requireValidLocation(internalLocationId: UUID?, excludingContainerIds: Set<UUID> = emptySet(), prisonId: String? = null) {
     if (internalLocationId == null) return
     val location = locationsClient.getPropertyLocation(internalLocationId)
       ?: throw InvalidLocationException(internalLocationId, "is not a property storage location")
+    if (prisonId != null && !location.prisonId.equalsPrisonId(prisonId)) {
+      throw InvalidLocationException(internalLocationId, "is not at the receiving establishment $prisonId")
+    }
     val used = repository.countContainersInLocation(internalLocationId, excludingContainerIds.takeIf { it.isNotEmpty() })
     if (used >= (location.capacity ?: 0)) {
       throw InvalidLocationException(internalLocationId, "is full")
@@ -226,6 +230,53 @@ class PropertyContainerWriteService(
     }
 
     return CreateResult(PropertyContainerDto.from(saved), events)
+  }
+
+  @Transactional
+  fun receive(id: UUID, request: ReceiveContainerRequest, username: String): WriteResult {
+    val container = repository.findByIdForUpdate(id).orElseThrow { PropertyContainerNotFoundException(id) }
+    if (!container.prisonerNumber.equals(request.prisonerNumber, ignoreCase = true)) {
+      throw ValidationException("Container does not belong to prisoner ${request.prisonerNumber}")
+    }
+    if (container.prisonId.equalsPrisonId(request.receivingPrisonId)) {
+      throw ValidationException("Container is already held at ${request.receivingPrisonId}")
+    }
+    if (!container.canBeReceivedAt(request.receivingPrisonId)) {
+      throw ContainerAlreadyRemovedException(id, container.removalOutcome!!)
+    }
+
+    val locationType = resolveLocationType(request.locationType, request.internalLocationId)
+    requireValidLocation(request.internalLocationId, excludingContainerIds = setOf(id), prisonId = request.receivingPrisonId)
+    if (repository.existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot(request.sealNumber, id)) {
+      throw DuplicateSealNumberException(request.sealNumber)
+    }
+
+    val before = ContainerState.of(container)
+    container.events.add(
+      PropertyEvent(
+        container = container,
+        eventType = PropertyEventType.RECEIVED,
+        eventDateTime = LocalDateTime.now(),
+        eventUserId = username,
+        sealNumber = request.sealNumber,
+        fromPrisonId = container.prisonId,
+        toPrisonId = request.receivingPrisonId,
+        toInternalLocationId = request.internalLocationId,
+        toStorageLocationType = locationType,
+      ),
+    )
+    container.prisonId = request.receivingPrisonId
+    container.currentSealNumber = request.sealNumber
+    container.removalOutcome = null
+    container.removalDate = null
+    container.refreshDerivedState()
+    val event = PropertyContainerEventFactory.changeEvent(
+      PropertyDomainEventType.CONTAINER_UPDATED,
+      id,
+      container.prisonerNumber,
+      container.changedFieldsSince(before),
+    )
+    return WriteResult(PropertyContainerDto.from(container), event)
   }
 
   @Transactional
@@ -730,11 +781,11 @@ class PropertyContainerWriteService(
   }
 
   /**
-   * Transfer a container out to the prisoner's new establishment (two-record model). The container is
+   * Transfer a container out to the prisoner's new establishment. The container is
    * marked removed with outcome [RemovalOutcome.TRANSFERRED] at the sending prison - its prison is NOT
    * reassigned - so it leaves the sending list and shows in the person's returned/transferred history.
-   * The receiving prison creates the destination record when it logs the arrival (add + seal-match, see
-   * [create]), which reconciles this one by linking it. Until then the TRANSFERRED event carries no
+   * The receiving prison either receives this record in place ([receive]) or creates a linked destination
+   * record (add + previous seal-match, see [create]). Until then the TRANSFERRED event carries no
    * related container, so this container still surfaces as awaiting at [toPrisonId] (see
    * [PropertyContainer.receivingPrison]).
    */
