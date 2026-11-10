@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import jakarta.validation.constraints.Pattern
 import org.springdoc.core.annotations.ParameterObject
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
@@ -22,6 +23,8 @@ import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_MESSAGE
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_REGEX
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
@@ -171,9 +174,11 @@ class SyncPropertyContainerResource(
   )
   fun moveToPrisoner(
     @Parameter(description = "Source prisoner", example = "A1234FG", required = true)
+    @Pattern(regexp = PRISONER_NUMBER_REGEX, message = PRISONER_NUMBER_MESSAGE)
     @PathVariable
     source: String,
     @Parameter(description = "Target prisoner", example = "A1234FG", required = true)
+    @Pattern(regexp = PRISONER_NUMBER_REGEX, message = PRISONER_NUMBER_MESSAGE)
     @PathVariable
     target: String,
     @RequestBody

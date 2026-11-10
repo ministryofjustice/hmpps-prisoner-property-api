@@ -93,6 +93,11 @@ class ActiveAgenciesResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `rejects an invalid agency id`() {
+    setActive("mdi", true).expectStatus().isBadRequest
+  }
+
+  @Test
   fun `deactivating an agency removes it from the active list but leaves the others`() {
     setActive("MDI", true).expectStatus().isOk
     setActive("LEI", true).expectStatus().isOk

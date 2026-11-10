@@ -132,6 +132,7 @@ class PropertyContainerResource(
     prisonerNumber: String,
     @Parameter(description = "Receiving establishment", example = "MDI", required = true)
     @NotBlank
+    @Pattern(regexp = PRISON_ID_REGEX, message = PRISON_ID_MESSAGE)
     @RequestParam
     prisonId: String,
     @Parameter(description = "Current or previous seal to look up", example = "5678", required = true)
@@ -228,6 +229,7 @@ class PropertyContainerResource(
     @RequestParam(required = false)
     query: String?,
     @Parameter(description = "Filter to a single prisoner number", example = "A1234BC")
+    @Pattern(regexp = PRISONER_NUMBER_REGEX, message = PRISONER_NUMBER_MESSAGE)
     @RequestParam(required = false)
     prisonerNumber: String?,
     @Parameter(description = "Filter to a single seal number, matched in full, including property that has left storage. Use query for a partial seal search.", example = "SN8842K1")

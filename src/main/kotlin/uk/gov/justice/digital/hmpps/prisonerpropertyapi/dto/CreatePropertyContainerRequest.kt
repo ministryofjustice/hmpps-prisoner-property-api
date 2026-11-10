@@ -4,6 +4,8 @@ import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_MESSAGE
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_REGEX
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_MESSAGE
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_REGEX
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
@@ -18,6 +20,7 @@ data class CreatePropertyContainerRequest(
 
   @Schema(description = "Id of the prison holding the container", example = "LEI", requiredMode = Schema.RequiredMode.REQUIRED)
   @field:NotBlank
+  @field:Pattern(regexp = PRISON_ID_REGEX, message = PRISON_ID_MESSAGE)
   val prisonId: String,
 
   @Schema(description = "Type of container", example = "STANDARD", requiredMode = Schema.RequiredMode.REQUIRED)

@@ -184,6 +184,24 @@ class LegacyCleanupResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `rejects an invalid agency id for cleanup operations`() {
+    webTestClient.get().uri("/active-agencies/mdi/cleanup/preview")
+      .headers(admin)
+      .exchange()
+      .expectStatus().isBadRequest
+
+    webTestClient.post().uri("/active-agencies/mdi/cleanup")
+      .headers(admin)
+      .exchange()
+      .expectStatus().isBadRequest
+
+    webTestClient.get().uri("/active-agencies/mdi/cleanup")
+      .headers(admin)
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
+  @Test
   fun `a window sent by an older client is ignored - the rule is fixed`() {
     seedLeeds()
 

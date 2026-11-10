@@ -142,6 +142,17 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `rejects an invalid prison id in a NOMIS snapshot`() {
+    webTestClient.post().uri("/sync/property-containers/upsert")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+      .bodyValue(request().copy(prisonId = "mdi"))
+      .exchange()
+      .expectStatus().isBadRequest
+
+    assertThat(repository.count()).isZero()
+  }
+
+  @Test
   fun `re-syncing an unchanged snapshot adds no events and publishes nothing`() {
     val created = upsert(request())
 
@@ -427,6 +438,22 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   @Nested
   inner class Move {
+    @Test
+    fun `rejects invalid source and target prisoner numbers`() {
+      for (path in listOf(
+        "/sync/property-containers/move/from/bad/to/A2222BB",
+        "/sync/property-containers/move/from/A0001AA/to/bad",
+      )) {
+        webTestClient.put().uri(path)
+          .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+          .bodyValue(listOf(UUID.randomUUID()))
+          .exchange()
+          .expectStatus().isBadRequest
+      }
+
+      assertThat(repository.count()).isZero()
+    }
+
     @Test
     fun `moves containers to the target prisoner`() {
       val p1 = upsert(request(prisonerNumber = "A0001AA")).dpsId

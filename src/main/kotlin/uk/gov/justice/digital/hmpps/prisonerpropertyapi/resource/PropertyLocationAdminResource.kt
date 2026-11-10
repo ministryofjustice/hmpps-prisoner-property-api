@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import jakarta.validation.constraints.Pattern
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType.APPLICATION_JSON_VALUE
 import org.springframework.security.access.prepost.PreAuthorize
@@ -21,6 +22,8 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_MESSAGE
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_REGEX
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.CreatePropertyLocationRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyLocationAdminDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.UpdatePropertyLocationRequest
@@ -51,6 +54,7 @@ class PropertyLocationAdminResource(
   )
   fun listPropertyLocations(
     @Parameter(description = "Prison id", example = "MDI", required = true)
+    @Pattern(regexp = PRISON_ID_REGEX, message = PRISON_ID_MESSAGE)
     @PathVariable
     prisonId: String,
   ): List<PropertyLocationAdminDto> = propertyLocationAdminService.listPropertyLocations(prisonId)
@@ -71,6 +75,7 @@ class PropertyLocationAdminResource(
   )
   fun createPropertyLocation(
     @Parameter(description = "Prison id", example = "MDI", required = true)
+    @Pattern(regexp = PRISON_ID_REGEX, message = PRISON_ID_MESSAGE)
     @PathVariable
     prisonId: String,
     @Valid @RequestBody request: CreatePropertyLocationRequest,

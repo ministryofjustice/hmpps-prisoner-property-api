@@ -49,9 +49,9 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
   fun cleanUp() = repository.deleteAll()
 
   @Test
-  fun `incoming lookup normalizes seals and prisons and can be followed by receipt with a changed seal`() {
+  fun `incoming lookup normalizes seals and can be followed by receipt with a changed seal`() {
     val id = repository.save(incoming().apply { currentSealNumber = " aBc5678 " }).id!!
-    val found = lookup(seal = " ABC5678 ", prison = " mdi ")
+    val found = lookup(seal = " ABC5678 ", prison = "MDI")
       .expectStatus().isOk
       .expectBody(PropertyContainerDto::class.java).returnResult().responseBody!!
     assertThat(found.id).isEqualTo(id)
@@ -87,7 +87,7 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     lookup(seal = "NOT_FOUND").expectStatus().isNotFound
       .expectBody().jsonPath("$.errorCode").isEqualTo("INCOMING_CONTAINER_NOT_FOUND")
     lookup(prisoner = "B1234CD").expectStatus().isNotFound
-    lookup(prison = " lei ").expectStatus().isNotFound
+    lookup(prison = "LEI").expectStatus().isNotFound
     assertNoEventsPublished()
   }
 
@@ -129,6 +129,8 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
   fun `lookup requires valid parameters and the read role`() {
     lookup(prisoner = "BAD").expectStatus().isBadRequest
     lookup(prison = " ").expectStatus().isBadRequest
+    lookup(prison = "mdi").expectStatus().isBadRequest
+    lookup(prison = " mdi ").expectStatus().isBadRequest
     lookup(seal = " ").expectStatus().isBadRequest
     webTestClient.get().uri("/property-containers/incoming")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
@@ -138,6 +140,14 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     webTestClient.get().uri("/property-containers/incoming?prisonerNumber=A1234BC&prisonId=MDI&sealNumber=5678")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
       .exchange().expectStatus().isForbidden
+  }
+
+  @Test
+  fun `prison list rejects an invalid prisoner number filter`() {
+    webTestClient.get().uri("/property-containers/prison/MDI?prisonerNumber=BAD")
+      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+      .exchange()
+      .expectStatus().isBadRequest
   }
 
   private fun lookup(seal: String = "5678", prison: String = "MDI", prisoner: String = "A1234BC") = webTestClient.get()
@@ -436,6 +446,7 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     val id = repository.save(incoming()).id!!
     receive(id, request().copy(locationType = StorageLocationType.BRANSTON)).expectStatus().isBadRequest
     receive(id, request().copy(receivingPrisonId = " ")).expectStatus().isBadRequest
+    receive(id, request().copy(receivingPrisonId = "mdi")).expectStatus().isBadRequest
     receive(id, request().copy(sealNumber = " ")).expectStatus().isBadRequest
     receive(id, request().copy(prisonerNumber = " ")).expectStatus().isBadRequest
     receive(id, request().copy(prisonerNumber = "INVALID")).expectStatus().isBadRequest
