@@ -192,6 +192,7 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     assertThat(receipt.fromPrisonId).isEqualTo("LEI")
     assertThat(receipt.toPrisonId).isEqualTo("MDI")
     assertThat(receipt.sealNumber).isEqualTo("5678")
+    assertThat(receipt.relatedContainerSealNumber).isNull()
     assertThat(receipt.toInternalLocationId).isEqualTo(LOCATION)
     assertThat(receipt.toStorageLocationType).isEqualTo(StorageLocationType.INTERNAL)
     assertThat(publishedEventsFor(source.id!!)).singleElement().satisfies({
@@ -208,6 +209,7 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     assertThat(item.toPrisonName).isEqualTo("Moorland (HMP & YOI)")
     assertThat(item.actingEstablishmentName).isEqualTo("Moorland (HMP & YOI)")
     assertThat(item.sealNumber).isEqualTo("5678")
+    assertThat(item.relatedContainerSealNumber).isNull()
     assertThat(item.containerLocationDescription).isEqualTo("Receiving store")
     assertThat(item.eventStatus).isEqualTo(ContainerStatus.STORED)
     val original = timeline.single { it.eventType == PropertyEventType.CREATED_SEALED }
@@ -380,8 +382,13 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.currentSealNumber").isEqualTo("NEWSEAL")
     val persisted = repository.findById(id).orElseThrow()
     assertThat(persisted.events.single { it.eventType == PropertyEventType.RECEIVED }.sealNumber).isEqualTo("NEWSEAL")
+    assertThat(persisted.events.single { it.eventType == PropertyEventType.RECEIVED }.relatedContainerSealNumber).isEqualTo("5678")
     assertThat(persisted.events.single { it.eventType == PropertyEventType.CREATED_SEALED }.sealNumber).isEqualTo("5678")
     assertThat(repository.count()).isEqualTo(1)
+
+    val receipt = timeline().single { it.eventType == PropertyEventType.RECEIVED }
+    assertThat(receipt.sealNumber).isEqualTo("NEWSEAL")
+    assertThat(receipt.relatedContainerSealNumber).isEqualTo("5678")
   }
 
   @Test

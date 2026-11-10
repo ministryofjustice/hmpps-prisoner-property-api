@@ -112,7 +112,8 @@ data class PrisonerTimelineItemDto(
   @Schema(
     description = "Seal number of the related container as at this event: the container this one was combined " +
       "into, or - for property matched on arrival from another establishment - the seal the other record holds. " +
-      "On the arriving container that is the previous seal; on the sending container it is the new one",
+      "On the arriving container that is the previous seal; on the sending container it is the new one. " +
+      "For receipt in place, the previous seal when it differs from the arriving seal",
     example = "SN991234",
     nullable = true,
   )

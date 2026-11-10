@@ -259,6 +259,7 @@ class PropertyContainerWriteService(
         eventDateTime = LocalDateTime.now(),
         eventUserId = username,
         sealNumber = request.sealNumber,
+        relatedContainerSealNumber = container.currentSealNumber?.takeUnless { it == request.sealNumber },
         fromPrisonId = container.prisonId,
         toPrisonId = request.receivingPrisonId,
         toInternalLocationId = request.internalLocationId,
