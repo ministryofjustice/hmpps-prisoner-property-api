@@ -52,7 +52,7 @@ class PropertyContainerService(
 
   @Transactional(readOnly = true)
   fun findIncoming(prisonerNumber: String, prisonId: String, sealNumber: String): PropertyContainerDto {
-    val matches = repository.findByPrisonerNumber(prisonerNumber)
+    val matches = repository.findByPrisonerNumber(prisonerNumber.uppercase())
       .filter {
         it.canBeReceivedAt(prisonId) &&
           it.currentSealNumber?.trim().equals(sealNumber.trim(), ignoreCase = true)

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerStatus
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
@@ -64,6 +65,21 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     assertThat(repository.count()).isEqualTo(1)
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = ["A1234BC", "a1234bc", "a1234Bc"])
+  fun `incoming lookup normalizes prisoner number case`(prisonerNumber: String) {
+    val id = repository.save(incoming()).id!!
+
+    lookup(prisoner = prisonerNumber)
+      .expectStatus().isOk
+      .expectBody()
+      .jsonPath("$.id").isEqualTo(id.toString())
+      .jsonPath("$.prisonerNumber").isEqualTo("A1234BC")
+
+    assertThat(repository.findById(id).orElseThrow().events).hasSize(2)
+    assertNoEventsPublished()
+  }
+
   @Test
   fun `lookup accepts stored review and in flight property including a different expected destination`() {
     val stored = incoming().apply {
@@ -87,6 +103,7 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     lookup(seal = "NOT_FOUND").expectStatus().isNotFound
       .expectBody().jsonPath("$.errorCode").isEqualTo("INCOMING_CONTAINER_NOT_FOUND")
     lookup(prisoner = "B1234CD").expectStatus().isNotFound
+    lookup(prisoner = "b1234Cd").expectStatus().isNotFound
     lookup(prison = "LEI").expectStatus().isNotFound
     assertNoEventsPublished()
   }
@@ -96,6 +113,8 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     repository.save(incoming())
     repository.save(incoming(transferred = true))
     lookup().expectStatus().isEqualTo(409)
+      .expectBody().jsonPath("$.errorCode").isEqualTo("AMBIGUOUS_INCOMING_CONTAINER")
+    lookup(prisoner = "a1234Bc").expectStatus().isEqualTo(409)
       .expectBody().jsonPath("$.errorCode").isEqualTo("AMBIGUOUS_INCOMING_CONTAINER")
     assertNoEventsPublished()
   }
