@@ -6,21 +6,25 @@ import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springdoc.core.annotations.ParameterObject
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
+import org.springframework.http.HttpStatus.NO_CONTENT
 import org.springframework.http.MediaType.APPLICATION_JSON_VALUE
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.validation.annotation.Validated
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.PropertyContainerDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
@@ -39,6 +43,12 @@ import java.util.UUID
 @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__SYNC')")
 @Tag(name = "Sync with NOMIS")
 @SecurityRequirement(name = "bearer-jwt")
+@ApiResponses(
+  value = [
+    ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__SYNC role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+  ],
+)
 class SyncPropertyContainerResource(
   private val syncPropertyContainerService: SyncPropertyContainerService,
   private val propertyContainerService: PropertyContainerService,
@@ -90,8 +100,6 @@ class SyncPropertyContainerResource(
     responses = [
       ApiResponse(responseCode = "200", description = "Container created or updated"),
       ApiResponse(responseCode = "400", description = "Invalid request", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
-      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
-      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__SYNC role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "404", description = "The supplied DPS id does not exist", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )
@@ -106,8 +114,6 @@ class SyncPropertyContainerResource(
     responses = [
       ApiResponse(responseCode = "200", description = "Container migrated"),
       ApiResponse(responseCode = "400", description = "Invalid request", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
-      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
-      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__SYNC role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "404", description = "The supplied DPS id does not exist", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )
@@ -119,8 +125,6 @@ class SyncPropertyContainerResource(
     description = "Requires role ROLE_PRISONER_PROPERTY__SYNC.",
     responses = [
       ApiResponse(responseCode = "200", description = "Property container returned"),
-      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
-      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__SYNC role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "404", description = "Property container not found", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )
@@ -130,6 +134,24 @@ class SyncPropertyContainerResource(
     id: UUID,
   ): PropertyContainerDto = propertyContainerService.getById(id)
 
+  @DeleteMapping("/{id}")
+  @ResponseStatus(NO_CONTENT)
+  @Operation(
+    summary = "Delete a property container by its DPS id",
+    description = "Permanently deletes the container and its event history. Only to be used to correct sync errors. Requires role ROLE_PRISONER_PROPERTY__SYNC.",
+    responses = [
+      ApiResponse(responseCode = "204", description = "Property container deleted"),
+      ApiResponse(responseCode = "404", description = "Property container not found", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+    ],
+  )
+  fun deleteContainer(
+    @Parameter(description = "Property container id", example = "0196f1d3-9a1f-7c3a-9b2e-2c1f3a4b5c6d", required = true)
+    @PathVariable
+    id: UUID,
+  ) {
+    syncPropertyContainerService.delete(id)
+  }
+
   @GetMapping("/ids")
   @Operation(
     summary = "Get a page of all property container ids, for reconciliation",
@@ -138,8 +160,6 @@ class SyncPropertyContainerResource(
       "entries as long as no containers are deleted between requests. Requires role ROLE_PRISONER_PROPERTY__SYNC.",
     responses = [
       ApiResponse(responseCode = "200", description = "Page of property container ids returned"),
-      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
-      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__SYNC role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )
   fun getAllIds(
@@ -155,8 +175,6 @@ class SyncPropertyContainerResource(
       "Requires role ROLE_PRISONER_PROPERTY__SYNC.",
     responses = [
       ApiResponse(responseCode = "200", description = "Containers moved"),
-      ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
-      ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__SYNC role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "404", description = "Some of the supplied DPS ids do not exist", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )

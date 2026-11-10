@@ -47,6 +47,12 @@ class SyncPropertyContainerService(
   fun migrate(request: SyncPropertyContainerRequest): SyncResult = upsert(request, migrating = true)
 
   @Transactional
+  fun delete(id: UUID) {
+    val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
+    repository.delete(container)
+  }
+
+  @Transactional
   fun moveToPrisoner(fromPrisoner: String, toPrisoner: String, propertyIds: List<UUID>) {
     if (propertyIds.isEmpty()) {
       throw ValidationException("propertyIds must not be empty")

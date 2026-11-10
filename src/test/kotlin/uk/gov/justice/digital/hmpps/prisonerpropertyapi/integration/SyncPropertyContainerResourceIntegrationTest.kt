@@ -348,6 +348,64 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Nested
+  inner class Delete {
+    @Test
+    fun `deletes a container and its events without affecting other containers`() {
+      val id = migrate(request()).dpsId
+      migrate(request(dpsId = id, sealMark = "SEAL2"))
+      val otherId = migrate(request()).dpsId
+      assertThat(eventRepository.findByContainerIdOrderByEventDateTimeDesc(id)).hasSize(2)
+
+      webTestClient.delete().uri("/sync/property-containers/{id}", id)
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .exchange()
+        .expectStatus().isNoContent
+        .expectBody().isEmpty
+
+      assertThat(repository.existsById(id)).isFalse()
+      assertThat(eventRepository.findByContainerIdOrderByEventDateTimeDesc(id)).isEmpty()
+      assertThat(repository.existsById(otherId)).isTrue()
+      assertThat(eventRepository.findByContainerIdOrderByEventDateTimeDesc(otherId)).hasSize(1)
+      assertNoEventsPublished()
+    }
+
+    @Test
+    fun `returns not found for an unknown id`() {
+      val id = UUID.randomUUID()
+
+      webTestClient.delete().uri("/sync/property-containers/{id}", id)
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .exchange()
+        .expectStatus().isNotFound
+        .expectBody()
+        .jsonPath("$.userMessage").isEqualTo("Property container not found: $id")
+    }
+
+    @Test
+    fun `returns unauthorized when no token is presented`() {
+      val id = migrate(request()).dpsId
+
+      webTestClient.delete().uri("/sync/property-containers/{id}", id)
+        .exchange()
+        .expectStatus().isUnauthorized
+
+      assertThat(repository.existsById(id)).isTrue()
+    }
+
+    @Test
+    fun `returns forbidden without the sync role`() {
+      val id = migrate(request()).dpsId
+
+      webTestClient.delete().uri("/sync/property-containers/{id}", id)
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+        .exchange()
+        .expectStatus().isForbidden
+
+      assertThat(repository.existsById(id)).isTrue()
+    }
+  }
+
+  @Nested
   inner class Move {
     @Test
     fun `moves containers to the target prisoner`() {
