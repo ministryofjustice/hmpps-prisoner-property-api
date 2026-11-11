@@ -127,7 +127,7 @@ The incoming lookup returns `200` with `PropertyContainerDto`, `404` with
 matches seals and establishment ids ignoring case and surrounding whitespace, and accepts active property
 held elsewhere or an unreconciled transfer (even if the sender named another destination). Removed or
 reconciled property and property already held at the receiving prison are excluded. Multiple matches are
-never resolved arbitrarily. The lookup does not change the record; receipt rechecks eligibility under its lock.
+never resolved arbitrarily. The lookup does not change the record; receipt rechecks eligibility in its write transaction.
 The UI should look up the previous seal when explicitly supplied, otherwise the current seal. A matching
 id goes to receipt with the current seal and location. No current-seal match goes to ordinary create;
 no explicitly entered previous-seal match must produce a field error instead of creating new property.
