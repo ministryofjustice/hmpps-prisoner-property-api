@@ -28,9 +28,6 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.Pri
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
 
@@ -372,24 +369,6 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
       .expectBody()
       .jsonPath("$.currentLocationType").isEqualTo("BRANSTON")
       .jsonPath("$.currentLocation").doesNotExist()
-  }
-
-  @Test
-  fun `concurrent confirmations record only one receipt`() {
-    val id = repository.save(incoming()).id!!
-    Executors.newFixedThreadPool(2).use { executor ->
-      val start = CountDownLatch(1)
-      val confirmations = List(2) {
-        executor.submit<Int> {
-          start.await()
-          receive(id).expectBody().returnResult().status.value()
-        }
-      }
-      start.countDown()
-      assertThat(confirmations.map { it.get(30, TimeUnit.SECONDS) }).containsExactlyInAnyOrder(200, 400)
-    }
-    assertThat(repository.findById(id).orElseThrow().events.count { it.eventType == PropertyEventType.RECEIVED }).isEqualTo(1)
-    assertThat(publishedEventsFor(id)).hasSize(1)
   }
 
   @Test

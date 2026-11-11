@@ -70,7 +70,7 @@ class SyncPropertyContainerService(
 
   private fun upsert(request: SyncPropertyContainerRequest, migrating: Boolean): SyncResult {
     val existing = request.dpsId?.let {
-      repository.findByIdForUpdate(it).orElseThrow { PropertyContainerNotFoundException(it) }
+      repository.findById(it).orElseThrow { PropertyContainerNotFoundException(it) }
     }
     return if (existing == null) create(request, migrating) else update(existing, request, migrating)
   }

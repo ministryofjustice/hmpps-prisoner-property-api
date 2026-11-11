@@ -504,11 +504,9 @@ destination need not match the receiving establishment; staff confirming the phy
 evidence. Active property can qualify even if the sender never flagged a transfer.
 
 Lookup is read-only and does not reserve anything. Receipt requires `ROLE_PRISONER_PROPERTY__RW`, loads
-the current record with `findByIdForUpdate` (`PESSIMISTIC_WRITE`), and revalidates eligibility while holding
-the row lock until commit. Two confirmations for the same receiving prison cannot both succeed: the second
-waits, then sees the updated holding prison and receives `400`. A container removed or reconciled since
-lookup receives `409`; an unknown id receives `404`. Receipt also rechecks seal uniqueness and location
-validity, capacity and membership of the receiving establishment.
+the current record and revalidates eligibility. A container removed or reconciled since lookup receives
+`409`; an unknown id receives `404`. Receipt also rechecks seal uniqueness and location validity, capacity
+and membership of the receiving establishment.
 
 Receipt retains the container id, creation metadata and existing history. It records `RECEIVED` with the
 authenticated user, confirmation time, sending and receiving establishments, current seal and destination

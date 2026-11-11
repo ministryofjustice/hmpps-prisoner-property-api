@@ -212,7 +212,7 @@ class PropertyContainerWriteService(
 
   @Transactional
   fun receive(id: UUID, request: ReceiveContainerRequest, username: String): WriteResult {
-    val container = repository.findByIdForUpdate(id).orElseThrow { PropertyContainerNotFoundException(id) }
+    val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
     if (!container.prisonerNumber.equals(request.prisonerNumber, ignoreCase = true)) {
       throw ValidationException("Container does not belong to prisoner ${request.prisonerNumber}")
     }

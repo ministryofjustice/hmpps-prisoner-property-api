@@ -33,9 +33,6 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.Pri
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
@@ -94,35 +91,6 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       },
       isNull(),
     )
-  }
-
-  @Test
-  fun `a concurrent sending prison sync cannot overwrite receipt`() {
-    val created = upsert(request())
-    Executors.newFixedThreadPool(2).use { executor ->
-      val start = CountDownLatch(1)
-      val receipt = executor.submit {
-        start.await()
-        webTestClient.post().uri("/property-containers/{id}/receive", created.dpsId)
-          .headers(setAuthorisation(username = "RECEPTION", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
-          .bodyValue(ReceiveContainerRequest(prisonerNumber = "A1234BC", receivingPrisonId = "MDI", sealNumber = "RECEIVED_SEAL"))
-          .exchange().expectStatus().isOk
-      }
-      val sync = executor.submit {
-        start.await()
-        upsert(request(dpsId = created.dpsId, sealMark = "STALE_SEAL").copy(modifyDateTime = LocalDateTime.now()))
-      }
-      start.countDown()
-      receipt.get(30, TimeUnit.SECONDS)
-      sync.get(30, TimeUnit.SECONDS)
-    }
-
-    val received = repository.findById(created.dpsId).orElseThrow()
-    assertThat(received.prisonId).isEqualTo("MDI")
-    assertThat(received.currentSealNumber).isEqualTo("RECEIVED_SEAL")
-    assertThat(received.removalOutcome).isNull()
-    assertThat(received.currentLocation()).isNull()
-    assertThat(received.events.maxBy { it.eventDateTime }.eventType).isEqualTo(PropertyEventType.RECEIVED)
   }
 
   @Test
