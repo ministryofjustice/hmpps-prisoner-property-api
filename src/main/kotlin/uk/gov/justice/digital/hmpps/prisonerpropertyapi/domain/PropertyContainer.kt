@@ -106,14 +106,13 @@ class PropertyContainer(
   /** Whether the container has left active storage (disposed, returned, transferred, combined). */
   fun isRemoved(): Boolean = removalOutcome != null
 
-  fun canBeReceivedAt(receivingPrisonId: String): Boolean = !prisonId.trim().equals(receivingPrisonId.trim(), ignoreCase = true) &&
-    (
-      !isRemoved() ||
-        (
-          removalOutcome == RemovalOutcome.TRANSFERRED &&
-            latestTransferEvent()?.let { it.relatedContainerId == null } == true
-          )
-      )
+  fun isHeldAt(prisonId: String): Boolean = this.prisonId.equalsPrisonId(prisonId)
+
+  fun isAwaitingArrival(): Boolean = removalOutcome == RemovalOutcome.TRANSFERRED &&
+    latestTransferEvent()?.let { it.relatedContainerId == null } == true
+
+  fun canBeReceivedAt(receivingPrisonId: String): Boolean = !isHeldAt(receivingPrisonId) &&
+    (!isRemoved() || isAwaitingArrival())
 
   /**
    * Whether the container is currently removed because a legacy clean-up job closed it under the retention rule,

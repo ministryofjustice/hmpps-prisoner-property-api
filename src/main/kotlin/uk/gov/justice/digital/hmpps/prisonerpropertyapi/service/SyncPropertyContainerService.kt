@@ -135,7 +135,7 @@ class SyncPropertyContainerService(
   private fun update(existing: PropertyContainer, request: SyncPropertyContainerRequest, migrating: Boolean): SyncResult {
     // Receipt moves the DPS record, not its old NOMIS mapping. Ignore the whole old-prison snapshot,
     // including corrections, before resolving a seal or location or changing any history.
-    if (!existing.prisonId.trim().equals(request.prisonId.trim(), ignoreCase = true) &&
+    if (!existing.isHeldAt(request.prisonId) &&
       existing.events.any { it.eventType == PropertyEventType.RECEIVED }
     ) {
       log.info(
