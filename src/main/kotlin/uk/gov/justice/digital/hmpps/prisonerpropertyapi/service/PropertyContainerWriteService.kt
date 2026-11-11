@@ -577,7 +577,9 @@ class PropertyContainerWriteService(
    * [newPrisonId] as its destination, as [prisonerReceived] would have given it.
    *
    * Only property recorded before [admittedAt] counts. Reception can seal property into storage within seconds
-   * of the admission, and the event can reach us after that; property sealed on this visit is not in doubt.
+   * of admission, and the event can reach us later; property sealed on this visit is not in doubt. A received
+   * container keeps its original createDateTime, so its RECEIVED event time also determines whether it arrived
+   * after this admission.
    *
    * Idempotent: a container already under review, or already put under review for this admission and since
    * confirmed by staff, is skipped - so a redelivered event cannot undo a confirmation. Returns one
@@ -588,7 +590,13 @@ class PropertyContainerWriteService(
   fun prisonerAdmitted(prisonerNumber: String, newPrisonId: String, admittedAt: LocalDateTime): List<HmppsDomainEvent> {
     val now = LocalDateTime.now()
     return repository.findByPrisonerNumber(prisonerNumber)
-      .filter { !it.isRemoved() && !it.requiresReview() && it.createDateTime < admittedAt && !it.admittedSince(admittedAt) }
+      .filter {
+        !it.isRemoved() &&
+          !it.requiresReview() &&
+          it.createDateTime < admittedAt &&
+          !it.receivedSince(admittedAt) &&
+          !it.admittedSince(admittedAt)
+      }
       .map { container ->
         val before = ContainerState.of(container)
         container.events.add(
@@ -607,6 +615,8 @@ class PropertyContainerWriteService(
   }
 
   private fun PropertyContainer.admittedSince(admittedAt: LocalDateTime): Boolean = events.any { it.eventType == PropertyEventType.PRISONER_ADMITTED && it.eventDateTime >= admittedAt }
+
+  private fun PropertyContainer.receivedSince(admittedAt: LocalDateTime): Boolean = events.any { it.eventType == PropertyEventType.RECEIVED && it.eventDateTime >= admittedAt }
 
   /**
    * Record that staff have confirmed where this container is, which clears the review. Appended after any other

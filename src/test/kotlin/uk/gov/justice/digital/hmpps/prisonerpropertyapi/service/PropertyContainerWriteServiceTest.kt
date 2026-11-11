@@ -918,6 +918,32 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
+  fun `prisonerAdmitted leaves a container received after admission alone`() {
+    val receivedAfterAdmission = containerAt("LEI", "OLDSEAL").apply {
+      events.add(
+        PropertyEvent(
+          this,
+          PropertyEventType.RECEIVED,
+          ADMITTED_AT.plusMinutes(45),
+          "RECEPTION",
+          sealNumber = "NEWSEAL",
+          fromPrisonId = "LEI",
+          toPrisonId = "MDI",
+        ),
+      )
+      prisonId = "MDI"
+      currentSealNumber = "NEWSEAL"
+      refreshDerivedState()
+    }
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(receivedAfterAdmission))
+
+    assertThat(receivedAfterAdmission.createDateTime).isBefore(ADMITTED_AT)
+    assertThat(service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)).isEmpty()
+    assertThat(receivedAfterAdmission.currentStatus()).isEqualTo(ContainerStatus.STORED)
+    assertThat(receivedAfterAdmission.events.map { it.eventType }).doesNotContain(PropertyEventType.PRISONER_ADMITTED)
+  }
+
+  @Test
   fun `prisonerAdmitted is idempotent, and a redelivery does not undo a confirmation`() {
     val container = containerAt("MDI", "SEAL1")
     whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
