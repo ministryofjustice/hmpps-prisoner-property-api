@@ -5,8 +5,6 @@ import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_MESSAGE
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_REGEX
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_MESSAGE
-import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_REGEX
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -34,7 +32,6 @@ data class SyncPropertyContainerRequest(
 
   @Schema(description = "NOMIS AGY_LOC_ID - establishment holding the container", example = "LEI", requiredMode = Schema.RequiredMode.REQUIRED)
   @field:NotBlank
-  @field:Pattern(regexp = PRISON_ID_REGEX, message = PRISON_ID_MESSAGE)
   val prisonId: String,
 
   @Schema(

@@ -147,6 +147,8 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     lookup(prison = " ").expectStatus().isBadRequest
     lookup(prison = "mdi").expectStatus().isBadRequest
     lookup(prison = " mdi ").expectStatus().isBadRequest
+    lookup(prison = "MDIX").expectStatus().isBadRequest
+    lookup(prison = "XZZGHI").expectStatus().isBadRequest
     lookup(seal = " ").expectStatus().isBadRequest
     webTestClient.get().uri("/property-containers/incoming")
       .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))

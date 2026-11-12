@@ -78,14 +78,24 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `rejects a create with an invalid prison id`() {
-    webTestClient.post().uri("/property-containers")
-      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
-      .bodyValue(createRequest().copy(prisonId = "mdi"))
-      .exchange()
-      .expectStatus().isBadRequest
+  fun `create validates the complete prison id`() {
+    listOf("MDI", "ZZGHI").forEachIndexed { index, prisonId ->
+      webTestClient.post().uri("/property-containers")
+        .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+        .bodyValue(createRequest(sealNumber = "VALID$index").copy(prisonId = prisonId))
+        .exchange()
+        .expectStatus().isCreated
+    }
 
-    assertThat(repository.count()).isZero()
+    listOf("mdi", "MDIX", "XZZGHI").forEach { prisonId ->
+      webTestClient.post().uri("/property-containers")
+        .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+        .bodyValue(createRequest(sealNumber = "INVALID_$prisonId").copy(prisonId = prisonId))
+        .exchange()
+        .expectStatus().isBadRequest
+    }
+
+    assertThat(repository.count()).isEqualTo(2)
   }
 
   @Test

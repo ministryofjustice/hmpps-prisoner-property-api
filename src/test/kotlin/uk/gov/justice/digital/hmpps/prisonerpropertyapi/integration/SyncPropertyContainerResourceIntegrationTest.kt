@@ -122,14 +122,20 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `rejects an invalid prison id in a NOMIS snapshot`() {
-    webTestClient.post().uri("/sync/property-containers/upsert")
-      .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
-      .bodyValue(request().copy(prisonId = "mdi"))
-      .exchange()
-      .expectStatus().isBadRequest
+  fun `accepts NOMIS agency ids that are not receiving prisons`() {
+    listOf("upsert" to "TRN", "migrate" to "OUT").forEachIndexed { index, (path, prisonId) ->
+      val response = webTestClient.post().uri("/sync/property-containers/$path")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .bodyValue(request().copy(nomisPropertyContainerId = 123L + index, prisonId = prisonId))
+        .exchange()
+        .expectStatus().isOk
+        .expectBody(SyncPropertyContainerResponse::class.java)
+        .returnResult().responseBody!!
 
-    assertThat(repository.count()).isZero()
+      assertThat(repository.findById(response.dpsId).orElseThrow().prisonId).isEqualTo(prisonId)
+    }
+
+    assertThat(repository.count()).isEqualTo(2)
   }
 
   @Test
