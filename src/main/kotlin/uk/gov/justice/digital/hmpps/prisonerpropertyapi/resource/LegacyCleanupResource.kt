@@ -7,15 +7,19 @@ import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
+import jakarta.validation.constraints.Pattern
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType.APPLICATION_JSON_VALUE
 import org.springframework.security.access.prepost.PreAuthorize
+import org.springframework.validation.annotation.Validated
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.AGENCY_ID_MESSAGE
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_REGEX
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.cleanup.LegacyCleanupJobDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.cleanup.LegacyCleanupPreviewDto
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.cleanup.LegacyCleanupService
@@ -29,6 +33,7 @@ import java.util.UUID
  * prison on, and carries the same admin role. See `docs/legacy-cleanup.md`.
  */
 @RestController
+@Validated
 @RequestMapping("/active-agencies", produces = [APPLICATION_JSON_VALUE])
 @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__ADMIN')")
 @Tag(name = "Active agencies")
@@ -57,6 +62,7 @@ class LegacyCleanupResource(
   )
   fun previewLegacyCleanup(
     @Parameter(description = "Agency (prison) id", example = "MDI", required = true)
+    @Pattern(regexp = PRISON_ID_REGEX, message = AGENCY_ID_MESSAGE)
     @PathVariable
     agencyId: String,
   ): LegacyCleanupPreviewDto = legacyCleanupService.preview(agencyId)
@@ -80,6 +86,7 @@ class LegacyCleanupResource(
   )
   fun startLegacyCleanup(
     @Parameter(description = "Agency (prison) id", example = "MDI", required = true)
+    @Pattern(regexp = PRISON_ID_REGEX, message = AGENCY_ID_MESSAGE)
     @PathVariable
     agencyId: String,
   ): LegacyCleanupJobDto = legacyCleanupService.start(agencyId, currentUsername())
@@ -97,6 +104,7 @@ class LegacyCleanupResource(
   )
   fun listLegacyCleanupJobs(
     @Parameter(description = "Agency (prison) id", example = "MDI", required = true)
+    @Pattern(regexp = PRISON_ID_REGEX, message = AGENCY_ID_MESSAGE)
     @PathVariable
     agencyId: String,
   ): List<LegacyCleanupJobDto> = legacyCleanupService.getJobs(agencyId)

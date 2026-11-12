@@ -10,6 +10,7 @@ import org.junit.jupiter.params.provider.CsvSource
 import org.mockito.kotlin.check
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.isNull
+import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.repository.findByIdOrNull
@@ -23,10 +24,12 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.cleanup.LegacyCle
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.cleanup.LegacyCleanupItem
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.cleanup.LegacyCleanupJob
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.cleanup.LegacyCleanupJobRepository
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.ReceiveContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.NomisContainerCode
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.ContainerState
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyEventSource
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyTelemetry
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
@@ -65,6 +68,44 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `sending prison updates and migration replays leave a received container unchanged and are tracked`() {
+    val created = upsert(request())
+    webTestClient.post().uri("/property-containers/{id}/receive", created.dpsId)
+      .headers(setAuthorisation(username = "RECEPTION", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(ReceiveContainerRequest(prisonerNumber = "A1234BC", receivingPrisonId = "MDI", sealNumber = "RECEIVED_SEAL"))
+      .exchange().expectStatus().isOk
+    val before = repository.findById(created.dpsId).orElseThrow()
+    val state = ContainerState.of(before)
+    val lastUpdated = before.lastUpdatedDateTime
+    val history = eventRepository.findByContainerIdOrderByEventDateTimeDesc(created.dpsId)
+    val publishedCount = publishedEvents().size
+
+    for (path in listOf("upsert", "migrate")) {
+      webTestClient.post().uri("/sync/property-containers/$path")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .bodyValue(request(dpsId = created.dpsId, sealMark = "STALE_SEAL").copy(active = false))
+        .exchange().expectStatus().isOk
+        .expectBody()
+        .jsonPath("$.dpsId").isEqualTo(created.dpsId.toString())
+        .jsonPath("$.mappingType").isEqualTo("UPDATED")
+    }
+
+    val after = repository.findById(created.dpsId).orElseThrow()
+    assertThat(ContainerState.of(after)).isEqualTo(state)
+    assertThat(after.lastUpdatedDateTime).isEqualTo(lastUpdated)
+    assertThat(eventRepository.findByContainerIdOrderByEventDateTimeDesc(created.dpsId).map { it.id }).containsExactlyElementsOf(history.map { it.id })
+    assertThat(publishedEvents()).hasSize(publishedCount)
+    verify(telemetryClient, times(2)).trackEvent(
+      eq(PropertyTelemetry.SYNC_IGNORED_AFTER_RECEIPT),
+      check {
+        assertThat(it["dpsId"]).isEqualTo(created.dpsId.toString())
+        assertThat(it["nomisPropertyContainerId"]).isEqualTo("123")
+      },
+      isNull(),
+    )
+  }
+
+  @Test
   fun `creates a new container from a NOMIS snapshot`() {
     val response = upsert(request())
 
@@ -78,6 +119,23 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       .jsonPath("$.currentStatus").isEqualTo("STORED")
       .jsonPath("$.currentLocation").isEqualTo(LOCATION.toString())
       .jsonPath("$.currentLocationType").isEqualTo("INTERNAL")
+  }
+
+  @Test
+  fun `accepts NOMIS agency ids that are not receiving prisons`() {
+    listOf("upsert" to "TRN", "migrate" to "OUT").forEachIndexed { index, (path, prisonId) ->
+      val response = webTestClient.post().uri("/sync/property-containers/$path")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .bodyValue(request().copy(nomisPropertyContainerId = 123L + index, prisonId = prisonId))
+        .exchange()
+        .expectStatus().isOk
+        .expectBody(SyncPropertyContainerResponse::class.java)
+        .returnResult().responseBody!!
+
+      assertThat(repository.findById(response.dpsId).orElseThrow().prisonId).isEqualTo(prisonId)
+    }
+
+    assertThat(repository.count()).isEqualTo(2)
   }
 
   @Test
@@ -180,7 +238,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     upsert(request(dpsId = created.dpsId, active = false, expiryDate = LocalDate.parse("2026-09-15")))
 
     // NOMIS reactivates the container (active again), re-allocating its location on the same snapshot.
-    upsert(request(dpsId = created.dpsId, active = true))
+    upsert(request(dpsId = created.dpsId, active = true).copy(modifyDateTime = LocalDateTime.parse("2026-02-01T09:00:01")))
 
     getById(created.dpsId)
       .jsonPath("$.currentStatus").isEqualTo("STORED")
@@ -556,6 +614,22 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   @Nested
   inner class Move {
+    @Test
+    fun `rejects invalid source and target prisoner numbers`() {
+      for (path in listOf(
+        "/sync/property-containers/move/from/bad/to/A2222BB",
+        "/sync/property-containers/move/from/A0001AA/to/bad",
+      )) {
+        webTestClient.put().uri(path)
+          .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+          .bodyValue(listOf(UUID.randomUUID()))
+          .exchange()
+          .expectStatus().isBadRequest
+      }
+
+      assertThat(repository.count()).isZero()
+    }
+
     @Test
     fun `moves containers to the target prisoner`() {
       val p1 = upsert(request(prisonerNumber = "A0001AA")).dpsId

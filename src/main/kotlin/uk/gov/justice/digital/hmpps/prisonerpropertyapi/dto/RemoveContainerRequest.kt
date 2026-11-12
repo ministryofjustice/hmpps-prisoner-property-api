@@ -1,6 +1,9 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto
 
 import io.swagger.v3.oas.annotations.media.Schema
+import jakarta.validation.constraints.Pattern
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_MESSAGE
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_REGEX
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import java.time.LocalDate
 
@@ -13,5 +16,6 @@ data class RemoveContainerRequest(
   val date: LocalDate? = null,
 
   @Schema(description = "Receiving prison id - required when the outcome is TRANSFERRED; the container is reassigned to this prison", example = "MDI", nullable = true)
+  @field:Pattern(regexp = PRISON_ID_REGEX, message = PRISON_ID_MESSAGE)
   val toPrisonId: String? = null,
 )

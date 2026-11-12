@@ -78,6 +78,27 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `create validates the complete prison id`() {
+    listOf("MDI", "ZZGHI").forEachIndexed { index, prisonId ->
+      webTestClient.post().uri("/property-containers")
+        .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+        .bodyValue(createRequest(sealNumber = "VALID$index").copy(prisonId = prisonId))
+        .exchange()
+        .expectStatus().isCreated
+    }
+
+    listOf("mdi", "MDIX", "XZZGHI").forEach { prisonId ->
+      webTestClient.post().uri("/property-containers")
+        .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+        .bodyValue(createRequest(sealNumber = "INVALID_$prisonId").copy(prisonId = prisonId))
+        .exchange()
+        .expectStatus().isBadRequest
+    }
+
+    assertThat(repository.count()).isEqualTo(2)
+  }
+
+  @Test
   fun `creates excess property offsite at Branston when locationType is BRANSTON`() {
     val created = webTestClient.post().uri("/property-containers")
       .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
@@ -348,6 +369,20 @@ class PropertyContainerWriteIntegrationTest : IntegrationTestBase() {
       assertThat(it.eventType).isEqualTo("prison-property.container.updated")
       assertThat(it.changedFields).containsExactly("location", "removalOutcome", "currentStatus", "receivingPrisonId")
     })
+  }
+
+  @Test
+  fun `rejects a transfer with an invalid receiving prison id`() {
+    val id = repository.save(seedContainer()).id!!
+
+    webTestClient.post().uri("/property-containers/{id}/remove", id)
+      .headers(setAuthorisation(username = "A_USER", roles = listOf("ROLE_PRISONER_PROPERTY__RW")))
+      .bodyValue(RemoveContainerRequest(outcome = RemovalOutcome.TRANSFERRED, toPrisonId = "mdi"))
+      .exchange()
+      .expectStatus().isBadRequest
+
+    assertThat(repository.findById(id).orElseThrow().prisonId).isEqualTo("LEI")
+    assertNoEventsPublished()
   }
 
   @Test

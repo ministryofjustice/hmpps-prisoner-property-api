@@ -181,6 +181,25 @@ class SyncPropertyContainerService(
   }
 
   private fun update(existing: PropertyContainer, request: SyncPropertyContainerRequest, migrating: Boolean): SyncResult {
+    // Receipt moves the DPS record, not its old NOMIS mapping. Ignore the whole old-prison snapshot,
+    // including corrections, before resolving a seal or location or changing any history.
+    if (!existing.isHeldAt(request.prisonId) &&
+      existing.events.any { it.eventType == PropertyEventType.RECEIVED }
+    ) {
+      log.info(
+        "Ignoring NOMIS property container {} update for DPS container {} from prison {} after receipt; currently held at {}",
+        request.nomisPropertyContainerId,
+        existing.id,
+        request.prisonId,
+        existing.prisonId,
+      )
+      return SyncResult(
+        SyncPropertyContainerResponse(existing.id!!, request.nomisPropertyContainerId, SyncMappingType.UPDATED),
+        event = null,
+        ignoredAfterReceipt = true,
+      )
+    }
+
     val now = request.modifyDateTime ?: LocalDateTime.now()
     val user = request.modifyUsername ?: request.createUsername
     val changed = mutableListOf<String>()
@@ -292,8 +311,14 @@ class SyncPropertyContainerService(
  * transaction commits (null when there is nothing to publish - a migration or an unchanged snapshot).
  * [legacyCleanupRetained] is set when NOMIS sent as active a container the legacy clean-up had removed, and it
  * was left removed - tracked so NOMIS disagreeing with the clean-up is visible.
+ * [ignoredAfterReceipt] identifies an old-establishment snapshot discarded without applying any fields.
  */
-data class SyncResult(val response: SyncPropertyContainerResponse, val event: HmppsDomainEvent?, val legacyCleanupRetained: Boolean = false)
+data class SyncResult(
+  val response: SyncPropertyContainerResponse,
+  val event: HmppsDomainEvent?,
+  val legacyCleanupRetained: Boolean = false,
+  val ignoredAfterReceipt: Boolean = false,
+)
 
 /**
  * The outcome of a deletion containing the domain [event] to publish *after* the transaction commits.

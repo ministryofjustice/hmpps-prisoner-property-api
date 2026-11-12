@@ -402,6 +402,16 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
+  fun `create will not match a transfer without a transfer event`() {
+    val source = containerAt("LEI", "OLDSEAL").apply { removalOutcome = RemovalOutcome.TRANSFERRED }
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+
+    assertThatThrownBy { service.create(createRequest(prisonId = "MDI", previousSealNumber = "OLDSEAL"), "A_USER") }
+      .isInstanceOf(PreviousSealNumberNotFoundException::class.java)
+    verify(repository, never()).save(any())
+  }
+
+  @Test
   fun `create will not mistake badly cased local property for property arriving on transfer`() {
     // Nothing normalises prison ids on the way in, so a stray " mdi" can be stored verbatim. Comparing them
     // raw would make property already here look like it is at another prison - and matching it would
@@ -905,6 +915,32 @@ class PropertyContainerWriteServiceTest {
 
     assertThat(service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)).isEmpty()
     assertThat(sealedInReception.events.map { it.eventType }).doesNotContain(PropertyEventType.PRISONER_ADMITTED)
+  }
+
+  @Test
+  fun `prisonerAdmitted leaves a container received after admission alone`() {
+    val receivedAfterAdmission = containerAt("LEI", "OLDSEAL").apply {
+      events.add(
+        PropertyEvent(
+          this,
+          PropertyEventType.RECEIVED,
+          ADMITTED_AT.plusMinutes(45),
+          "RECEPTION",
+          sealNumber = "NEWSEAL",
+          fromPrisonId = "LEI",
+          toPrisonId = "MDI",
+        ),
+      )
+      prisonId = "MDI"
+      currentSealNumber = "NEWSEAL"
+      refreshDerivedState()
+    }
+    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(receivedAfterAdmission))
+
+    assertThat(receivedAfterAdmission.createDateTime).isBefore(ADMITTED_AT)
+    assertThat(service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)).isEmpty()
+    assertThat(receivedAfterAdmission.currentStatus()).isEqualTo(ContainerStatus.STORED)
+    assertThat(receivedAfterAdmission.events.map { it.eventType }).doesNotContain(PropertyEventType.PRISONER_ADMITTED)
   }
 
   @Test

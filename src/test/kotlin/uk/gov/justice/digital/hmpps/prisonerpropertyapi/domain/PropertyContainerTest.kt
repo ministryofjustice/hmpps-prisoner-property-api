@@ -144,6 +144,32 @@ class PropertyContainerTest {
     }
 
     @Test
+    fun `eligibility compares prison ids ignoring case and surrounding spaces`() {
+      val container = container().apply { prisonId = " lei " }
+      assertThat(container.isHeldAt("LEI")).isTrue()
+      assertThat(container.canBeReceivedAt("LEI")).isFalse()
+      assertThat(container.canBeReceivedAt(" mdi ")).isTrue()
+    }
+
+    @Test
+    fun `only an unreconciled transfer with an event is eligible for receipt`() {
+      val awaiting = transferredOut()
+      assertThat(awaiting.isAwaitingArrival()).isTrue()
+      assertThat(awaiting.canBeReceivedAt("IWI")).isTrue()
+
+      val reconciled = transferredOut(relatedContainerId = UUID.randomUUID())
+      assertThat(reconciled.isAwaitingArrival()).isFalse()
+      assertThat(reconciled.canBeReceivedAt("MDI")).isFalse()
+
+      val missingTransfer = container().apply { removalOutcome = RemovalOutcome.TRANSFERRED }
+      assertThat(missingTransfer.isAwaitingArrival()).isFalse()
+      assertThat(missingTransfer.canBeReceivedAt("MDI")).isFalse()
+
+      val returned = container().apply { removalOutcome = RemovalOutcome.RETURNED }
+      assertThat(returned.canBeReceivedAt("MDI")).isFalse()
+    }
+
+    @Test
     fun `a staff transfer not yet logged at the destination is awaiting arrival there`() {
       val container = transferredOut()
       assertThat(container.receivingPrison()).isEqualTo("MDI")
