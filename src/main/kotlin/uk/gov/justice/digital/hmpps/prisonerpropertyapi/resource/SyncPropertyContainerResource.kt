@@ -31,6 +31,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyCon
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.DomainEventPublisher
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyTelemetry
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DeleteResult
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.SyncPropertyContainerService
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.SyncResult
@@ -91,6 +92,12 @@ class SyncPropertyContainerResource(
     "mappingType" to mappingType.name,
   )
 
+  private fun DeleteResult.telemetryProperties(): Map<String, String> = mapOf(
+    "dpsId" to event.additionalInformation?.get("dpsId").toString(),
+    "prisonerNumber" to event.prisonerNumber.toString(),
+    "prisonId" to event.additionalInformation?.get("prisonId").toString(),
+  )
+
   @PostMapping("/upsert")
   @Operation(
     summary = "Create or update a property container from a NOMIS change",
@@ -149,7 +156,9 @@ class SyncPropertyContainerResource(
     @PathVariable
     id: UUID,
   ) {
-    syncPropertyContainerService.delete(id)
+    val result = syncPropertyContainerService.delete(id)
+    domainEventPublisher.publish(result.event)
+    telemetryClient.trackEvent(PropertyTelemetry.DELETED, result.telemetryProperties(), null)
   }
 
   @GetMapping("/ids")

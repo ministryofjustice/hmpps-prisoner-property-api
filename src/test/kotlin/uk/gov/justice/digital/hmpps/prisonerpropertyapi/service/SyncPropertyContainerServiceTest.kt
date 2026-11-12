@@ -13,9 +13,11 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.cleanup.LegacyCleanupItemRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.NomisContainerCode
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
@@ -28,7 +30,9 @@ import java.util.UUID
 class SyncPropertyContainerServiceTest {
 
   private val repository = mock<PropertyContainerRepository>()
-  private val service = SyncPropertyContainerService(repository, NomisContainerTransformer())
+  private val eventRepository = mock<PropertyEventRepository>()
+  private val legacyCleanupItemRepository = mock<LegacyCleanupItemRepository>()
+  private val service = SyncPropertyContainerService(repository, eventRepository, legacyCleanupItemRepository, NomisContainerTransformer())
 
   @Test
   fun `create builds a sealed container and returns a created event to publish`() {
