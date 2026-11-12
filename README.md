@@ -177,6 +177,7 @@ per transaction, telling NOMIS as it goes. See [docs/legacy-cleanup.md](docs/leg
 | `POST /migrate` | SYNC | Bulk-migrate a container from NOMIS (raises no domain event) |
 | `GET /{id}` | SYNC | Read a synced container by DPS id, for reconciliation |
 | `GET /ids` | SYNC | Page through every DPS container id, in a stable order, to reconcile against NOMIS |
+| `DELETE /{id}` | SYNC | Permanently delete a synced container and its events, for manual use to correct sync errors (raises a `prison-property.container.deleted` domain event) |
 
 ### NOMIS synchronisation
 

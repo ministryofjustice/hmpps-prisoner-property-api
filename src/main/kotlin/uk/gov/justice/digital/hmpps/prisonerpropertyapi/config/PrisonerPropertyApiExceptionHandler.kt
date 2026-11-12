@@ -22,6 +22,7 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicateSealNum
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.IncomingContainerNotFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.InvalidLocationException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PreviousSealNumberNotFoundException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerInUseException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerNotFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainersNotFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationCapacityBelowUsageException
@@ -100,6 +101,17 @@ class PrisonerPropertyApiExceptionHandler {
         developerMessage = e.message,
       ),
     ).also { log.info("Property location not found: {}", e.message) }
+
+  @ExceptionHandler(PropertyContainerInUseException::class)
+  fun handlePropertyContainerInUseException(e: PropertyContainerInUseException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(CONFLICT)
+    .body(
+      ErrorResponse(
+        status = CONFLICT,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Property container in use: {}", e.message) }
 
   @ExceptionHandler(PropertyLocationInUseException::class)
   fun handlePropertyLocationInUseException(e: PropertyLocationInUseException): ResponseEntity<ErrorResponse> = ResponseEntity

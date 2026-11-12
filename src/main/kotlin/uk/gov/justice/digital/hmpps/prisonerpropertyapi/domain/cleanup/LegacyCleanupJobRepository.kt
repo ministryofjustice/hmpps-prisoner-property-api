@@ -44,4 +44,5 @@ interface LegacyCleanupJobRepository : JpaRepository<LegacyCleanupJob, UUID> {
 interface LegacyCleanupItemRepository : JpaRepository<LegacyCleanupItem, UUID> {
   /** The unprocessed items of a job in insertion order (ids are time-ordered), which is the resume point after a redelivery. */
   fun findByJobIdAndStatusOrderById(jobId: UUID, status: LegacyCleanupItemStatus): List<LegacyCleanupItem>
+  fun existsByContainerId(containerId: UUID): Boolean
 }
