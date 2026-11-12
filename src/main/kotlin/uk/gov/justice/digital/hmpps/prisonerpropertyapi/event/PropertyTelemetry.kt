@@ -17,6 +17,9 @@ object PropertyTelemetry {
   /** An inbound domain event we received but deliberately did nothing with; carries a `reason`. */
   const val PRISONER_EVENT_IGNORED = "prison-property-prisoner-event-ignored"
 
+  /** A property was deleted, by an admin request to correct a sync error, e.g. a duplicate. */
+  const val DELETED = "prison-property-deleted"
+
   /**
    * A NOMIS prisoner-number merge moved a prisoner's containers onto their surviving number, and the
    * no-op form for a merge whose retired number held no property (which is also every redelivery).

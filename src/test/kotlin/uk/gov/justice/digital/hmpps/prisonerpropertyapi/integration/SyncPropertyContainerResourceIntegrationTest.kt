@@ -7,17 +7,28 @@ import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
+import org.mockito.kotlin.check
+import org.mockito.kotlin.eq
+import org.mockito.kotlin.isNull
+import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.http.MediaType
+import org.springframework.test.web.reactive.server.expectBody
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.cleanup.LegacyCleanupAction
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.cleanup.LegacyCleanupItem
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.cleanup.LegacyCleanupJob
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.cleanup.LegacyCleanupJobRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.NomisContainerCode
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyEventSource
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.event.PropertyTelemetry
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.HmppsAuthApiExtension.Companion.hmppsAuth
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
@@ -34,6 +45,9 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   @Autowired
   private lateinit var eventRepository: PropertyEventRepository
 
+  @Autowired
+  private lateinit var legacyCleanupJobRepository: LegacyCleanupJobRepository
+
   // Stub the enrichment calls the list endpoints make, so they do not depend on another test warming the caches.
   @BeforeEach
   fun stubEnrichment() {
@@ -45,7 +59,10 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @AfterEach
-  fun cleanUp() = repository.deleteAll()
+  fun cleanUp() {
+    repository.deleteAll()
+    legacyCleanupJobRepository.deleteAll()
+  }
 
   @Test
   fun `creates a new container from a NOMIS snapshot`() {
@@ -348,6 +365,196 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Nested
+  inner class Delete {
+    @Nested
+    inner class Security {
+      @Test
+      fun `returns unauthorized when no token is presented`() {
+        val id = migrate(request()).dpsId
+
+        webTestClient.delete().uri("/sync/property-containers/{id}", id)
+          .exchange()
+          .expectStatus().isUnauthorized
+
+        assertThat(repository.existsById(id)).isTrue()
+      }
+
+      @Test
+      fun `returns forbidden without the sync role`() {
+        val id = migrate(request()).dpsId
+
+        webTestClient.delete().uri("/sync/property-containers/{id}", id)
+          .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__RO")))
+          .exchange()
+          .expectStatus().isForbidden
+
+        assertThat(repository.existsById(id)).isTrue()
+      }
+    }
+
+    @Nested
+    inner class Validation {
+      @Test
+      fun `returns not found for an unknown id`() {
+        val id = UUID.randomUUID()
+
+        webTestClient.delete().uri("/sync/property-containers/{id}", id)
+          .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+          .exchange()
+          .expectStatus().isNotFound
+          .expectBody()
+          .jsonPath("$.userMessage").isEqualTo("Property container not found: $id")
+      }
+
+      @Test
+      fun `returns conflict if the container has non-sync events`() {
+        val id = migrate(request()).dpsId
+        repository.findById(id).ifPresent { container ->
+          container.events.add(
+            PropertyEvent(container, PropertyEventType.COMBINED, LocalDateTime.now(), "ME"),
+          )
+          repository.saveAndFlush(container)
+        }
+
+        webTestClient.delete().uri("/sync/property-containers/{id}", id)
+          .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+          .exchange()
+          .expectStatus().isEqualTo(409)
+          .expectBody()
+          .jsonPath("$.userMessage").isEqualTo("Property container $id has a non-sync event")
+      }
+
+      @Test
+      fun `returns conflict if the container has a legacy_cleanup_item`() {
+        val id = migrate(request()).dpsId
+
+        val job = legacyCleanupJobRepository.save(
+          LegacyCleanupJob(
+            prisonId = "LEI",
+            cutoffDate = LocalDate.now(),
+            requestedBy = "ME",
+            requestedAt = LocalDateTime.now(),
+          ),
+        )
+        job.items.add(
+          LegacyCleanupItem(
+            containerId = id,
+            job = job,
+            prisonerNumber = "A1234BC",
+            action = LegacyCleanupAction.TRANSFER,
+            plannedEventDate = LocalDate.now(),
+          ),
+        )
+        legacyCleanupJobRepository.saveAndFlush(job)
+
+        webTestClient.delete().uri("/sync/property-containers/{id}", id)
+          .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+          .exchange()
+          .expectStatus().isEqualTo(409)
+          .expectBody()
+          .jsonPath("$.userMessage").isEqualTo("Property container $id was in use by a cleanup job")
+      }
+
+      @Test
+      fun `returns conflict if the container has an event related to another container`() {
+        val id = migrate(request()).dpsId
+        val otherId = migrate(request(sealMark = "SEAL2")).dpsId
+        repository.findById(id).ifPresent { container ->
+          container.events.first().also { event ->
+            event.relatedContainerId = otherId
+            event.relatedContainerSealNumber = "SEAL1"
+            eventRepository.saveAndFlush(event)
+          }
+        }
+
+        webTestClient.delete().uri("/sync/property-containers/{id}", id)
+          .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+          .exchange()
+          .expectStatus().isEqualTo(409)
+          .expectBody()
+          .jsonPath("$.userMessage").isEqualTo("Property container $id is related to container $otherId (seal SEAL1)")
+      }
+
+      @Test
+      fun `returns conflict if the container is a related container in an event`() {
+        val id = migrate(request()).dpsId
+        val otherId = migrate(request(sealMark = "SEAL2")).dpsId
+        var eventId: UUID? = null
+        repository.findById(otherId).ifPresent { container ->
+          container.events.first().also { event ->
+            event.relatedContainerId = id
+            event.relatedContainerSealNumber = "SEAL1"
+            eventRepository.saveAndFlush(event)
+            eventId = event.id
+          }
+        }
+
+        webTestClient.delete().uri("/sync/property-containers/{id}", id)
+          .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+          .exchange()
+          .expectStatus().isEqualTo(409)
+          .expectBody()
+          .jsonPath("$.userMessage").isEqualTo("Property container $id is related to event $eventId")
+      }
+    }
+
+    @Test
+    fun `deletes a container and its events without affecting other containers`() {
+      val id = migrate(request()).dpsId
+      migrate(request(dpsId = id, sealMark = "SEAL2"))
+      val otherId = migrate(request()).dpsId
+      assertThat(eventRepository.findByContainerIdOrderByEventDateTimeDesc(id)).hasSize(2)
+
+      webTestClient.delete().uri("/sync/property-containers/{id}", id)
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .exchange()
+        .expectStatus().isNoContent
+        .expectBody().isEmpty
+
+      assertThat(repository.existsById(id)).isFalse()
+      assertThat(eventRepository.findByContainerIdOrderByEventDateTimeDesc(id)).isEmpty()
+      assertThat(repository.existsById(otherId)).isTrue()
+      assertThat(eventRepository.findByContainerIdOrderByEventDateTimeDesc(otherId)).hasSize(1)
+    }
+
+    @Test
+    fun `publishes a deleted event`() {
+      val id = migrate(request()).dpsId
+
+      webTestClient.delete().uri("/sync/property-containers/{id}", id)
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .exchange()
+        .expectStatus().isNoContent
+
+      assertThat(publishedEvents()).singleElement().satisfies({
+        assertThat(it.eventType).isEqualTo("prison-property.container.deleted")
+        assertThat(it.dpsId).isEqualTo(id.toString())
+        assertThat(it.prisonerNumber).isEqualTo("A1234BC")
+        assertThat(it.additionalInformation).containsEntry("prisonId", "LEI")
+      })
+    }
+
+    @Test
+    fun `emits telemetry`() {
+      val id = upsert(request()).dpsId
+      webTestClient.delete().uri("/sync/property-containers/{id}", id)
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .exchange()
+        .expectStatus().isNoContent
+
+      verify(telemetryClient).trackEvent(
+        eq(PropertyTelemetry.DELETED),
+        check {
+          assertThat(it).containsEntry("dpsId", id.toString())
+          assertThat(it).containsEntry("prisonerNumber", "A1234BC")
+          assertThat(it).containsEntry("prisonId", "LEI")
+        },
+        isNull(),
+      )
+    }
+  }
+
+  @Nested
   inner class Move {
     @Test
     fun `moves containers to the target prisoner`() {
@@ -439,7 +646,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     .bodyValue(request)
     .exchange()
     .expectStatus().isOk
-    .expectBody(SyncPropertyContainerResponse::class.java)
+    .expectBody<SyncPropertyContainerResponse>()
     .returnResult().responseBody!!
 
   private fun migrate(request: SyncPropertyContainerRequest): SyncPropertyContainerResponse = webTestClient.post()
@@ -448,7 +655,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     .bodyValue(request)
     .exchange()
     .expectStatus().isOk
-    .expectBody(SyncPropertyContainerResponse::class.java)
+    .expectBody<SyncPropertyContainerResponse>()
     .returnResult().responseBody!!
 
   private fun getById(id: UUID) = webTestClient.get().uri("/sync/property-containers/{id}", id)
