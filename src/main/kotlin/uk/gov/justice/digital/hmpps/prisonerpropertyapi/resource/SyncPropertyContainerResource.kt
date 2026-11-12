@@ -149,6 +149,7 @@ class SyncPropertyContainerResource(
     responses = [
       ApiResponse(responseCode = "204", description = "Property container deleted"),
       ApiResponse(responseCode = "404", description = "Property container not found", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
+      ApiResponse(responseCode = "409", description = "Property container has non-sync events or is referenced by another container's event", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )
   fun deleteContainer(
