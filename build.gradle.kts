@@ -26,7 +26,7 @@ dependencies {
   runtimeOnly("org.flywaydb:flyway-database-postgresql")
 
   testImplementation("uk.gov.justice.service.hmpps:hmpps-kotlin-spring-boot-starter-test:3.1.0")
-  testImplementation("uk.gov.justice.service.hmpps:hmpps-subject-access-request-test-support:2.8.6")
+  testImplementation("uk.gov.justice.service.hmpps:hmpps-subject-access-request-test-support:2.9.0")
   testImplementation("org.springframework.boot:spring-boot-starter-webflux-test")
   testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
   testImplementation("org.springframework.security:spring-security-test")
