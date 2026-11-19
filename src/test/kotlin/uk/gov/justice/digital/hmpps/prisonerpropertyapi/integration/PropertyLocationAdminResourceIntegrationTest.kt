@@ -43,6 +43,21 @@ class PropertyLocationAdminResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `rejects invalid prison ids for location operations`() {
+    webTestClient.get().uri("/property-locations/prison/mdi")
+      .headers(setAuthorisation(roles = adminRole))
+      .exchange()
+      .expectStatus().isBadRequest
+
+    webTestClient.post().uri("/property-locations/prison/mdi")
+      .headers(setAuthorisation(roles = adminRole))
+      .contentType(MediaType.APPLICATION_JSON)
+      .bodyValue("""{ "localName": "Reception Store", "capacity": 10 }""")
+      .exchange()
+      .expectStatus().isBadRequest
+  }
+
+  @Test
   fun `lists property locations with capacity and how full they are`() {
     repository.save(seedContainerAt(LOCATION_B, "LEI"))
     locations.stubGetBoxLocations("LEI", listOf(Triple(LOCATION_B.toString(), "PB5638", "Reception Property Store")), capacity = 10)

@@ -15,11 +15,14 @@ import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.servlet.resource.NoResourceFoundException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.AmbiguousIncomingContainerException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.ContainerAlreadyRemovedException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicatePropertyLocationNameException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.DuplicateSealNumberException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.IncomingContainerNotFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.InvalidLocationException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PreviousSealNumberNotFoundException
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerInUseException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerNotFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainersNotFoundException
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyLocationCapacityBelowUsageException
@@ -32,6 +35,18 @@ import uk.gov.justice.hmpps.kotlin.common.ErrorResponse
 
 @RestControllerAdvice
 class PrisonerPropertyApiExceptionHandler {
+  @ExceptionHandler(IncomingContainerNotFoundException::class)
+  fun handleIncomingContainerNotFound(e: IncomingContainerNotFoundException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(NOT_FOUND)
+    .body(ErrorResponse(status = NOT_FOUND, errorCode = "INCOMING_CONTAINER_NOT_FOUND", userMessage = e.message, developerMessage = e.message))
+    .also { log.info("Incoming container lookup failed: {}", e.message) }
+
+  @ExceptionHandler(AmbiguousIncomingContainerException::class)
+  fun handleAmbiguousIncomingContainer(e: AmbiguousIncomingContainerException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(CONFLICT)
+    .body(ErrorResponse(status = CONFLICT, errorCode = "AMBIGUOUS_INCOMING_CONTAINER", userMessage = e.message, developerMessage = e.message))
+    .also { log.info("Incoming container lookup ambiguous: {}", e.message) }
+
   @ExceptionHandler(PropertyContainerNotFoundException::class)
   fun handlePropertyContainerNotFoundException(e: PropertyContainerNotFoundException): ResponseEntity<ErrorResponse> = ResponseEntity
     .status(NOT_FOUND)
@@ -86,6 +101,17 @@ class PrisonerPropertyApiExceptionHandler {
         developerMessage = e.message,
       ),
     ).also { log.info("Property location not found: {}", e.message) }
+
+  @ExceptionHandler(PropertyContainerInUseException::class)
+  fun handlePropertyContainerInUseException(e: PropertyContainerInUseException): ResponseEntity<ErrorResponse> = ResponseEntity
+    .status(CONFLICT)
+    .body(
+      ErrorResponse(
+        status = CONFLICT,
+        userMessage = e.message,
+        developerMessage = e.message,
+      ),
+    ).also { log.info("Property container in use: {}", e.message) }
 
   @ExceptionHandler(PropertyLocationInUseException::class)
   fun handlePropertyLocationInUseException(e: PropertyLocationInUseException): ResponseEntity<ErrorResponse> = ResponseEntity

@@ -8,8 +8,10 @@ import org.springframework.transaction.annotation.Transactional
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainer
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.RemovalOutcome
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.cleanup.LegacyCleanupItemRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncMappingType
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerRequest
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync.SyncPropertyContainerResponse
@@ -32,10 +34,21 @@ import java.util.UUID
 @Service
 class SyncPropertyContainerService(
   private val repository: PropertyContainerRepository,
+  private val eventRepository: PropertyEventRepository,
+  private val legacyCleanupItemRepository: LegacyCleanupItemRepository,
   private val transformer: NomisContainerTransformer,
 ) {
   companion object {
     private val log: Logger = LoggerFactory.getLogger(this::class.java)
+    private val syncEventTypes = setOf(
+      PropertyEventType.CREATED_SEALED,
+      PropertyEventType.SEAL_CHANGED,
+      PropertyEventType.CONTAINER_TYPE_CHANGE,
+      PropertyEventType.MOVED,
+      PropertyEventType.DISPOSAL_REQUIRED,
+      PropertyEventType.REMOVED,
+      PropertyEventType.REACTIVATED,
+    )
   }
 
   /** Ongoing event-driven sync of a single NOMIS change. */
@@ -45,6 +58,41 @@ class SyncPropertyContainerService(
   /** Initial bulk migration of a NOMIS container. */
   @Transactional
   fun migrate(request: SyncPropertyContainerRequest): SyncResult = upsert(request, migrating = true)
+
+  @Transactional
+  fun delete(id: UUID): DeleteResult {
+    val container = repository.findById(id).orElseThrow {
+      PropertyContainerNotFoundException(id)
+    }
+    container.events.forEach {
+      if (it.eventType !in syncEventTypes) {
+        throw PropertyContainerInUseException("Property container $id has a non-sync event")
+      }
+      if (legacyCleanupItemRepository.existsByContainerId(id)) {
+        throw PropertyContainerInUseException("Property container $id was in use by a cleanup job")
+      }
+      if (it.relatedContainerId != null || it.relatedContainerSealNumber != null) {
+        throw PropertyContainerInUseException("Property container $id is related to container ${it.relatedContainerId} (seal ${it.relatedContainerSealNumber})")
+      }
+    }
+    eventRepository.findFirstByRelatedContainerId(id)
+      ?.let {
+        throw PropertyContainerInUseException("Property container $id is related to event ${it.id}")
+      }
+
+    repository.delete(container)
+    log.info("Deleted property container ${container.id} for prisoner ${container.prisonerNumber} at prison ${container.prisonId}")
+
+    return DeleteResult(
+      PropertyContainerEventFactory.changeEvent(
+        PropertyDomainEventType.CONTAINER_DELETED,
+        container.id!!,
+        container.prisonerNumber,
+        null,
+        additional = mapOf("prisonId" to container.prisonId),
+      ),
+    )
+  }
 
   @Transactional
   fun moveToPrisoner(fromPrisoner: String, toPrisoner: String, propertyIds: List<UUID>) {
@@ -133,6 +181,25 @@ class SyncPropertyContainerService(
   }
 
   private fun update(existing: PropertyContainer, request: SyncPropertyContainerRequest, migrating: Boolean): SyncResult {
+    // Receipt moves the DPS record, not its old NOMIS mapping. Ignore the whole old-prison snapshot,
+    // including corrections, before resolving a seal or location or changing any history.
+    if (!existing.isHeldAt(request.prisonId) &&
+      existing.events.any { it.eventType == PropertyEventType.RECEIVED }
+    ) {
+      log.info(
+        "Ignoring NOMIS property container {} update for DPS container {} from prison {} after receipt; currently held at {}",
+        request.nomisPropertyContainerId,
+        existing.id,
+        request.prisonId,
+        existing.prisonId,
+      )
+      return SyncResult(
+        SyncPropertyContainerResponse(existing.id!!, request.nomisPropertyContainerId, SyncMappingType.UPDATED),
+        event = null,
+        ignoredAfterReceipt = true,
+      )
+    }
+
     val now = request.modifyDateTime ?: LocalDateTime.now()
     val user = request.modifyUsername ?: request.createUsername
     val changed = mutableListOf<String>()
@@ -244,5 +311,16 @@ class SyncPropertyContainerService(
  * transaction commits (null when there is nothing to publish - a migration or an unchanged snapshot).
  * [legacyCleanupRetained] is set when NOMIS sent as active a container the legacy clean-up had removed, and it
  * was left removed - tracked so NOMIS disagreeing with the clean-up is visible.
+ * [ignoredAfterReceipt] identifies an old-establishment snapshot discarded without applying any fields.
  */
-data class SyncResult(val response: SyncPropertyContainerResponse, val event: HmppsDomainEvent?, val legacyCleanupRetained: Boolean = false)
+data class SyncResult(
+  val response: SyncPropertyContainerResponse,
+  val event: HmppsDomainEvent?,
+  val legacyCleanupRetained: Boolean = false,
+  val ignoredAfterReceipt: Boolean = false,
+)
+
+/**
+ * The outcome of a deletion containing the domain [event] to publish *after* the transaction commits.
+ */
+data class DeleteResult(val event: HmppsDomainEvent)
