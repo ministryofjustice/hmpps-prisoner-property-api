@@ -4,4 +4,5 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.event
 enum class PropertyDomainEventType(val value: String) {
   CONTAINER_CREATED("prison-property.container.created"),
   CONTAINER_UPDATED("prison-property.container.updated"),
+  CONTAINER_DELETED("prison-property.container.deleted"),
 }
