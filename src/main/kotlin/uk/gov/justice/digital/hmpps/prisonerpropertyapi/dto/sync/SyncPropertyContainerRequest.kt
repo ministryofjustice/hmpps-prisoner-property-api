@@ -3,6 +3,8 @@ package uk.gov.justice.digital.hmpps.prisonerpropertyapi.dto.sync
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_MESSAGE
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_REGEX
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -25,7 +27,7 @@ data class SyncPropertyContainerRequest(
   val dpsId: UUID? = null,
 
   @Schema(description = "Prisoner (NOMS) number, resolved by the caller from OFFENDER_BOOK_ID", example = "A1234BC", requiredMode = Schema.RequiredMode.REQUIRED)
-  @field:Pattern(regexp = "[A-Za-z][0-9]{4}[A-Za-z]{2}", message = "Prisoner number must be in the format A1234BC")
+  @field:Pattern(regexp = PRISONER_NUMBER_REGEX, message = PRISONER_NUMBER_MESSAGE)
   val prisonerNumber: String,
 
   @Schema(description = "NOMIS AGY_LOC_ID - establishment holding the container", example = "LEI", requiredMode = Schema.RequiredMode.REQUIRED)

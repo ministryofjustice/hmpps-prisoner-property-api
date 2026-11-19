@@ -4,6 +4,10 @@ import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.ContainerType
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_MESSAGE
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISONER_NUMBER_REGEX
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_MESSAGE
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PRISON_ID_REGEX
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.StorageLocationType
 import java.time.LocalDate
 import java.util.UUID
@@ -11,11 +15,12 @@ import java.util.UUID
 @Schema(description = "Details for a new sealed property container")
 data class CreatePropertyContainerRequest(
   @Schema(description = "Prisoner (NOMS) number the property belongs to", example = "A1234BC", requiredMode = Schema.RequiredMode.REQUIRED)
-  @field:Pattern(regexp = "[A-Za-z][0-9]{4}[A-Za-z]{2}", message = "Prisoner number must be in the format A1234BC")
+  @field:Pattern(regexp = PRISONER_NUMBER_REGEX, message = PRISONER_NUMBER_MESSAGE)
   val prisonerNumber: String,
 
   @Schema(description = "Id of the prison holding the container", example = "LEI", requiredMode = Schema.RequiredMode.REQUIRED)
   @field:NotBlank
+  @field:Pattern(regexp = PRISON_ID_REGEX, message = PRISON_ID_MESSAGE)
   val prisonId: String,
 
   @Schema(description = "Type of container", example = "STANDARD", requiredMode = Schema.RequiredMode.REQUIRED)
