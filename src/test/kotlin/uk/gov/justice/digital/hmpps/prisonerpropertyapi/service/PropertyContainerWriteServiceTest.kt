@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
+import org.mockito.kotlin.inOrder
 import org.mockito.kotlin.isNull
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
@@ -110,7 +111,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `update changes the seal and returns an update event listing the change`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.update(existing.id!!, updateRequest(sealNumber = "SEAL2"), "A_USER")
 
@@ -123,7 +124,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `update changing the type and location appends the matching events`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
     val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
 
     service.update(existing.id!!, updateRequest(containerType = ContainerType.VALUABLES, internalLocationId = newLocation), "A_USER")
@@ -139,7 +140,7 @@ class PropertyContainerWriteServiceTest {
     // designation removed after placement). Editing its seal must still work - the location is unchanged,
     // so it is never looked up (the default stub would resolve it, but it should not be called at all).
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.update(existing.id!!, updateRequest(sealNumber = "SEAL2", internalLocationId = LOCATION), "A_USER")
 
@@ -152,7 +153,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `update with no changes does not save and returns no event`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.update(existing.id!!, updateRequest(), "A_USER")
 
@@ -164,7 +165,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `update of an unknown container throws not found`() {
     val id = UUID.randomUUID()
-    whenever(repository.findById(id)).thenReturn(Optional.empty())
+    whenever(repository.findByIdForUpdate(id)).thenReturn(Optional.empty())
 
     assertThatThrownBy { service.update(id, updateRequest(), "A_USER") }
       .isInstanceOf(PropertyContainerNotFoundException::class.java)
@@ -208,7 +209,7 @@ class PropertyContainerWriteServiceTest {
   fun `update rejects an internal location that does not exist`() {
     val existing = existingContainer()
     val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
     whenever(locationsClient.getPropertyLocation(newLocation)).thenReturn(null)
 
     assertThatThrownBy { service.update(existing.id!!, updateRequest(internalLocationId = newLocation), "A_USER") }
@@ -229,8 +230,8 @@ class PropertyContainerWriteServiceTest {
   fun `combine rejects an internal location that does not exist`() {
     val a = sourceContainer("A1234BC", "SEALA")
     val b = sourceContainer("A1234BC", "SEALB")
-    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
-    whenever(repository.findById(b.id!!)).thenReturn(Optional.of(b))
+    whenever(repository.findByIdForUpdate(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findByIdForUpdate(b.id!!)).thenReturn(Optional.of(b))
     whenever(locationsClient.getPropertyLocation(LOCATION)).thenReturn(null)
 
     assertThatThrownBy {
@@ -243,7 +244,7 @@ class PropertyContainerWriteServiceTest {
   fun `create reconciles a matching due-for-transfer-out container arriving from another prison`() {
     stubSaveAssigningId()
     val source = dueForTransferOut("LEI", "OLDSEAL", toPrisonId = "MDI")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(source))
 
     val result = service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
 
@@ -274,7 +275,7 @@ class PropertyContainerWriteServiceTest {
   fun `create with the same arriving seal succeeds because the reconciled source frees its seal`() {
     stubSaveAssigningId()
     val source = dueForTransferOut("LEI", "SAMESEAL", toPrisonId = "MDI")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(source))
     // the seal is still held by the source at this point; the create must exclude the source it is reconciling
     whenever(repository.existsByCurrentSealNumberAndRemovalOutcomeIsNull("SAMESEAL")).thenReturn(true)
 
@@ -292,7 +293,7 @@ class PropertyContainerWriteServiceTest {
   fun `create reconciles a previous seal held by a merely stored container at another prison`() {
     stubSaveAssigningId()
     val storedElsewhere = containerAt("LEI", "OLDSEAL")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(storedElsewhere))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(storedElsewhere))
 
     val result = service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
 
@@ -306,7 +307,7 @@ class PropertyContainerWriteServiceTest {
   fun `create matches a previous seal ignoring case and surrounding whitespace`() {
     stubSaveAssigningId()
     val source = dueForTransferOut("LEI", "OldSeal", toPrisonId = "MDI")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(source))
 
     service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "  oldseal "), "A_USER")
 
@@ -316,7 +317,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `create rejects a previous seal that matches nothing rather than silently duplicating the property`() {
     val elsewhere = containerAt("LEI", "ANOTHERSEAL")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(elsewhere))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(elsewhere))
 
     assertThatThrownBy { service.create(createRequest(prisonId = "MDI", previousSealNumber = "TYPO"), "A_USER") }
       .isInstanceOf(PreviousSealNumberNotFoundException::class.java)
@@ -328,7 +329,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `create rejects a previous seal matching only the prison the container is being added at`() {
     // Property already here is not property arriving on transfer - matching it would deactivate a live record.
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("MDI", "OLDSEAL")))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(containerAt("MDI", "OLDSEAL")))
 
     assertThatThrownBy { service.create(createRequest(prisonId = "MDI", previousSealNumber = "OLDSEAL"), "A_USER") }
       .isInstanceOf(PreviousSealNumberNotFoundException::class.java)
@@ -337,7 +338,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `create ignores a blank previous seal`() {
     stubSaveAssigningId()
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(emptyList())
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(emptyList())
 
     val result = service.create(createRequest(prisonId = "MDI", previousSealNumber = "   "), "A_USER")
 
@@ -348,7 +349,7 @@ class PropertyContainerWriteServiceTest {
   fun `create records the matched seals on both containers' histories`() {
     stubSaveAssigningId()
     val source = dueForTransferOut("LEI", "OLDSEAL", toPrisonId = "MDI")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(source))
 
     service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
 
@@ -362,7 +363,7 @@ class PropertyContainerWriteServiceTest {
   fun `create records the matched seal when reconciling a container already transferred out`() {
     stubSaveAssigningId()
     val source = transferredOut("LEI", "OLDSEAL", toPrisonId = "MDI")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(source))
 
     service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
 
@@ -381,7 +382,7 @@ class PropertyContainerWriteServiceTest {
     // log it at all, while the sender's record showed it in transit indefinitely.
     stubSaveAssigningId()
     val source = transferredOut("LEI", "OLDSEAL", toPrisonId = "MDI")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(source))
 
     service.create(createRequest(prisonId = "IWI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
 
@@ -395,7 +396,7 @@ class PropertyContainerWriteServiceTest {
     val source = transferredOut("LEI", "OLDSEAL", toPrisonId = "MDI").apply {
       latestTransferEvent()?.relatedContainerId = UUID.randomUUID()
     }
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(source))
 
     assertThatThrownBy { service.create(createRequest(prisonId = "MDI", previousSealNumber = "OLDSEAL"), "A_USER") }
       .isInstanceOf(PreviousSealNumberNotFoundException::class.java)
@@ -404,7 +405,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `create will not match a transfer without a transfer event`() {
     val source = containerAt("LEI", "OLDSEAL").apply { removalOutcome = RemovalOutcome.TRANSFERRED }
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(source))
 
     assertThatThrownBy { service.create(createRequest(prisonId = "MDI", previousSealNumber = "OLDSEAL"), "A_USER") }
       .isInstanceOf(PreviousSealNumberNotFoundException::class.java)
@@ -416,7 +417,7 @@ class PropertyContainerWriteServiceTest {
     // Nothing normalises prison ids on the way in, so a stray " mdi" can be stored verbatim. Comparing them
     // raw would make property already here look like it is at another prison - and matching it would
     // deactivate a live local record.
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt(" mdi ", "OLDSEAL")))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(containerAt(" mdi ", "OLDSEAL")))
 
     assertThatThrownBy { service.create(createRequest(prisonId = "MDI", previousSealNumber = "OLDSEAL"), "A_USER") }
       .isInstanceOf(PreviousSealNumberNotFoundException::class.java)
@@ -426,7 +427,7 @@ class PropertyContainerWriteServiceTest {
   fun `create matches property at a genuinely different prison however its id is cased`() {
     stubSaveAssigningId()
     val source = containerAt(" lei ", "OLDSEAL")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(source))
 
     service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
 
@@ -436,7 +437,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `update rejects amending the seal to one held by another active container`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
     whenever(repository.existsByCurrentSealNumberAndRemovalOutcomeIsNullAndIdNot("SEAL2", existing.id!!)).thenReturn(true)
 
     assertThatThrownBy { service.update(existing.id!!, updateRequest(sealNumber = "SEAL2"), "A_USER") }
@@ -446,7 +447,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `update keeping the same seal does not check uniqueness`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.update(existing.id!!, updateRequest(), "A_USER")
 
@@ -456,7 +457,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `dispose records a disposed outcome, clears the location and returns an updated event`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.dispose(existing.id!!, DisposeContainerRequest(disposalDate = LocalDate.parse("2026-09-15")), "A_USER")
 
@@ -472,7 +473,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `dispose defaults the disposal date to today when omitted`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.dispose(existing.id!!, DisposeContainerRequest(), "A_USER")
 
@@ -482,7 +483,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `dispose of an already-removed container throws`() {
     val existing = existingContainer().apply { removalOutcome = RemovalOutcome.RETURNED }
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     assertThatThrownBy { service.dispose(existing.id!!, DisposeContainerRequest(), "A_USER") }
       .isInstanceOf(ContainerAlreadyRemovedException::class.java)
@@ -492,7 +493,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `dispose of an unknown container throws not found`() {
     val id = UUID.randomUUID()
-    whenever(repository.findById(id)).thenReturn(Optional.empty())
+    whenever(repository.findByIdForUpdate(id)).thenReturn(Optional.empty())
 
     assertThatThrownBy { service.dispose(id, DisposeContainerRequest(), "A_USER") }
       .isInstanceOf(PropertyContainerNotFoundException::class.java)
@@ -501,7 +502,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `remove returning to the prisoner records a RETURNED outcome and event`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.RETURNED), "A_USER")
 
@@ -516,7 +517,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `remove transferring marks the container transferred out without reassigning its prison`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.TRANSFERRED, toPrisonId = "MDI"), "A_USER")
 
@@ -539,7 +540,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `legacy clean-up records a REMOVED event attributed to the clean-up, dated to when the person left`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
     val jobId = UUID.randomUUID()
     val left = LocalDate.parse("2025-06-01")
 
@@ -566,7 +567,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `legacy clean-up closes a container whose disposal date has passed`() {
     val disposalDue = existingContainer().apply { proposedDisposalDate = LocalDate.now().minusDays(1) }
-    whenever(repository.findById(disposalDue.id!!)).thenReturn(Optional.of(disposalDue))
+    whenever(repository.findByIdForUpdate(disposalDue.id!!)).thenReturn(Optional.of(disposalDue))
 
     service.legacyCleanupRemove(disposalDue.id!!, LocalDate.parse("2025-06-01"), UUID.randomUUID(), "LEI")
 
@@ -576,25 +577,25 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `legacy clean-up refuses a container held elsewhere, confiscated, with a disposal date to come, or already removed`() {
     val elsewhere = existingContainer()
-    whenever(repository.findById(elsewhere.id!!)).thenReturn(Optional.of(elsewhere))
+    whenever(repository.findByIdForUpdate(elsewhere.id!!)).thenReturn(Optional.of(elsewhere))
     assertThatThrownBy { service.legacyCleanupRemove(elsewhere.id!!, LocalDate.now(), UUID.randomUUID(), "MDI") }
       .isInstanceOf(LegacyCleanupNotApplicableException::class.java)
       .hasMessageContaining("held at LEI, not MDI")
 
     val confiscated = existingContainer().apply { containerType = ContainerType.CONFISCATED }
-    whenever(repository.findById(confiscated.id!!)).thenReturn(Optional.of(confiscated))
+    whenever(repository.findByIdForUpdate(confiscated.id!!)).thenReturn(Optional.of(confiscated))
     assertThatThrownBy { service.legacyCleanupRemove(confiscated.id!!, LocalDate.now(), UUID.randomUUID(), "LEI") }
       .isInstanceOf(LegacyCleanupNotApplicableException::class.java)
       .hasMessageContaining("CONFISCATED")
 
     val disposalToCome = existingContainer().apply { proposedDisposalDate = LocalDate.now().plusDays(1) }
-    whenever(repository.findById(disposalToCome.id!!)).thenReturn(Optional.of(disposalToCome))
+    whenever(repository.findByIdForUpdate(disposalToCome.id!!)).thenReturn(Optional.of(disposalToCome))
     assertThatThrownBy { service.legacyCleanupRemove(disposalToCome.id!!, LocalDate.now(), UUID.randomUUID(), "LEI") }
       .isInstanceOf(LegacyCleanupNotApplicableException::class.java)
       .hasMessageContaining("DISPOSAL_DATE_NOT_REACHED")
 
     val removed = existingContainer().apply { removalOutcome = RemovalOutcome.RETURNED }
-    whenever(repository.findById(removed.id!!)).thenReturn(Optional.of(removed))
+    whenever(repository.findByIdForUpdate(removed.id!!)).thenReturn(Optional.of(removed))
     assertThatThrownBy { service.legacyCleanupRemove(removed.id!!, LocalDate.now(), UUID.randomUUID(), "LEI") }
       .isInstanceOf(ContainerAlreadyRemovedException::class.java)
 
@@ -607,7 +608,7 @@ class PropertyContainerWriteServiceTest {
   fun `create reconciles a container already transferred out to this prison by linking it`() {
     stubSaveAssigningId()
     val source = transferredOut("LEI", "OLDSEAL", toPrisonId = "MDI")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(source))
 
     val result = service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")
 
@@ -636,7 +637,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `remove with a DISPOSED outcome records a disposed removal and clears the location`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.DISPOSED), "A_USER")
 
@@ -649,7 +650,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `remove recording the record was created in error takes the container out of active storage`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.CREATED_IN_ERROR), "A_USER")
 
@@ -669,7 +670,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `remove of an already-removed container throws`() {
     val existing = existingContainer().apply { removalOutcome = RemovalOutcome.DISPOSED }
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     assertThatThrownBy { service.remove(existing.id!!, RemoveContainerRequest(outcome = RemovalOutcome.RETURNED), "A_USER") }
       .isInstanceOf(ContainerAlreadyRemovedException::class.java)
@@ -679,7 +680,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `move to Branston records a Branston move with no internal id`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.move(existing.id!!, MoveContainerRequest(locationType = StorageLocationType.BRANSTON), "A_USER")
 
@@ -696,7 +697,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `move to an internal location records an internal move`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
     val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
 
     service.move(existing.id!!, MoveContainerRequest(locationType = StorageLocationType.INTERNAL, internalLocationId = newLocation), "A_USER")
@@ -722,7 +723,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `move to the current location is a no-op`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     val result = service.move(existing.id!!, MoveContainerRequest(StorageLocationType.INTERNAL, internalLocationId = LOCATION), "A_USER")
 
@@ -734,7 +735,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `move of an already-removed container throws`() {
     val existing = existingContainer().apply { removalOutcome = RemovalOutcome.DISPOSED }
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     assertThatThrownBy { service.move(existing.id!!, MoveContainerRequest(StorageLocationType.BRANSTON), "A_USER") }
       .isInstanceOf(ContainerAlreadyRemovedException::class.java)
@@ -746,8 +747,8 @@ class PropertyContainerWriteServiceTest {
     stubSaveAssigningId()
     val a = sourceContainer("A1234BC", "SEALA")
     val b = sourceContainer("A1234BC", "SEALB")
-    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
-    whenever(repository.findById(b.id!!)).thenReturn(Optional.of(b))
+    whenever(repository.findByIdForUpdate(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findByIdForUpdate(b.id!!)).thenReturn(Optional.of(b))
 
     val result = service.combine(
       CombineContainersRequest(sourceContainerIds = listOf(a.id!!, b.id!!), containerType = ContainerType.VALUABLES, sealNumber = "NEWSEAL", internalLocationId = LOCATION),
@@ -774,11 +775,27 @@ class PropertyContainerWriteServiceTest {
   }
 
   @Test
+  fun `combine locks sources in database UUID order regardless of request order`() {
+    stubSaveAssigningId()
+    val first = sourceContainer("A1234BC", "SEALA").apply { id = UUID.fromString("00000000-0000-0000-0000-000000000001") }
+    val second = sourceContainer("A1234BC", "SEALB").apply { id = UUID.fromString("80000000-0000-0000-0000-000000000001") }
+    whenever(repository.findByIdForUpdate(first.id!!)).thenReturn(Optional.of(first))
+    whenever(repository.findByIdForUpdate(second.id!!)).thenReturn(Optional.of(second))
+
+    service.combine(CombineContainersRequest(listOf(second.id!!, first.id!!), ContainerType.STANDARD, "NEWSEAL"), "A_USER")
+
+    inOrder(repository) {
+      verify(repository).findByIdForUpdate(first.id!!)
+      verify(repository).findByIdForUpdate(second.id!!)
+    }
+  }
+
+  @Test
   fun `combine rejects sources belonging to different prisoners`() {
     val a = sourceContainer("A1234BC", "SEALA")
     val b = sourceContainer("B2345CD", "SEALB")
-    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
-    whenever(repository.findById(b.id!!)).thenReturn(Optional.of(b))
+    whenever(repository.findByIdForUpdate(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findByIdForUpdate(b.id!!)).thenReturn(Optional.of(b))
 
     assertThatThrownBy { service.combine(CombineContainersRequest(listOf(a.id!!, b.id!!), ContainerType.STANDARD, "NEWSEAL"), "A_USER") }
       .isInstanceOf(ValidationException::class.java)
@@ -789,8 +806,8 @@ class PropertyContainerWriteServiceTest {
   fun `combine rejects a seal already held by an active container`() {
     val a = sourceContainer("A1234BC", "SEALA")
     val b = sourceContainer("A1234BC", "SEALB")
-    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
-    whenever(repository.findById(b.id!!)).thenReturn(Optional.of(b))
+    whenever(repository.findByIdForUpdate(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findByIdForUpdate(b.id!!)).thenReturn(Optional.of(b))
     whenever(repository.existsByCurrentSealNumberAndRemovalOutcomeIsNull("NEWSEAL")).thenReturn(true)
 
     assertThatThrownBy { service.combine(CombineContainersRequest(listOf(a.id!!, b.id!!), ContainerType.STANDARD, "NEWSEAL"), "A_USER") }
@@ -802,8 +819,8 @@ class PropertyContainerWriteServiceTest {
   fun `combine rejects an already-removed source`() {
     val a = sourceContainer("A1234BC", "SEALA").apply { removalOutcome = RemovalOutcome.DISPOSED }
     val b = sourceContainer("A1234BC", "SEALB")
-    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
-    whenever(repository.findById(b.id!!)).thenReturn(Optional.of(b))
+    whenever(repository.findByIdForUpdate(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findByIdForUpdate(b.id!!)).thenReturn(Optional.of(b))
 
     assertThatThrownBy { service.combine(CombineContainersRequest(listOf(a.id!!, b.id!!), ContainerType.STANDARD, "NEWSEAL"), "A_USER") }
       .isInstanceOf(ValidationException::class.java)
@@ -814,8 +831,8 @@ class PropertyContainerWriteServiceTest {
   fun `combine with an unknown source throws not found`() {
     val a = sourceContainer("A1234BC", "SEALA")
     val unknown = UUID.randomUUID()
-    whenever(repository.findById(a.id!!)).thenReturn(Optional.of(a))
-    whenever(repository.findById(unknown)).thenReturn(Optional.empty())
+    whenever(repository.findByIdForUpdate(a.id!!)).thenReturn(Optional.of(a))
+    whenever(repository.findByIdForUpdate(unknown)).thenReturn(Optional.empty())
 
     assertThatThrownBy { service.combine(CombineContainersRequest(listOf(a.id!!, unknown), ContainerType.STANDARD, "NEWSEAL"), "A_USER") }
       .isInstanceOf(PropertyContainerNotFoundException::class.java)
@@ -826,7 +843,7 @@ class PropertyContainerWriteServiceTest {
     val atSendingPrison = containerAt("LEI", "SEAL1")
     val atNewPrison = containerAt("MDI", "SEAL2")
     val removedAtSendingPrison = containerAt("LEI", "SEAL3").apply { removalOutcome = RemovalOutcome.RETURNED }
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(atSendingPrison, atNewPrison, removedAtSendingPrison))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(atSendingPrison, atNewPrison, removedAtSendingPrison))
 
     val events = service.prisonerReceived("A1234BC", "MDI")
 
@@ -847,7 +864,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `prisonerReceived is idempotent - a repeated receive to the same prison does nothing`() {
     val atSendingPrison = containerAt("LEI", "SEAL1")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(atSendingPrison))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(atSendingPrison))
 
     service.prisonerReceived("A1234BC", "MDI")
     val secondCallEvents = service.prisonerReceived("A1234BC", "MDI")
@@ -858,7 +875,7 @@ class PropertyContainerWriteServiceTest {
 
   @Test
   fun `prisonerReceived with no property at another prison returns no events`() {
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(containerAt("MDI", "SEAL1")))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(containerAt("MDI", "SEAL1")))
 
     assertThat(service.prisonerReceived("A1234BC", "MDI")).isEmpty()
     verify(repository, never()).save(any())
@@ -872,7 +889,7 @@ class PropertyContainerWriteServiceTest {
       events.add(PropertyEvent(this, PropertyEventType.PRISONER_RELEASED, LocalDateTime.parse("2026-03-01T09:00:00"), "PRISONER_PROPERTY_API", fromPrisonId = "LEI"))
     }
     val removed = containerAt("LEI", "SEAL4").apply { removalOutcome = RemovalOutcome.RETURNED }
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(here, elsewhere, dueForReturn, removed))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(here, elsewhere, dueForReturn, removed))
 
     val events = service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)
 
@@ -889,7 +906,7 @@ class PropertyContainerWriteServiceTest {
   fun `prisonerAdmitted records the admitting prison as the destination only for property held elsewhere`() {
     val here = containerAt("MDI", "SEAL1")
     val elsewhere = containerAt("LEI", "SEAL2")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(here, elsewhere))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(here, elsewhere))
 
     service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)
 
@@ -911,7 +928,7 @@ class PropertyContainerWriteServiceTest {
       currentSealNumber = "SEAL1",
       id = UUID.randomUUID(),
     )
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(sealedInReception))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(sealedInReception))
 
     assertThat(service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)).isEmpty()
     assertThat(sealedInReception.events.map { it.eventType }).doesNotContain(PropertyEventType.PRISONER_ADMITTED)
@@ -935,7 +952,7 @@ class PropertyContainerWriteServiceTest {
       currentSealNumber = "NEWSEAL"
       refreshDerivedState()
     }
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(receivedAfterAdmission))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(receivedAfterAdmission))
 
     assertThat(receivedAfterAdmission.createDateTime).isBefore(ADMITTED_AT)
     assertThat(service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)).isEmpty()
@@ -946,8 +963,8 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `prisonerAdmitted is idempotent, and a redelivery does not undo a confirmation`() {
     val container = containerAt("MDI", "SEAL1")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
-    whenever(repository.findById(container.id!!)).thenReturn(Optional.of(container))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findByIdForUpdate(container.id!!)).thenReturn(Optional.of(container))
 
     service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)
     assertThat(service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)).isEmpty()
@@ -964,7 +981,7 @@ class PropertyContainerWriteServiceTest {
   fun `a later admission puts confirmed property under review again`() {
     val container = containerAt("MDI", "SEAL1").also { it.underReview(LocalDateTime.parse("2026-02-01T09:00:00")) }
     container.events.add(PropertyEvent(container, PropertyEventType.LOCATION_CONFIRMED, LocalDateTime.parse("2026-02-02T09:00:00"), "A_USER"))
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(container))
 
     assertThat(service.prisonerAdmitted("A1234BC", "MDI", ADMITTED_AT)).hasSize(1)
     assertThat(container.currentStatus()).isEqualTo(ContainerStatus.REVIEW_REQUIRED)
@@ -973,7 +990,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `movement events leave property under review alone - only staff can clear it`() {
     val container = containerAt("LEI", "SEAL1").also { it.underReview() }
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(container))
 
     assertThat(service.prisonerReceived("A1234BC", "MDI")).isEmpty()
     assertThat(service.prisonerTransferredOut("A1234BC")).isEmpty()
@@ -985,7 +1002,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `saving property under review with no other change confirms its location`() {
     val existing = existingContainer().also { it.underReview() }
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.update(existing.id!!, updateRequest(), "A_USER")
 
@@ -998,7 +1015,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `confirming property held elsewhere keeps it due in at the admitting prison`() {
     val existing = existingContainer().also { it.underReview(toPrisonId = "MDI") }
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
     assertThat(existing.receivingPrisonId).isEqualTo("MDI")
 
     service.update(existing.id!!, updateRequest(containerType = ContainerType.VALUABLES), "A_USER")
@@ -1011,7 +1028,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `the seal number cannot be changed while property requires review`() {
     val existing = existingContainer().also { it.underReview() }
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     assertThatThrownBy { service.update(existing.id!!, updateRequest(sealNumber = "SEAL2"), "A_USER") }
       .isInstanceOf(ValidationException::class.java)
@@ -1022,7 +1039,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `moving property under review confirms its location`() {
     val existing = existingContainer().also { it.underReview() }
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
     val newLocation = UUID.fromString("33333333-3333-3333-3333-333333333333")
 
     service.move(existing.id!!, MoveContainerRequest(StorageLocationType.INTERNAL, newLocation), "A_USER")
@@ -1035,7 +1052,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `saving property that is not under review records no confirmation`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.update(existing.id!!, updateRequest(containerType = ContainerType.VALUABLES), "A_USER")
 
@@ -1047,7 +1064,7 @@ class PropertyContainerWriteServiceTest {
     val here = containerAt("LEI", "SEAL1")
     val elsewhere = containerAt("MDI", "SEAL2")
     val removed = containerAt("LEI", "SEAL3").apply { removalOutcome = RemovalOutcome.RETURNED }
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(here, elsewhere, removed))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(here, elsewhere, removed))
 
     val events = service.prisonerTransferredOut("A1234BC")
 
@@ -1062,7 +1079,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `prisonerTransferredOut records no destination - the movement does not say where they are going`() {
     val container = containerAt("LEI", "SEAL1")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(container))
 
     service.prisonerTransferredOut("A1234BC")
 
@@ -1075,7 +1092,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `prisonerTransferredOut is idempotent - a repeat does nothing`() {
     val container = containerAt("LEI", "SEAL1")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(container))
 
     service.prisonerTransferredOut("A1234BC")
     val secondCallEvents = service.prisonerTransferredOut("A1234BC")
@@ -1089,7 +1106,7 @@ class PropertyContainerWriteServiceTest {
     // The person left on transfer but was then released instead - the property is due back to them, not
     // following them anywhere.
     val container = containerAt("LEI", "SEAL1")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(container))
 
     service.prisonerTransferredOut("A1234BC")
     val releaseEvents = service.prisonerReleased("A1234BC")
@@ -1104,7 +1121,7 @@ class PropertyContainerWriteServiceTest {
     // A container already due for transfer out flips to due for return on release.
     val elsewhere = dueForTransferOut("MDI", "SEAL2", "LEI")
     val removed = containerAt("LEI", "SEAL3").apply { removalOutcome = RemovalOutcome.RETURNED }
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(here, elsewhere, removed))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(here, elsewhere, removed))
 
     val events = service.prisonerReleased("A1234BC")
 
@@ -1119,7 +1136,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `prisonerReleased is idempotent - a repeat does nothing`() {
     val container = containerAt("LEI", "SEAL1")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(container))
 
     service.prisonerReleased("A1234BC")
     val secondCallEvents = service.prisonerReleased("A1234BC")
@@ -1132,7 +1149,7 @@ class PropertyContainerWriteServiceTest {
   fun `prisonerDied flags all active containers as due for return with a distinct DIED_IN_CUSTODY event`() {
     val here = containerAt("LEI", "SEAL1")
     val removed = containerAt("LEI", "SEAL2").apply { removalOutcome = RemovalOutcome.RETURNED }
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(here, removed))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(here, removed))
 
     val events = service.prisonerDied("A1234BC")
 
@@ -1146,7 +1163,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `prisonerDied is idempotent - a repeat does nothing`() {
     val container = containerAt("LEI", "SEAL1")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(container))
 
     service.prisonerDied("A1234BC")
     val secondCallEvents = service.prisonerDied("A1234BC")
@@ -1159,7 +1176,7 @@ class PropertyContainerWriteServiceTest {
   fun `a merge moves every container to the retained number and raises one event each`() {
     val first = sourceContainer("A9999ZZ", "SEAL1")
     val second = sourceContainer("A9999ZZ", "SEAL2")
-    whenever(repository.findByPrisonerNumber("A9999ZZ")).thenReturn(listOf(first, second))
+    whenever(repository.findByPrisonerNumberForUpdate("A9999ZZ")).thenReturn(listOf(first, second))
 
     val events = service.prisonerMerged(retainedPrisonerNumber = "A1234BC", removedPrisonerNumber = "A9999ZZ")
 
@@ -1173,7 +1190,7 @@ class PropertyContainerWriteServiceTest {
 
   @Test
   fun `a merge for a number holding no property does nothing and raises nothing`() {
-    whenever(repository.findByPrisonerNumber("A9999ZZ")).thenReturn(emptyList())
+    whenever(repository.findByPrisonerNumberForUpdate("A9999ZZ")).thenReturn(emptyList())
 
     val events = service.prisonerMerged(retainedPrisonerNumber = "A1234BC", removedPrisonerNumber = "A9999ZZ")
 
@@ -1187,7 +1204,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `a staff change moves the last updated date on`() {
     val existing = existingContainer()
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
     val before = LocalDateTime.now()
 
     service.update(existing.id!!, updateRequest(sealNumber = "SEAL2"), "A_USER")
@@ -1202,7 +1219,7 @@ class PropertyContainerWriteServiceTest {
       events.add(PropertyEvent(this, PropertyEventType.DISPOSAL_REQUIRED, LocalDateTime.parse("2026-01-01T09:00:00"), "A_USER", eventDate = LocalDate.parse("2026-06-01")))
       refreshDerivedState()
     }
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
     val before = LocalDateTime.now()
 
     service.update(existing.id!!, updateRequest(proposedDisposalDate = null), "A_USER")
@@ -1214,7 +1231,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `an update that changes nothing leaves the last updated date alone`() {
     val existing = existingContainer().apply { refreshDerivedState() }
-    whenever(repository.findById(existing.id!!)).thenReturn(Optional.of(existing))
+    whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     service.update(existing.id!!, updateRequest(), "A_USER")
 
@@ -1224,7 +1241,7 @@ class PropertyContainerWriteServiceTest {
   @Test
   fun `flagging property due for return on release leaves the last updated date alone`() {
     val container = containerAt("LEI", "SEAL1").apply { refreshDerivedState() }
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(container))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(container))
 
     service.prisonerReleased("A1234BC")
 
@@ -1236,7 +1253,7 @@ class PropertyContainerWriteServiceTest {
   fun `logging the arrival of property already transferred out moves the sending record's last updated date on`() {
     stubSaveAssigningId()
     val source = transferredOut("LEI", "OLDSEAL", toPrisonId = "MDI")
-    whenever(repository.findByPrisonerNumber("A1234BC")).thenReturn(listOf(source))
+    whenever(repository.findByPrisonerNumberForUpdate("A1234BC")).thenReturn(listOf(source))
     val before = LocalDateTime.now()
 
     service.create(createRequest(prisonId = "MDI", sealNumber = "NEWSEAL", previousSealNumber = "OLDSEAL"), "A_USER")

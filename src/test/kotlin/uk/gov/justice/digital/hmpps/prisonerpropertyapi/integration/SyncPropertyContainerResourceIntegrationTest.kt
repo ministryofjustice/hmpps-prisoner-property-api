@@ -1,6 +1,8 @@
 package uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration
 
+import jakarta.validation.ValidationException
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
@@ -16,6 +18,8 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.expectBody
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyContainerRepository
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEvent
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.domain.PropertyEventRepository
@@ -36,9 +40,15 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.Hmp
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.LocationsApiExtension.Companion.locations
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonRegisterApiExtension.Companion.prisonRegister
 import uk.gov.justice.digital.hmpps.prisonerpropertyapi.integration.wiremock.PrisonerSearchApiExtension.Companion.prisonerSearch
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.PropertyContainerWriteService
+import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.SyncPropertyContainerService
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
@@ -50,6 +60,15 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   @Autowired
   private lateinit var legacyCleanupJobRepository: LegacyCleanupJobRepository
+
+  @Autowired
+  private lateinit var writeService: PropertyContainerWriteService
+
+  @Autowired
+  private lateinit var syncService: SyncPropertyContainerService
+
+  @Autowired
+  private lateinit var transactionManager: PlatformTransactionManager
 
   // Stub the enrichment calls the list endpoints make, so they do not depend on another test warming the caches.
   @BeforeEach
@@ -103,6 +122,78 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       },
       isNull(),
     )
+  }
+
+  @Test
+  fun `sync waits for receipt and ignores the old prison snapshot`() {
+    val id = upsert(request()).dpsId
+    val result = afterUncommittedWrite(
+      first = { writeService.receive(id, receipt(), "RECEPTION") },
+      second = { syncService.sync(request(dpsId = id, sealMark = "STALE").copy(active = false)) },
+    )
+
+    assertThat(result.ignoredAfterReceipt).isTrue()
+    val container = repository.findById(id).orElseThrow()
+    assertThat(container.prisonId).isEqualTo("MDI")
+    assertThat(container.currentSealNumber).isEqualTo("RECEIVED_SEAL")
+    assertThat(container.removalOutcome).isNull()
+    assertThat(container.events.count { it.eventType == PropertyEventType.RECEIVED }).isEqualTo(1)
+  }
+
+  @Test
+  fun `receipt waits for sync and sees its committed seal and history`() {
+    val id = upsert(request()).dpsId
+    afterUncommittedWrite(
+      first = { syncService.sync(request(dpsId = id, sealMark = "NOMIS_SEAL")) },
+      second = { writeService.receive(id, receipt(), "RECEPTION") },
+    )
+
+    val container = repository.findById(id).orElseThrow()
+    assertThat(container.currentSealNumber).isEqualTo("RECEIVED_SEAL")
+    assertThat(container.events.single { it.eventType == PropertyEventType.RECEIVED }.relatedContainerSealNumber).isEqualTo("NOMIS_SEAL")
+    assertThat(container.events.count { it.eventType == PropertyEventType.SEAL_CHANGED }).isEqualTo(1)
+  }
+
+  @Test
+  fun `concurrent receipts revalidate the holding prison`() {
+    val id = upsert(request()).dpsId
+    assertThatThrownBy {
+      afterUncommittedWrite(
+        first = { writeService.receive(id, receipt(), "RECEPTION") },
+        second = { writeService.receive(id, receipt(), "RECEPTION") },
+      )
+    }.hasCauseInstanceOf(ValidationException::class.java)
+    assertThat(repository.findById(id).orElseThrow().events.count { it.eventType == PropertyEventType.RECEIVED }).isEqualTo(1)
+  }
+
+  @Test
+  fun `prisoner movement waits for receipt before deciding which containers to flag`() {
+    val id = upsert(request()).dpsId
+    val events = afterUncommittedWrite(
+      first = { writeService.receive(id, receipt(), "RECEPTION") },
+      second = { writeService.prisonerReceived("A1234BC", "MDI") },
+    )
+    assertThat(events).isEmpty()
+    assertThat(repository.findById(id).orElseThrow().events.count { it.eventType == PropertyEventType.PRISONER_RECEIVED }).isZero()
+  }
+
+  private fun receipt() = ReceiveContainerRequest(prisonerNumber = "A1234BC", receivingPrisonId = "MDI", sealNumber = "RECEIVED_SEAL")
+
+  private fun <T> afterUncommittedWrite(first: () -> Any, second: () -> T): T {
+    Executors.newSingleThreadExecutor().use { executor ->
+      val started = CountDownLatch(1)
+      val future = TransactionTemplate(transactionManager).execute {
+        first()
+        val pending = executor.submit<T> {
+          started.countDown()
+          second()
+        }
+        check(started.await(10, TimeUnit.SECONDS))
+        assertThatThrownBy { pending.get(500, TimeUnit.MILLISECONDS) }.isInstanceOf(TimeoutException::class.java)
+        pending
+      }!!
+      return future.get(30, TimeUnit.SECONDS)
+    }
   }
 
   @Test

@@ -120,7 +120,7 @@ class PropertyContainerWriteService(
     // deactivating the sending record is the intent. A container already transferred out but not yet logged
     // anywhere also matches: this add is what reconciles it.
     val source = request.previousSealNumber?.trim()?.takeIf { it.isNotEmpty() }?.let { previousSeal ->
-      repository.findByPrisonerNumber(request.prisonerNumber).firstOrNull { candidate ->
+      repository.findByPrisonerNumberForUpdate(request.prisonerNumber).firstOrNull { candidate ->
         candidate.canBeReceivedAt(request.prisonId) &&
           // Case- and whitespace-insensitive, like the establishment seal search: staff should not have to
           // reproduce the exact form the sending prison recorded.
@@ -212,7 +212,7 @@ class PropertyContainerWriteService(
 
   @Transactional
   fun receive(id: UUID, request: ReceiveContainerRequest, username: String): WriteResult {
-    val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
+    val container = load(id)
     if (!container.prisonerNumber.equals(request.prisonerNumber, ignoreCase = true)) {
       throw ValidationException("Container does not belong to prisoner ${request.prisonerNumber}")
     }
@@ -260,7 +260,7 @@ class PropertyContainerWriteService(
 
   @Transactional
   fun update(id: UUID, request: UpdatePropertyContainerRequest, username: String): WriteResult {
-    val container = repository.findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
+    val container = load(id)
     val now = LocalDateTime.now()
     val before = ContainerState.of(container)
 
@@ -432,9 +432,8 @@ class PropertyContainerWriteService(
    */
   @Transactional
   fun combine(request: CombineContainersRequest, username: String): CombineResult {
-    val sources = request.sourceContainerIds.map { sourceId ->
-      repository.findById(sourceId).orElseThrow { PropertyContainerNotFoundException(sourceId) }
-    }
+    val lockedSources = request.sourceContainerIds.distinct().sortedBy { it.toString() }.associateWith { load(it) }
+    val sources = request.sourceContainerIds.map { lockedSources.getValue(it) }
     if (sources.map { it.prisonerNumber }.distinct().size != 1 || sources.map { it.prisonId }.distinct().size != 1) {
       throw ValidationException("All source containers must belong to the same prisoner and prison")
     }
@@ -546,8 +545,9 @@ class PropertyContainerWriteService(
    */
   @Transactional
   fun prisonerReceived(prisonerNumber: String, newPrisonId: String): List<HmppsDomainEvent> {
+    val containers = repository.findByPrisonerNumberForUpdate(prisonerNumber)
     val now = LocalDateTime.now()
-    return repository.findByPrisonerNumber(prisonerNumber)
+    return containers
       .filter { !it.isRemoved() && !it.requiresReview() && it.prisonId != newPrisonId && !it.isAlreadyDueForTransferOut(newPrisonId) }
       .map { container ->
         val before = ContainerState.of(container)
@@ -588,8 +588,9 @@ class PropertyContainerWriteService(
    */
   @Transactional
   fun prisonerAdmitted(prisonerNumber: String, newPrisonId: String, admittedAt: LocalDateTime): List<HmppsDomainEvent> {
+    val containers = repository.findByPrisonerNumberForUpdate(prisonerNumber)
     val now = LocalDateTime.now()
-    return repository.findByPrisonerNumber(prisonerNumber)
+    return containers
       .filter {
         !it.isRemoved() &&
           !it.requiresReview() &&
@@ -651,7 +652,7 @@ class PropertyContainerWriteService(
    */
   @Transactional
   fun prisonerMerged(retainedPrisonerNumber: String, removedPrisonerNumber: String): List<HmppsDomainEvent> {
-    val containers = repository.findByPrisonerNumber(removedPrisonerNumber)
+    val containers = repository.findByPrisonerNumberForUpdate(removedPrisonerNumber)
     if (containers.isEmpty()) {
       // The retired number held no property - the common case, and also every redelivery of a merge we
       // have already handled. Silent otherwise, and indistinguishable from the handler never running.
@@ -726,8 +727,9 @@ class PropertyContainerWriteService(
    */
   @Transactional
   fun prisonerTransferredOut(prisonerNumber: String): List<HmppsDomainEvent> {
+    val containers = repository.findByPrisonerNumberForUpdate(prisonerNumber)
     val now = LocalDateTime.now()
-    return repository.findByPrisonerNumber(prisonerNumber)
+    return containers
       .filter { !it.isRemoved() && !it.requiresReview() && it.baseStatus() != ContainerStatus.DUE_FOR_TRANSFER_OUT }
       .map { container ->
         val before = ContainerState.of(container)
@@ -747,8 +749,9 @@ class PropertyContainerWriteService(
    * changed, to publish after commit.
    */
   private fun flagDueForReturn(prisonerNumber: String, eventType: PropertyEventType): List<HmppsDomainEvent> {
+    val containers = repository.findByPrisonerNumberForUpdate(prisonerNumber)
     val now = LocalDateTime.now()
-    return repository.findByPrisonerNumber(prisonerNumber)
+    return containers
       .filter { !it.isRemoved() && !it.requiresReview() && it.baseStatus() != ContainerStatus.DUE_FOR_RETURN }
       .map { container ->
         val before = ContainerState.of(container)
@@ -761,7 +764,7 @@ class PropertyContainerWriteService(
   }
 
   private fun load(id: UUID): PropertyContainer = repository
-    .findById(id).orElseThrow { PropertyContainerNotFoundException(id) }
+    .findByIdForUpdate(id).orElseThrow { PropertyContainerNotFoundException(id) }
 
   private fun loadActive(id: UUID): PropertyContainer {
     val container = load(id)

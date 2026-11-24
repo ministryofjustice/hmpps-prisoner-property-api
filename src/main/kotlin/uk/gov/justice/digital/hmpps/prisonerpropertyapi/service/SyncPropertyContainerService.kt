@@ -61,7 +61,7 @@ class SyncPropertyContainerService(
 
   @Transactional
   fun delete(id: UUID): DeleteResult {
-    val container = repository.findById(id).orElseThrow {
+    val container = repository.findByIdForUpdate(id).orElseThrow {
       PropertyContainerNotFoundException(id)
     }
     container.events.forEach {
@@ -100,7 +100,8 @@ class SyncPropertyContainerService(
       throw ValidationException("propertyIds must not be empty")
     }
     val requestedIds = propertyIds.distinct()
-    val containers = repository.findAllById(requestedIds)
+    val containers = requestedIds.sortedBy { it.toString() }
+      .mapNotNull { repository.findByIdForUpdate(it).orElse(null) }
     if (containers.size != requestedIds.size) {
       val missing = requestedIds - containers.map { it.id }.toSet()
       log.error("Cannot move property containers to prisoner $toPrisoner: missing containers $missing")
@@ -118,7 +119,7 @@ class SyncPropertyContainerService(
 
   private fun upsert(request: SyncPropertyContainerRequest, migrating: Boolean): SyncResult {
     val existing = request.dpsId?.let {
-      repository.findById(it).orElseThrow { PropertyContainerNotFoundException(it) }
+      repository.findByIdForUpdate(it).orElseThrow { PropertyContainerNotFoundException(it) }
     }
     return if (existing == null) create(request, migrating) else update(existing, request, migrating)
   }

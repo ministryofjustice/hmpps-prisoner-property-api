@@ -504,9 +504,10 @@ destination need not match the receiving establishment; staff confirming the phy
 evidence. Active property can qualify even if the sender never flagged a transfer.
 
 Lookup is read-only and does not reserve anything. Receipt requires `ROLE_PRISONER_PROPERTY__RW`, loads
-the current record and revalidates eligibility. A container removed or reconciled since lookup receives
-`409`; an unknown id receives `404`. Receipt also rechecks seal uniqueness and location validity, capacity
-and membership of the receiving establishment.
+the current record under a write lock and revalidates eligibility. Concurrent receipts of the same container
+are serialized; a second receipt at the same prison receives `400`. A container removed or reconciled since
+lookup receives `409`; an unknown id receives `404`. Receipt also rechecks seal uniqueness and location
+validity, capacity and membership of the receiving establishment.
 
 Receipt retains the container id, creation metadata and existing history. It records `RECEIVED` with the
 authenticated user, confirmation time, sending and receiving establishments, current seal and destination
@@ -540,6 +541,20 @@ A → B → A, A's snapshots are accepted and B's are blocked; after another rec
 Multiple `RECEIVED` events do not change that rule. A limitation remains: a delayed snapshot from a
 previous stay at the now-current establishment is also accepted. This guard does not identify a holding
 period or distinguish old and new NOMIS mappings at the same establishment.
+
+### Container write concurrency
+
+Writers acquire a pessimistic row lock before reading an existing container and its history, and hold it
+until the transaction commits or rolls back. This includes staff changes, receipt, sync and migration updates
+and deletion, legacy clean-up, prisoner movement and merge handlers, and previous-seal reconciliation.
+Multi-container writes acquire locks in UUID order to reduce deadlocks. Read-only lookups do not lock.
+
+The lock serializes changes to an existing container; it does not reserve a row while a staff member is
+editing, or make an old same-prison NOMIS snapshot current. It also cannot protect a row that does not yet
+exist, enforce seal uniqueness or location capacity across different containers, or prevent a location
+being changed in the separate locations service. Those cross-row and cross-service races need separate
+coordination or constraints. Location validation during some writes involves a remote call while a lock is
+held, so slow downstream responses can extend lock waits.
 
 
 ### 6a. Owner location — the status you see is not the status in the column
