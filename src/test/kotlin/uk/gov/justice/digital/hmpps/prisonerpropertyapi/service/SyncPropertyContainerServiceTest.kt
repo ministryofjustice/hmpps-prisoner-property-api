@@ -57,7 +57,7 @@ class SyncPropertyContainerServiceTest {
 
     val result = if (migrating) service.migrate(snapshot) else service.sync(snapshot)
 
-    assertThat(result.ignoredAfterReceipt).isTrue()
+    assertThat(result.ignoredDueToPrisonMismatch).isTrue()
     assertThat(result.event).isNull()
     assertThat(result.response.dpsId).isEqualTo(existing.id)
     assertThat(result.response.mappingType).isEqualTo(SyncMappingType.UPDATED)
@@ -74,7 +74,7 @@ class SyncPropertyContainerServiceTest {
 
     val result = service.sync(request(dpsId = existing.id, sealMark = "NEWSEAL").copy(prisonId = " mdi "))
 
-    assertThat(result.ignoredAfterReceipt).isFalse()
+    assertThat(result.ignoredDueToPrisonMismatch).isFalse()
     assertThat(result.event).isNotNull()
     assertThat(existing.currentSealNumber).isEqualTo("NEWSEAL")
   }
@@ -95,7 +95,7 @@ class SyncPropertyContainerServiceTest {
         .copy(modifyDateTime = MODIFY_TIME.plusDays(3))
       val accepted = if (migrating) service.migrate(snapshot) else service.sync(snapshot)
 
-      assertThat(accepted.ignoredAfterReceipt).isFalse()
+      assertThat(accepted.ignoredDueToPrisonMismatch).isFalse()
       assertThat(existing.currentSealNumber).isEqualTo(snapshot.sealMark)
       val state = ContainerState.of(existing)
       val history = existing.events.toList()
@@ -103,7 +103,7 @@ class SyncPropertyContainerServiceTest {
       val oldPrisonSnapshot = snapshot.copy(prisonId = "MDI", sealMark = "STALE_B", active = false)
       val ignored = if (migrating) service.migrate(oldPrisonSnapshot) else service.sync(oldPrisonSnapshot)
 
-      assertThat(ignored.ignoredAfterReceipt).isTrue()
+      assertThat(ignored.ignoredDueToPrisonMismatch).isTrue()
       assertThat(ignored.event).isNull()
       assertThat(ContainerState.of(existing)).isEqualTo(state)
       assertThat(existing.events).containsExactlyElementsOf(history)
@@ -123,7 +123,7 @@ class SyncPropertyContainerServiceTest {
     whenever(repository.findByIdForUpdate(existing.id!!)).thenReturn(Optional.of(existing))
 
     for (prison in listOf("LEI", "MDI")) {
-      assertThat(service.sync(request(dpsId = existing.id).copy(prisonId = prison)).ignoredAfterReceipt).isTrue()
+      assertThat(service.sync(request(dpsId = existing.id).copy(prisonId = prison)).ignoredDueToPrisonMismatch).isTrue()
     }
     verify(repository, never()).save(any<PropertyContainer>())
   }

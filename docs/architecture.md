@@ -239,7 +239,7 @@ The result types carry the events out of the transaction:
 | `WriteResult` | update, receive, dispose, remove, move | `event: HmppsDomainEvent?` — **null when nothing changed** (e.g. a move to the same location) |
 | `CreateResult` | create | the new container, plus an update for a reconciled transfer-in source |
 | `CombineResult` | combine | one created (the new container) + one updated per source |
-| `SyncResult` | sync, migrate | `event?` — always null for `migrate`; null for an unchanged or ignored snapshot. Flags identify legacy-cleanup retention and snapshots ignored after receipt for telemetry |
+| `SyncResult` | sync, migrate | `event?` — always null for `migrate`; null for an unchanged or ignored snapshot. Flags identify legacy-cleanup retention and snapshots ignored due to a prison mismatch for telemetry |
 
 The inbound listener follows the same shape: it calls the write service, then publishes the returned
 events outside that transaction.
@@ -370,7 +370,7 @@ filters on `changedFields` must therefore match on the field it cares about, not
 | combine | one `.created` for the new container **plus one `.updated` per source**, each naming its own `dpsId` |
 | prisoner received / released / died | one `.updated` per container actually changed; none for containers already in that state |
 | prisoner merged | one `.updated` per container moved, `changedFields: ["prisonerNumber"]` and `removedNomsNumber` in `additionalInformation`; none when the retired number held nothing |
-| sync upsert | one `.created` or `.updated`, `source: NOMIS`; none when the snapshot changed nothing or was ignored after receipt |
+| sync upsert | one `.created` or `.updated`, `source: NOMIS`; none when the snapshot changed nothing or was ignored due to a prison mismatch |
 | sync migrate | **none, ever** — bulk replay must not flood the topic |
 | legacy clean-up | one `.updated` per container closed, `source: DPS`, published after that container's own commit; none for items skipped or failed |
 
@@ -521,20 +521,18 @@ without read enrichment. Individual container history and the prisoner timeline 
 establishments. Earlier events keep their original establishment and location, including legacy create
 events with no recorded prison. Receipt is attributed to the receiving establishment. 
 
-### NOMIS updates after receipt
+### NOMIS updates from a different prison
 
 Receipt moves the DPS record but does not itself change its old NOMIS mapping. To stop sending-prison
 edits from overwriting the received property, sync and migration updates acquire the same row lock as
 receipt before reading the container. `SyncPropertyContainerService.update` ignores the entire snapshot
-before transformations or mutations when:
-
-- the container has any `RECEIVED` event; and
-- the snapshot's prison differs from its current `prisonId`, ignoring case and surrounding whitespace.
+before transformations or mutations whenever its prison differs from the container's current `prisonId`,
+ignoring case and surrounding whitespace. This applies even when no `RECEIVED` event exists.
 
 An ignored snapshot changes no fields, history, derived state or last-updated time, and publishes no domain
 event. The response retains the DPS/NOMIS ids and `UPDATED` mapping type; it does not introduce a new
 mapping status. Logs include the incoming and current prisons, and both sync and migration track
-`prison-property-sync-ignored-after-receipt` with the mapping ids.
+`prison-property-sync-ignored-after-receipt` with the mapping ids (the historical event name is retained).
 
 The guard follows the **current** establishment, not a blacklist of previous establishments. After
 A → B → A, A's snapshots are accepted and B's are blocked; after another receipt at B, the reverse applies.

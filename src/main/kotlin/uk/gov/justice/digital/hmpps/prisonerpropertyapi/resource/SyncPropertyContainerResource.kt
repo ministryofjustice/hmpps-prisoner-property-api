@@ -76,7 +76,7 @@ class SyncPropertyContainerResource(
     if (legacyCleanupRetained) {
       telemetryClient.trackEvent(PropertyTelemetry.SYNC_LEGACY_CLEANUP_RETAINED, response.telemetryProperties(), null)
     }
-    trackIgnoredAfterReceipt()
+    trackIgnoredPrisonMismatch()
     return response
   }
 
@@ -87,12 +87,12 @@ class SyncPropertyContainerResource(
    */
   private fun SyncResult.migrated(): SyncPropertyContainerResponse {
     telemetryClient.trackEvent(PropertyTelemetry.MIGRATED, response.telemetryProperties(), null)
-    trackIgnoredAfterReceipt()
+    trackIgnoredPrisonMismatch()
     return response
   }
 
-  private fun SyncResult.trackIgnoredAfterReceipt() {
-    if (ignoredAfterReceipt) {
+  private fun SyncResult.trackIgnoredPrisonMismatch() {
+    if (ignoredDueToPrisonMismatch) {
       telemetryClient.trackEvent(PropertyTelemetry.SYNC_IGNORED_AFTER_RECEIPT, response.telemetryProperties(), null)
     }
   }
@@ -114,8 +114,8 @@ class SyncPropertyContainerResource(
     summary = "Create or update a property container from a NOMIS change",
     description = "Used by the NOMIS sync to keep DPS in step with ongoing NOMIS changes. Supply the DPS id to " +
       "update an existing container, or omit it to create a new one. Requires role ROLE_PRISONER_PROPERTY__SYNC. " +
-      "Re-sending an unchanged snapshot makes no change. Snapshots from another establishment are ignored " +
-      "once the container has been received in DPS.",
+      "Re-sending an unchanged snapshot makes no change. Updates from an establishment other than the " +
+      "container's current prison are ignored.",
     responses = [
       ApiResponse(responseCode = "200", description = "Container created or updated"),
       ApiResponse(responseCode = "400", description = "Invalid request", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),

@@ -125,6 +125,38 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
+  fun `sync and migration ignore a different prison even without a receipt event`() {
+    val created = upsert(request())
+    val before = repository.findById(created.dpsId).orElseThrow()
+    val state = ContainerState.of(before)
+    val lastUpdated = before.lastUpdatedDateTime
+    val history = eventRepository.findByContainerIdOrderByEventDateTimeDesc(created.dpsId)
+    val publishedCount = publishedEvents().size
+
+    for (path in listOf("upsert", "migrate")) {
+      webTestClient.post().uri("/sync/property-containers/$path")
+        .headers(setAuthorisation(roles = listOf("ROLE_PRISONER_PROPERTY__SYNC")))
+        .bodyValue(request(dpsId = created.dpsId, sealMark = "DIFFERENT").copy(prisonId = "MDI", active = false))
+        .exchange().expectStatus().isOk
+        .expectBody()
+        .jsonPath("$.dpsId").isEqualTo(created.dpsId.toString())
+        .jsonPath("$.mappingType").isEqualTo("UPDATED")
+    }
+
+    val after = repository.findById(created.dpsId).orElseThrow()
+    assertThat(after.prisonId).isEqualTo("LEI")
+    assertThat(ContainerState.of(after)).isEqualTo(state)
+    assertThat(after.lastUpdatedDateTime).isEqualTo(lastUpdated)
+    assertThat(eventRepository.findByContainerIdOrderByEventDateTimeDesc(created.dpsId).map { it.id }).containsExactlyElementsOf(history.map { it.id })
+    assertThat(publishedEvents()).hasSize(publishedCount)
+    verify(telemetryClient, times(2)).trackEvent(
+      eq(PropertyTelemetry.SYNC_IGNORED_AFTER_RECEIPT),
+      check { assertThat(it["dpsId"]).isEqualTo(created.dpsId.toString()) },
+      isNull(),
+    )
+  }
+
+  @Test
   fun `sync waits for receipt and ignores the old prison snapshot`() {
     val id = upsert(request()).dpsId
     val result = afterUncommittedWrite(
@@ -132,7 +164,7 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
       second = { syncService.sync(request(dpsId = id, sealMark = "STALE").copy(active = false)) },
     )
 
-    assertThat(result.ignoredAfterReceipt).isTrue()
+    assertThat(result.ignoredDueToPrisonMismatch).isTrue()
     val container = repository.findById(id).orElseThrow()
     assertThat(container.prisonId).isEqualTo("MDI")
     assertThat(container.currentSealNumber).isEqualTo("RECEIVED_SEAL")
@@ -152,6 +184,19 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
     assertThat(container.currentSealNumber).isEqualTo("RECEIVED_SEAL")
     assertThat(container.events.single { it.eventType == PropertyEventType.RECEIVED }.relatedContainerSealNumber).isEqualTo("NOMIS_SEAL")
     assertThat(container.events.count { it.eventType == PropertyEventType.SEAL_CHANGED }).isEqualTo(1)
+  }
+
+  @Test
+  fun `concurrent NOMIS syncs wait for each other and apply updates in order`() {
+    val id = upsert(request()).dpsId
+    afterUncommittedWrite(
+      first = { syncService.sync(request(dpsId = id, sealMark = "FIRST_SEAL")) },
+      second = { syncService.sync(request(dpsId = id, sealMark = "SECOND_SEAL")) },
+    )
+
+    val container = repository.findById(id).orElseThrow()
+    assertThat(container.currentSealNumber).isEqualTo("SECOND_SEAL")
+    assertThat(container.events.count { it.eventType == PropertyEventType.SEAL_CHANGED }).isEqualTo(2)
   }
 
   @Test
