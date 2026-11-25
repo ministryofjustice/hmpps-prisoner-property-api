@@ -17,6 +17,7 @@ import org.mockito.kotlin.verify
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.http.MediaType
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.reactive.server.expectBody
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -45,10 +46,9 @@ import uk.gov.justice.digital.hmpps.prisonerpropertyapi.service.SyncPropertyCont
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
@@ -69,6 +69,9 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   @Autowired
   private lateinit var transactionManager: PlatformTransactionManager
+
+  @Autowired
+  private lateinit var jdbcTemplate: JdbcTemplate
 
   // Stub the enrichment calls the list endpoints make, so they do not depend on another test warming the caches.
   @BeforeEach
@@ -226,19 +229,41 @@ class SyncPropertyContainerResourceIntegrationTest : IntegrationTestBase() {
 
   private fun <T> afterUncommittedWrite(first: () -> Any, second: () -> T): T {
     Executors.newSingleThreadExecutor().use { executor ->
-      val started = CountDownLatch(1)
       val future = TransactionTemplate(transactionManager).execute {
         first()
-        val pending = executor.submit<T> {
-          started.countDown()
-          second()
-        }
-        check(started.await(10, TimeUnit.SECONDS))
-        assertThatThrownBy { pending.get(500, TimeUnit.MILLISECONDS) }.isInstanceOf(TimeoutException::class.java)
+        val blockingBackendPid = jdbcTemplate.queryForObject("select pg_backend_pid()", Int::class.java)!!
+        val pending = executor.submit<T> { second() }
+        awaitLockWait(blockingBackendPid, pending)
         pending
       }!!
       return future.get(30, TimeUnit.SECONDS)
     }
+  }
+
+  private fun awaitLockWait(blockingBackendPid: Int, pending: Future<*>) {
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+    while (System.nanoTime() < deadline) {
+      val blockedByFirstTransaction = jdbcTemplate.queryForObject(
+        """
+        select exists (
+          select 1
+          from pg_stat_activity
+          where wait_event_type = 'Lock'
+            and ? = any(pg_blocking_pids(pid))
+        )
+        """.trimIndent(),
+        Boolean::class.java,
+        blockingBackendPid,
+      ) == true
+      if (blockedByFirstTransaction) return
+
+      if (pending.isDone) {
+        pending.get()
+        error("Concurrent operation completed without waiting on backend $blockingBackendPid")
+      }
+      Thread.sleep(25)
+    }
+    error("Timed out waiting for a PostgreSQL lock wait on backend $blockingBackendPid")
   }
 
   @Test
