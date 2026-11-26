@@ -61,7 +61,7 @@ class SyncPropertyContainerService(
 
   @Transactional
   fun delete(id: UUID): DeleteResult {
-    val container = repository.findById(id).orElseThrow {
+    val container = repository.findByIdForUpdate(id).orElseThrow {
       PropertyContainerNotFoundException(id)
     }
     container.events.forEach {
@@ -100,7 +100,8 @@ class SyncPropertyContainerService(
       throw ValidationException("propertyIds must not be empty")
     }
     val requestedIds = propertyIds.distinct()
-    val containers = repository.findAllById(requestedIds)
+    val containers = requestedIds.sortedBy { it.toString() }
+      .mapNotNull { repository.findByIdForUpdate(it).orElse(null) }
     if (containers.size != requestedIds.size) {
       val missing = requestedIds - containers.map { it.id }.toSet()
       log.error("Cannot move property containers to prisoner $toPrisoner: missing containers $missing")
@@ -118,7 +119,7 @@ class SyncPropertyContainerService(
 
   private fun upsert(request: SyncPropertyContainerRequest, migrating: Boolean): SyncResult {
     val existing = request.dpsId?.let {
-      repository.findById(it).orElseThrow { PropertyContainerNotFoundException(it) }
+      repository.findByIdForUpdate(it).orElseThrow { PropertyContainerNotFoundException(it) }
     }
     return if (existing == null) create(request, migrating) else update(existing, request, migrating)
   }
@@ -181,13 +182,10 @@ class SyncPropertyContainerService(
   }
 
   private fun update(existing: PropertyContainer, request: SyncPropertyContainerRequest, migrating: Boolean): SyncResult {
-    // Receipt moves the DPS record, not its old NOMIS mapping. Ignore the whole old-prison snapshot,
-    // including corrections, before resolving a seal or location or changing any history.
-    if (!existing.isHeldAt(request.prisonId) &&
-      existing.events.any { it.eventType == PropertyEventType.RECEIVED }
-    ) {
+    // A snapshot from another prison may belong to a stale NOMIS mapping after receipt.
+    if (!existing.isHeldAt(request.prisonId)) {
       log.info(
-        "Ignoring NOMIS property container {} update for DPS container {} from prison {} after receipt; currently held at {}",
+        "Ignoring NOMIS property container {} update for DPS container {} from prison {}; currently held at {}",
         request.nomisPropertyContainerId,
         existing.id,
         request.prisonId,
@@ -196,7 +194,7 @@ class SyncPropertyContainerService(
       return SyncResult(
         SyncPropertyContainerResponse(existing.id!!, request.nomisPropertyContainerId, SyncMappingType.UPDATED),
         event = null,
-        ignoredAfterReceipt = true,
+        ignoredDueToPrisonMismatch = true,
       )
     }
 
@@ -311,13 +309,13 @@ class SyncPropertyContainerService(
  * transaction commits (null when there is nothing to publish - a migration or an unchanged snapshot).
  * [legacyCleanupRetained] is set when NOMIS sent as active a container the legacy clean-up had removed, and it
  * was left removed - tracked so NOMIS disagreeing with the clean-up is visible.
- * [ignoredAfterReceipt] identifies an old-establishment snapshot discarded without applying any fields.
+ * [ignoredDueToPrisonMismatch] identifies a snapshot discarded because its prison differs from the container's.
  */
 data class SyncResult(
   val response: SyncPropertyContainerResponse,
   val event: HmppsDomainEvent?,
   val legacyCleanupRetained: Boolean = false,
-  val ignoredAfterReceipt: Boolean = false,
+  val ignoredDueToPrisonMismatch: Boolean = false,
 )
 
 /**
