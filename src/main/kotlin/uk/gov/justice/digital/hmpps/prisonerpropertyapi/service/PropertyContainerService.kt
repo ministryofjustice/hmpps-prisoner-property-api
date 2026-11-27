@@ -51,17 +51,16 @@ class PropertyContainerService(
 ) {
 
   @Transactional(readOnly = true)
-  fun findIncoming(prisonerNumber: String, prisonId: String, sealNumber: String): PropertyContainerDto {
+  fun findIncoming(prisonerNumber: String, prisonId: String, sealNumber: String): List<PropertyContainerDto> {
     val matches = repository.findByPrisonerNumber(prisonerNumber.uppercase())
       .filter {
         it.canBeReceivedAt(prisonId) &&
           it.currentSealNumber?.trim().equals(sealNumber.trim(), ignoreCase = true)
       }
-    return when (matches.size) {
-      0 -> throw IncomingContainerNotFoundException()
-      1 -> PropertyContainerDto.from(matches.single())
-      else -> throw AmbiguousIncomingContainerException()
+    if (matches.isEmpty()) {
+      throw IncomingContainerNotFoundException()
     }
+    return matches.map { PropertyContainerDto.from(it) }
   }
 
   /**
