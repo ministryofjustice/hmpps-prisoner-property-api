@@ -110,19 +110,18 @@ class PropertyContainerResource(
   @GetMapping("/incoming")
   @PreAuthorize("hasRole('ROLE_PRISONER_PROPERTY__RO')")
   @Operation(
-    summary = "Find an incoming property container by seal",
+    summary = "Find incoming property container(s) by seal",
     description = "Requires role ROLE_PRISONER_PROPERTY__RO. Matches the prisoner's property held at another " +
       "establishment, either still active or transferred out and not yet reconciled. Seal and establishment " +
       "comparisons ignore case and surrounding whitespace. The recorded transfer destination need not match " +
       "the receiving prison. Returns basic container details without enrichment. Lookup makes no changes; " +
-      "use the returned id with the receive endpoint, which revalidates eligibility under a lock.",
+      "use the returned id(s) with the receive endpoint, which revalidates eligibility under a lock.",
     responses = [
-      ApiResponse(responseCode = "200", description = "One matching incoming container found"),
+      ApiResponse(responseCode = "200", description = "Matching incoming container(s) found"),
       ApiResponse(responseCode = "400", description = "Invalid or missing lookup parameters", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "401", description = "Unauthorized - a valid token was not presented", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "403", description = "Forbidden - the ROLE_PRISONER_PROPERTY__RO role is required", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
       ApiResponse(responseCode = "404", description = "No match (INCOMING_CONTAINER_NOT_FOUND)", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
-      ApiResponse(responseCode = "409", description = "Multiple matches (AMBIGUOUS_INCOMING_CONTAINER)", content = [Content(schema = Schema(implementation = ErrorResponse::class))]),
     ],
   )
   fun findIncomingContainer(
@@ -139,7 +138,7 @@ class PropertyContainerResource(
     @NotBlank
     @RequestParam
     sealNumber: String,
-  ): PropertyContainerDto = propertyContainerService.findIncoming(prisonerNumber, prisonId, sealNumber)
+  ): List<PropertyContainerDto> = propertyContainerService.findIncoming(prisonerNumber, prisonId, sealNumber)
 
   @GetMapping("/prisoner/{prisonerNumber}")
   @Operation(

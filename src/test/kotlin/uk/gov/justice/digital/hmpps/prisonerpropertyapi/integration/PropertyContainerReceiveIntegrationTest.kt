@@ -51,13 +51,14 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
     val id = repository.save(incoming().apply { currentSealNumber = " aBc5678 " }).id!!
     val found = lookup(seal = " ABC5678 ", prison = "MDI")
       .expectStatus().isOk
-      .expectBody(PropertyContainerDto::class.java).returnResult().responseBody!!
-    assertThat(found.id).isEqualTo(id)
-    assertThat(found.prisonId).isEqualTo("LEI")
+      .expectBodyList(PropertyContainerDto::class.java).returnResult().responseBody!!
+    assertThat(found).hasSize(1)
+    assertThat(found[0].id).isEqualTo(id)
+    assertThat(found[0].prisonId).isEqualTo("LEI")
     assertThat(repository.findById(id).orElseThrow().events).hasSize(2)
     assertNoEventsPublished()
 
-    receive(found.id, request().copy(sealNumber = "NEWSEAL")).expectStatus().isOk
+    receive(id, request().copy(sealNumber = "NEWSEAL")).expectStatus().isOk
     lookup(seal = "NEWSEAL").expectStatus().isNotFound
     assertThat(repository.count()).isEqualTo(1)
   }
@@ -67,11 +68,12 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
   fun `incoming lookup normalizes prisoner number case`(prisonerNumber: String) {
     val id = repository.save(incoming()).id!!
 
-    lookup(prisoner = prisonerNumber)
+    val found = lookup(prisoner = prisonerNumber)
       .expectStatus().isOk
-      .expectBody()
-      .jsonPath("$.id").isEqualTo(id.toString())
-      .jsonPath("$.prisonerNumber").isEqualTo("A1234BC")
+      .expectBodyList(PropertyContainerDto::class.java).returnResult().responseBody!!
+    assertThat(found).hasSize(1)
+    assertThat(found[0].id).isEqualTo(id)
+    assertThat(found[0].prisonerNumber).isEqualTo("A1234BC")
 
     assertThat(repository.findById(id).orElseThrow().events).hasSize(2)
     assertNoEventsPublished()
@@ -84,14 +86,22 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
       refreshDerivedState()
     }
     val id = repository.save(stored).id!!
-    lookup().expectStatus().isOk
+    val result1 = lookup().expectStatus().isOk
+      .expectBodyList(PropertyContainerDto::class.java).returnResult().responseBody!!
+    assertThat(result1).hasSize(1)
+
     stored.events.add(PropertyEvent(stored, PropertyEventType.PRISONER_ADMITTED, CREATED.plusDays(1), "PRISONER_PROPERTY_API", toPrisonId = "MDI"))
     stored.refreshDerivedState()
     repository.save(stored)
-    lookup().expectStatus().isOk
+    val result2 = lookup().expectStatus().isOk
+      .expectBodyList(PropertyContainerDto::class.java).returnResult().responseBody!!
+    assertThat(result2).hasSize(1)
+
     repository.deleteById(id)
     repository.save(incoming(transferred = true))
-    lookup(prison = "IWI").expectStatus().isOk
+    val result3 = lookup(prison = "IWI").expectStatus().isOk
+      .expectBodyList(PropertyContainerDto::class.java).returnResult().responseBody!!
+    assertThat(result3).hasSize(1)
   }
 
   @Test
@@ -106,13 +116,18 @@ class PropertyContainerReceiveIntegrationTest : IntegrationTestBase() {
   }
 
   @Test
-  fun `lookup reports ambiguity instead of choosing one container`() {
-    repository.save(incoming())
-    repository.save(incoming(transferred = true))
-    lookup().expectStatus().isEqualTo(409)
-      .expectBody().jsonPath("$.errorCode").isEqualTo("AMBIGUOUS_INCOMING_CONTAINER")
-    lookup(prisoner = "a1234Bc").expectStatus().isEqualTo(409)
-      .expectBody().jsonPath("$.errorCode").isEqualTo("AMBIGUOUS_INCOMING_CONTAINER")
+  fun `lookup returns multiple containers when there are multiple matches`() {
+    val id1 = repository.save(incoming()).id!!
+    val id2 = repository.save(incoming(transferred = true)).id!!
+
+    val result = lookup().expectStatus().isOk
+      .expectBodyList(PropertyContainerDto::class.java).returnResult().responseBody!!
+    assertThat(result).hasSize(2)
+    assertThat(result.map { it.id }).containsExactlyInAnyOrder(id1, id2)
+
+    val result2 = lookup(prisoner = "a1234Bc").expectStatus().isOk
+      .expectBodyList(PropertyContainerDto::class.java).returnResult().responseBody!!
+    assertThat(result2).hasSize(2)
     assertNoEventsPublished()
   }
 
